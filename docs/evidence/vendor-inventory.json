@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "scope": "read_only_static_and_allowlisted_log_inventory",
+  "capturedAt": "2026-08-08T15:18:34+08:00",
+  "sourceCommand": "swift run powervpn oracle inventory --json",
+  "vendor": {
+    "version": "3.2.1",
+    "build": "24572"
+  },
+  "upstreamStrongSwanVersion": {
+    "value": "5.8.0",
+    "evidence": "debug_symbol_path"
+  },
+  "vendorPatchLevel": "unknown",
+  "staticCapabilitySemantics": "compiled_or_linked_evidence_only_not_negotiated",
+  "helpers": [
+    {
+      "path": "/Library/PrivilegedHelperTools/com.leadsec.charon-xpc",
+      "architectures": ["x86_64"],
+      "sha256": "ce25374f028216374d386c91a7ee8fea8146b4bfd80f5fde6a59954700555404",
+      "vendorBuild": "24572"
+    },
+    {
+      "path": "/Library/PrivilegedHelperTools/com.leadsec.ipsec-xpc",
+      "architectures": ["x86_64"],
+      "sha256": "87f4004aecebe4a2aff9e8e43377ba1f53e5e496d70763fd01c4f0df0c68e400",
+      "vendorBuild": "24572"
+    },
+    {
+      "path": "/Applications/PowerVPN.app/Contents/Library/LaunchServices/com.leadsec.charon-xpc",
+      "architectures": ["x86_64"],
+      "sha256": "ce25374f028216374d386c91a7ee8fea8146b4bfd80f5fde6a59954700555404",
+      "vendorBuild": "24572"
+    },
+    {
+      "path": "/Applications/PowerVPN.app/Contents/Library/LaunchServices/com.leadsec.ipsec-xpc",
+      "architectures": ["x86_64"],
+      "sha256": "87f4004aecebe4a2aff9e8e43377ba1f53e5e496d70763fd01c4f0df0c68e400",
+      "vendorBuild": "24572"
+    },
+    {
+      "path": "/Applications/PowerVPN.app/Contents/Library/LaunchServices/com.leadsec.sh-xpc",
+      "architectures": ["x86_64"],
+      "sha256": "0e0004df2718bc142d1f59473fc42cc533961c2af19605066cc4abe93a291363",
+      "vendorBuild": "24572"
+    }
+  ],
+  "leadsecbridgeClassification": {
+    "configurationAdapter": "unknown",
+    "customStrongSwanPlugin": "confirmed",
+    "privateIKEv1ResourceRuleExtension": "confirmed"
+  },
+  "loadedPlugins": [
+    "leadsecbridge",
+    "charon",
+    "nonce",
+    "sm4",
+    "sm3",
+    "openssl",
+    "hash_null",
+    "fips-prf",
+    "hmac",
+    "socket-default",
+    "random",
+    "pubkey",
+    "pkcs1",
+    "pkcs8",
+    "pem",
+    "xcbc",
+    "eap-identity",
+    "eap-mschapv2",
+    "eap-md5",
+    "eap-gtc"
+  ],
+  "staticEvidence": {
+    "strongSwan": {
+      "observed": true,
+      "markers": ["strongswan_debug_path", "strongswan_symbols"]
+    },
+    "leadsecbridge": {
+      "observed": true,
+      "markers": [
+        "loaded_plugin",
+        "custom_kernel_ipsec_feature",
+        "vendor_kernel_ipsec_symbols",
+        "ncv1_policy_symbols",
+        "expandrule_symbols",
+        "quick_mode_addrule_log",
+        "expandrule_v1_log"
+      ]
+    },
+    "kernelLibIPSec": {
+      "observed": true,
+      "markers": ["kernel_libipsec_symbols"]
+    },
+    "kernelOSX": {
+      "observed": true,
+      "markers": ["kernel_osx_symbols", "utun_control_string"]
+    },
+    "xAuth": {
+      "observed": true,
+      "markers": ["xauth_symbols"]
+    },
+    "modeConfig": {
+      "observed": true,
+      "markers": ["mode_config_symbols"]
+    },
+    "vici": {
+      "observed": false,
+      "markers": []
+    }
+  }
+}

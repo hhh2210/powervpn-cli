@@ -43,3 +43,9 @@ import Testing
     """
   #expect(TunnelLogAnalyzer.analyze(log).health == .healthy)
 }
+
+@Test func commandRunnerDrainsOutputLargerThanPipeBuffer() throws {
+  let output = try CommandRunner().run("/usr/bin/jot", ["20000"])
+  #expect(output.hasPrefix("1\n2\n"))
+  #expect(output.hasSuffix("20000\n"))
+}

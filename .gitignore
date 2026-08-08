@@ -1,3 +1,19 @@
 .build/
 .swiftpm/
 .DS_Store
+build/
+prefix/
+secrets/
+
+# Raw captures and private fixtures may contain credentials or session material.
+captures/*.pcap
+captures/*.pcapng
+captures/raw/
+fixtures/private/
+*.pcap
+*.pcapng
+*.keylog
+*.key
+*.p12
+*.mobileconfig
+*.secrets

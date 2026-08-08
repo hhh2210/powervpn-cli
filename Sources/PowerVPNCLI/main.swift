@@ -33,17 +33,43 @@ struct PowerVPNCommand {
       if results.contains(where: { $0.status != .healthy }) {
         Foundation.exit(2)
       }
-    case "reconnect":
-      guard arguments.contains("--yes") else {
-        throw CLIError.confirmationRequired
-      }
-      try await PowerVPNController().reconnect()
-      print(
-        "PowerVPN was terminated and relaunched. Authentication remains under PowerVPN control.")
+    case "oracle":
+      try runOracle(arguments, json: json)
+    case "spec":
+      try validateSpec(arguments, json: json)
     case "help", "--help", "-h":
       printUsage()
     default:
       throw CLIError.unknownCommand(command)
+    }
+  }
+
+  private static func runOracle(_ arguments: [String], json: Bool) throws {
+    let subcommand = arguments.dropFirst().first { !$0.hasPrefix("--") } ?? "inventory"
+    guard subcommand == "inventory" else {
+      throw CLIError.unknownSubcommand(command: "oracle", subcommand: subcommand)
+    }
+    renderOracle(SystemInspector().oracleInventory(), json: json)
+  }
+
+  private static func validateSpec(_ arguments: [String], json: Bool) throws {
+    guard arguments.count >= 3, arguments[1] == "validate-redacted" else {
+      throw CLIError.invalidArguments("usage: powervpn spec validate-redacted <path> [--json]")
+    }
+    let data = try Data(contentsOf: URL(fileURLWithPath: arguments[2]))
+    let report = TunnelSpecRedactedValidator.validate(data: data)
+    if json {
+      printJSON(report)
+    } else if report.valid {
+      print("valid redacted TunnelSpec fixture")
+    } else {
+      print("invalid redacted TunnelSpec fixture")
+      for issue in report.issues {
+        print("  \(issue.path): \(issue.message) [\(issue.code)]")
+      }
+    }
+    if !report.valid {
+      Foundation.exit(2)
     }
   }
 
@@ -74,7 +100,8 @@ struct PowerVPNCommand {
     if let signal = status.helper.lastTerminatingSignal {
       print("helper last signal: \(signal)")
     }
-    print("tunnel: \(status.tunnel.health.rawValue) (\(status.tunnel.latestEvent))")
+    let tunnelLabel = status.tunnel.historicalHint ? "historical tunnel hint" : "tunnel"
+    print("\(tunnelLabel): \(status.tunnel.health.rawValue) (\(status.tunnel.latestEvent))")
   }
 
   private static func renderProbe(_ results: [ProbeResult], json: Bool) {
@@ -87,6 +114,39 @@ struct PowerVPNCommand {
         "\(result.target.name): \(result.status.rawValue) \(result.latencyMilliseconds)ms — \(result.detail)"
       )
     }
+  }
+
+  private static func renderOracle(_ inventory: VendorHelperInventory, json: Bool) {
+    if json {
+      printJSON(inventory)
+      return
+    }
+    print("PowerVPN \(inventory.vendor.version) build \(inventory.vendor.build)")
+    print(
+      "strongSwan upstream base: \(inventory.upstreamStrongSwanVersion.value) (\(inventory.upstreamStrongSwanVersion.evidence)); vendor patch level: \(inventory.vendorPatchLevel)"
+    )
+    for helper in inventory.helpers {
+      print(
+        "helper: \(helper.path) [\(helper.architectures.joined(separator: ", "))] sha256=\(helper.sha256) build=\(helper.vendorBuild)"
+      )
+    }
+    print("loaded plugins: \(inventory.loadedPlugins.joined(separator: ", "))")
+    renderEvidence("strongSwan", inventory.staticEvidence.strongSwan)
+    renderEvidence("leadsecbridge", inventory.staticEvidence.leadsecbridge)
+    renderEvidence("kernel-libipsec", inventory.staticEvidence.kernelLibIPSec)
+    renderEvidence("kernel-osx", inventory.staticEvidence.kernelOSX)
+    renderEvidence("XAuth static binary capability", inventory.staticEvidence.xAuth)
+    renderEvidence("Mode Config static binary capability", inventory.staticEvidence.modeConfig)
+    renderEvidence("VICI", inventory.staticEvidence.vici)
+    print(
+      "leadsecbridge classification: configuration adapter=\(inventory.leadsecbridgeClassification.configurationAdapter.rawValue), custom strongSwan plugin=\(inventory.leadsecbridgeClassification.customStrongSwanPlugin.rawValue), private IKEv1 resource-rule extension=\(inventory.leadsecbridgeClassification.privateIKEv1ResourceRuleExtension.rawValue)"
+    )
+  }
+
+  private static func renderEvidence(_ name: String, _ evidence: OracleEvidenceMarker) {
+    let state = evidence.observed ? "observed" : "not observed"
+    let markers = evidence.markers.isEmpty ? "-" : evidence.markers.joined(separator: ", ")
+    print("evidence \(name): \(state) [\(markers)]")
   }
 
   private static func printJSON<T: Encodable>(_ value: T) {
@@ -112,7 +172,9 @@ struct PowerVPNCommand {
         status                 Show GUI, helper, crash, and tunnel state
         probe [--timeout N]    Read SSH banners from thu21 and thu52
         diagnose              Run status and probe together
-        reconnect --yes       Explicitly terminate and relaunch PowerVPN
+        oracle [inventory]     Read-only vendor helper and protocol inventory
+        spec validate-redacted <path>
+                               Validate a commit-safe redacted TunnelSpec fixture
 
       Options:
         --json                 Emit JSON
@@ -122,14 +184,17 @@ struct PowerVPNCommand {
 
 private enum CLIError: Error, CustomStringConvertible {
   case unknownCommand(String)
-  case confirmationRequired
+  case unknownSubcommand(command: String, subcommand: String)
+  case invalidArguments(String)
 
   var description: String {
     switch self {
     case .unknownCommand(let command):
       return "unknown command: \(command)"
-    case .confirmationRequired:
-      return "reconnect changes the active VPN session; rerun with --yes"
+    case .unknownSubcommand(let command, let subcommand):
+      return "unknown \(command) subcommand: \(subcommand)"
+    case .invalidArguments(let usage):
+      return usage
     }
   }
 }

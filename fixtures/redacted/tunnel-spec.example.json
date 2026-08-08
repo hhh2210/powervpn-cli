@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "gateway": "${GATEWAY}",
+  "ikeVersion": 1,
+  "exchangeMode": "main",
+  "authentication": {
+    "machine": "<machine-authentication>",
+    "extended": "unknown"
+  },
+  "localIdentifier": "<local-identifier>",
+  "remoteIdentifier": "<remote-identifier>",
+  "tunnelName": "<tunnel-name>",
+  "virtualIP": "<virtual-ip>",
+  "natTraversal": "observed",
+  "sessionBinding": {
+    "storage": "opaque",
+    "identifier": "<session-binding-reference>"
+  },
+  "mapID": "<map-id>",
+  "credentialReference": {
+    "storage": "keychain",
+    "identifier": "<credential-reference>"
+  },
+  "ikeProposal": [
+    "aes128-sha1-modp1024"
+  ],
+  "espProposal": [
+    "aes128-sha1"
+  ],
+  "modeConfig": "unknown",
+  "vendorIds": [
+    "unknown"
+  ],
+  "routes": [
+    {
+      "identifier": "<route-identifier>",
+      "destination": "<route-cidr>"
+    }
+  ],
+  "resourceOperations": [
+    "ADDRULE",
+    "DELRULE"
+  ],
+  "resources": [
+    {
+      "name": "<resource-name>",
+      "ruleIdentifier": "<rule-identifier>",
+      "remoteTrafficSelectors": [
+        "<resource-cidr>"
+      ]
+    }
+  ]
+}

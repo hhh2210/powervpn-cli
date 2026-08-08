@@ -54,6 +54,7 @@ public struct HelperState: Codable, Sendable {
 
 public enum TunnelHealth: String, Codable, Sendable {
   case healthy
+  case stopped
   case staleAuthentication = "stale_authentication"
   case retrying
   case unknown
@@ -62,6 +63,13 @@ public enum TunnelHealth: String, Codable, Sendable {
 public struct TunnelLogState: Codable, Sendable {
   public let health: TunnelHealth
   public let latestEvent: String
+  public let historicalHint: Bool
+
+  public init(health: TunnelHealth, latestEvent: String, historicalHint: Bool = true) {
+    self.health = health
+    self.latestEvent = latestEvent
+    self.historicalHint = historicalHint
+  }
 }
 
 public struct PowerVPNStatus: Codable, Sendable {

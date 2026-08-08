@@ -24,8 +24,8 @@ public struct CommandRunner: Sendable {
     process.standardOutput = pipe
     process.standardError = pipe
     try process.run()
-    process.waitUntilExit()
     let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
     let output = String(decoding: data, as: UTF8.self)
     guard process.terminationStatus == 0 else {
       throw CommandError.failed(
@@ -75,6 +75,7 @@ public enum TunnelLogAnalyzer {
     "giving up after 5 retransmits",
   ]
   private static let retryMarker = "sending retransmit"
+  public static let allowlistedMarkers = [established, retryMarker] + staleMarkers
 
   public static func analyze(_ text: String) -> TunnelLogState {
     let establishedIndex = text.range(of: established, options: .backwards)?.lowerBound
@@ -84,18 +85,43 @@ public enum TunnelLogAnalyzer {
     let retryIndex = text.range(of: retryMarker, options: .backwards)?.lowerBound
 
     if let establishedIndex, staleIndex.map({ establishedIndex > $0 }) ?? true {
-      return TunnelLogState(health: .healthy, latestEvent: "CHILD_SA established")
+      return TunnelLogState(
+        health: .healthy,
+        latestEvent: "historical log hint: CHILD_SA established"
+      )
     }
     if let staleIndex, establishedIndex.map({ staleIndex > $0 }) ?? true {
       return TunnelLogState(
         health: .staleAuthentication,
-        latestEvent: "IKE authentication failed after the last established tunnel"
+        latestEvent: "historical log hint: IKE authentication failed after the last established tunnel"
       )
     }
     if let retryIndex, establishedIndex.map({ retryIndex > $0 }) ?? true {
-      return TunnelLogState(health: .retrying, latestEvent: "IKE retransmission in progress")
+      return TunnelLogState(
+        health: .retrying,
+        latestEvent: "historical log hint: IKE retransmission observed"
+      )
     }
-    return TunnelLogState(health: .unknown, latestEvent: "no decisive tunnel event")
+    return TunnelLogState(
+      health: .unknown,
+      latestEvent: "historical log hint: no decisive tunnel event"
+    )
+  }
+}
+
+public enum TunnelStateResolver {
+  public static func resolve(
+    helper: HelperState,
+    analyzedLogState: TunnelLogState
+  ) -> TunnelLogState {
+    guard helper.isRunning else {
+      return TunnelLogState(
+        health: .stopped,
+        latestEvent: "helper not running; historical tunnel log ignored",
+        historicalHint: false
+      )
+    }
+    return analyzedLogState
   }
 }
 
@@ -104,17 +130,26 @@ public struct SystemInspector: Sendable {
   public static let helperLabel = "system/com.leadsec.charon-xpc"
   public static let logPath = "/var/log/vsgvpn.log"
 
-  private let runner = CommandRunner()
+  let runner: CommandRunner
 
-  public init() {}
+  public init(runner: CommandRunner = CommandRunner()) {
+    self.runner = runner
+  }
 
   public func status() -> PowerVPNStatus {
     let appURL = URL(fileURLWithPath: Self.appPath)
     let bundle = Bundle(url: appURL)
     let helperOutput = (try? runner.run("/bin/launchctl", ["print", Self.helperLabel])) ?? ""
     let helper = HelperOutputParser.parse(helperOutput)
-    let log = readTail(path: Self.logPath, maximumBytes: 256 * 1_024)
-    let tunnel = TunnelLogAnalyzer.analyze(log)
+    let log = AllowlistedLogReader.readLines(
+      path: Self.logPath,
+      maximumBytes: 256 * 1_024,
+      markers: TunnelLogAnalyzer.allowlistedMarkers
+    )
+    let tunnel = TunnelStateResolver.resolve(
+      helper: helper,
+      analyzedLogState: TunnelLogAnalyzer.analyze(log)
+    )
     let running = !NSRunningApplication.runningApplications(
       withBundleIdentifier: "com.leadsec.PowerVPN-Mac"
     ).isEmpty
@@ -129,47 +164,8 @@ public struct SystemInspector: Sendable {
     )
   }
 
-  private func readTail(path: String, maximumBytes: UInt64) -> String {
-    guard let handle = FileHandle(forReadingAtPath: path) else { return "" }
-    defer { try? handle.close() }
-    let end = (try? handle.seekToEnd()) ?? 0
-    let start = end > maximumBytes ? end - maximumBytes : 0
-    try? handle.seek(toOffset: start)
-    return String(decoding: (try? handle.readToEnd()) ?? Data(), as: UTF8.self)
-  }
-
-  private func architectures(of path: String) -> [String] {
+  func architectures(of path: String) -> [String] {
     guard let output = try? runner.run("/usr/bin/file", [path]) else { return [] }
     return ["arm64", "x86_64"].filter { output.contains($0) }
-  }
-}
-
-@MainActor
-public struct PowerVPNController {
-  public init() {}
-
-  public func reconnect() async throws {
-    let running = NSRunningApplication.runningApplications(
-      withBundleIdentifier: "com.leadsec.PowerVPN-Mac"
-    )
-    for app in running {
-      _ = app.terminate()
-    }
-
-    let deadline = ContinuousClock.now + .seconds(8)
-    while ContinuousClock.now < deadline {
-      let remaining = NSRunningApplication.runningApplications(
-        withBundleIdentifier: "com.leadsec.PowerVPN-Mac"
-      )
-      if remaining.isEmpty { break }
-      try await Task.sleep(for: .milliseconds(200))
-    }
-
-    let configuration = NSWorkspace.OpenConfiguration()
-    configuration.activates = false
-    _ = try await NSWorkspace.shared.openApplication(
-      at: URL(fileURLWithPath: SystemInspector.appPath),
-      configuration: configuration
-    )
   }
 }
