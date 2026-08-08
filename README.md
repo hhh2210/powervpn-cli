@@ -7,6 +7,10 @@ This project does **not** replace the proprietary VPN tunnel yet. It replaces
 the fragile GUI control loop with explicit, inspectable commands while reusing
 the installed vendor helper and its authenticated session.
 
+The full interaction timeline, local evidence, corrected misdiagnoses, and
+remediation analysis are recorded in
+[the 2026-08-08 incident postmortem](docs/2026-08-08-power-vpn-incident-postmortem.md).
+
 ## Why this exists
 
 PowerVPN 3.2.1 build 24572 on Apple Silicon can display `login21` and `login52`
