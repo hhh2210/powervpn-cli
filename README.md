@@ -61,8 +61,18 @@ upstream strongSwan 6.0.7.
   Its one integrated review was closed by rejecting streamed command failures,
   preserving ownership state on unexpected cleanup residue, and detecting
   orphan fixed sockets and generation directories.
-- CP7B remains behind an explicit Live Approval Gate. No privileged backend,
-  IKE SA, server traffic, credential handoff, or resource data path has passed.
+- CP7B preflight is **PASS; root/live execution is waiting for a second explicit
+  approval** bound to manifest SHA-256
+  `c5464052f21af585a348a3fced8d1b5cf4fa336f8128fd9e64acc10465add877`.
+  Source inspection found
+  that macOS PF_KEY plus `socket-default` writes the global
+  `net.inet.ipsec.esp_port` when opening its NAT-T socket and has no teardown
+  restore path. The candidate therefore uses an independent scratch CP7B build
+  with `socket-dynamic`; its root-executed closure is hash-pinned and sealed
+  before launch, and its same-PID gated launcher closes the spawn/state gap.
+  The `0/0` port config must produce exactly zero UDP descriptors in this
+  no-send smoke. No privileged backend, IKE SA, server
+  traffic, credential handoff, or resource data path has passed.
 
 The target is therefore:
 
@@ -130,6 +140,8 @@ native replacement.
   and end-to-end probe logic.
 - `Sources/PowerVPNCLI`: thin command routing and rendering.
 - `docs/protocol-*.md`: verified protocol facts, unknowns, and next experiments.
+- `docs/evidence/checkpoint-7b-preflight.md`: reviewed scope and safety contract
+  for the separately approved privileged PF_KEY/PF_ROUTE backend window.
 - `fixtures/redacted`: synthetic structures and derived value-free runtime
   metadata only; no captured values or replayable payloads.
 - `patches/strongswan-6.0.7`: minimal patches replayable on the official tag.
@@ -149,6 +161,7 @@ scripts/verify_checkpoint.sh 4a
 scripts/verify_checkpoint.sh 5
 scripts/verify_checkpoint.sh 6
 scripts/verify_checkpoint.sh 7a
+scripts/verify_checkpoint.sh 7b-preflight
 ```
 
 The Swift package has one executable product, `powervpn`, and one reusable
@@ -166,6 +179,11 @@ library target, `PowerVPNCore`.
 - A live backend test requiring root or a VPN configuration change is a
   separately approved isolation-window experiment because it may interact with
   Surge.
+- CP7B's implementation/build/dry-review authorization is not root execution
+  authorization. Its integrated preflight review and manifest are finalized,
+  but the privileged command still requires a second explicit user approval.
+  PowerVPN and Surge remain running; `socket-default` is excluded and
+  any native UDP descriptor or global ESP-port change fails closed.
 - No SwiftUI, LaunchDaemon, or recovery service is built until protocol gates
   pass.
 

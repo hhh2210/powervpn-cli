@@ -16,6 +16,43 @@ pvn_count_process_pattern() {
 	pgrep -f "$1" 2>/dev/null | awk 'END { print NR + 0 }'
 }
 
+pvn_process_pids() {
+	match_kind=$1
+	match_value=$2
+	case "$match_kind" in
+	exact) match_option=-x ;;
+	pattern) match_option=-f ;;
+	*) return 1 ;;
+	esac
+	if matched_pids=$(pgrep "$match_option" "$match_value" 2>/dev/null); then
+		printf '%s\n' "$matched_pids"
+	else
+		match_rc=$?
+		[ "$match_rc" -eq 1 ] || return "$match_rc"
+	fi
+}
+
+pvn_process_identity_sha256() {
+	identity_kind=$1
+	identity_match=$2
+	identity_pids=$(pvn_process_pids "$identity_kind" "$identity_match") || return 1
+	identity_records=$(
+		for identity_pid in $identity_pids; do
+			printf '%s\n' "$identity_pid" | grep -Eq '^[0-9]+$' || exit 1
+			identity_start=$(LC_ALL=C ps -ww -p "$identity_pid" -o lstart= 2>/dev/null |
+				sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+			identity_command=$(LC_ALL=C ps -ww -p "$identity_pid" -o command= 2>/dev/null |
+				sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+			[ -n "$identity_start" ] && [ -n "$identity_command" ] || exit 1
+			identity_start_sha=$(printf '%s' "$identity_start" | pvn_hash_stdin)
+			identity_command_sha=$(printf '%s' "$identity_command" | pvn_hash_stdin)
+			printf '%s\t%s\t%s\n' "$identity_pid" \
+				"$identity_start_sha" "$identity_command_sha"
+		done
+	) || return 1
+	printf '%s' "$identity_records" | LC_ALL=C sort -n -k1,1 | pvn_hash_stdin
+}
+
 pvn_native_charon_pids() {
 	ps -axo pid=,command= | awk -v executable="$PVN_BINARY" '
 		index($0, executable) {
@@ -32,6 +69,7 @@ pvn_native_charon_pids() {
 pvn_snapshot_json() {
 	timestamp=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 	interfaces=$(ifconfig -l)
+	# shellcheck disable=SC2086
 	utun_names=$(printf '%s\n' $interfaces | awk '/^utun/' | pvn_json_string_array)
 	interface_hash=$(ifconfig -a 2>/dev/null | pvn_hash_stdin)
 	inet_routes=$(netstat -rn -f inet 2>/dev/null)
@@ -72,10 +110,17 @@ pvn_snapshot_json() {
 	generation_count=0
 	if [ -d "$PVN_RUNTIME_ROOT" ]; then
 		generation_count=$(find "$PVN_RUNTIME_ROOT" -mindepth 1 -maxdepth 1 \
-			-type d -name 'generation-*' -print | awk 'END { print NR + 0 }')
+			-type d -name 'generation-*' -print 2>/dev/null | awk 'END { print NR + 0 }')
 	fi
 	compiled_pid=false
 	[ ! -e "$PVN_PID_FILE" ] || compiled_pid=true
+	surge_process_identity=$(pvn_process_identity_sha256 exact Surge) || return 1
+	surge_extension_identity=$(pvn_process_identity_sha256 pattern \
+		'/com\.nssurge\.surge-mac\.ne$') || return 1
+	surge_helper_identity=$(pvn_process_identity_sha256 pattern \
+		'^/Library/PrivilegedHelperTools/com\.nssurge\.surge-mac\.helper$') || return 1
+	surge_cli_identity=$(pvn_process_identity_sha256 exact surge-cli) || return 1
+	power_vpn_identity=$(pvn_process_identity_sha256 exact PowerVPN) || return 1
 	production_ports=false
 	for pid in $(printf '%s' "$native_pids" | jq -r '.[]'); do
 		if lsof -nP -a -p "$pid" -iUDP 2>/dev/null | grep -Eq ':(500|4500)[[:space:]]'; then
@@ -84,12 +129,25 @@ pvn_snapshot_json() {
 	done
 	setkey_state=unavailable_unprivileged
 	setkey_hash=""
+	setkey_policy_state=unavailable_unprivileged
+	setkey_policy_hash=""
 	if [ -x /usr/sbin/setkey ]; then
-		setkey_output=$(/usr/sbin/setkey -D 2>/dev/null || true)
-		if [ -n "$setkey_output" ]; then
+		if /usr/sbin/setkey -D >/dev/null 2>&1; then
 			setkey_state=available
-			setkey_hash=$(printf '%s\n' "$setkey_output" | pvn_hash_stdin)
+			setkey_hash=$(/usr/sbin/setkey -D 2>/dev/null | pvn_hash_stdin)
 		fi
+		if /usr/sbin/setkey -DP >/dev/null 2>&1; then
+			setkey_policy_state=available
+			setkey_policy_hash=$(/usr/sbin/setkey -DP 2>/dev/null | pvn_hash_stdin)
+		fi
+	fi
+	esp_port_state=unavailable
+	esp_port_hash=""
+	if /usr/sbin/sysctl -n net.inet.ipsec.esp_port >/dev/null 2>&1; then
+		esp_port_state=available
+		esp_port_hash=$(
+			/usr/sbin/sysctl -n net.inet.ipsec.esp_port 2>/dev/null | pvn_hash_stdin
+		)
 	fi
 
 	jq -n \
@@ -112,12 +170,21 @@ pvn_snapshot_json() {
 		--argjson generationDirectoryCount "$generation_count" \
 		--argjson productionIKEPortsBoundByNative "$production_ports" \
 		--argjson surgeProcessCount "$(pvn_count_process Surge)" \
+		--arg surgeProcessIdentitySHA256 "$surge_process_identity" \
 		--argjson surgeExtensionProcessCount "$(pvn_count_process_pattern '/com\.nssurge\.surge-mac\.ne$')" \
+		--arg surgeExtensionProcessIdentitySHA256 "$surge_extension_identity" \
 		--argjson surgeHelperProcessCount "$(pvn_count_process_pattern '^/Library/PrivilegedHelperTools/com\.nssurge\.surge-mac\.helper$')" \
+		--arg surgeHelperProcessIdentitySHA256 "$surge_helper_identity" \
 		--argjson surgeCLIProcessCount "$(pvn_count_process surge-cli)" \
+		--arg surgeCLIProcessIdentitySHA256 "$surge_cli_identity" \
 		--argjson powerVPNProcessCount "$(pvn_count_process PowerVPN)" \
+		--arg powerVPNProcessIdentitySHA256 "$power_vpn_identity" \
 		--arg setkeyState "$setkey_state" \
 		--arg setkeySHA256 "$setkey_hash" \
+		--arg setkeyPolicyState "$setkey_policy_state" \
+		--arg setkeyPolicySHA256 "$setkey_policy_hash" \
+		--arg espPortState "$esp_port_state" \
+		--arg espPortSHA256 "$esp_port_hash" \
 		'{
 		  schemaVersion: 1,
 		  evidenceClass: "value_free_local_network_snapshot",
@@ -140,13 +207,23 @@ pvn_snapshot_json() {
 		  generationDirectoryCount: $generationDirectoryCount,
 		  productionIKEPortsBoundByNative: $productionIKEPortsBoundByNative,
 		  surgeProcessCount: $surgeProcessCount,
+		  surgeProcessIdentitySHA256: $surgeProcessIdentitySHA256,
 		  surgeExtensionProcessCount: $surgeExtensionProcessCount,
+		  surgeExtensionProcessIdentitySHA256: $surgeExtensionProcessIdentitySHA256,
 		  surgeHelperProcessCount: $surgeHelperProcessCount,
+		  surgeHelperProcessIdentitySHA256: $surgeHelperProcessIdentitySHA256,
 		  surgeCLIProcessCount: $surgeCLIProcessCount,
+		  surgeCLIProcessIdentitySHA256: $surgeCLIProcessIdentitySHA256,
 		  powerVPNProcessCount: $powerVPNProcessCount,
+		  powerVPNProcessIdentitySHA256: $powerVPNProcessIdentitySHA256,
 		  setkeyState: $setkeyState,
 		  setkeySHA256: $setkeySHA256,
+		  setkeyPolicyState: $setkeyPolicyState,
+		  setkeyPolicySHA256: $setkeyPolicySHA256,
+		  espPortState: $espPortState,
+		  espPortSHA256: $espPortSHA256,
 		  containsSecrets: false,
-		  containsRawRoutes: false
+		  containsRawRoutes: false,
+		  containsRawSAState: false
 		}'
 }

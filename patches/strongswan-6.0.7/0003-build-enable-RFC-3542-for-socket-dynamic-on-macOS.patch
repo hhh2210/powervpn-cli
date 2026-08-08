@@ -1,0 +1,25 @@
+From a81298234753f314dbf2c4f2867a9a144006bd8c Mon Sep 17 00:00:00 2001
+From: hhh2210 <hzy2210@gmail.com>
+Date: Sat, 8 Aug 2026 22:34:50 +0800
+Subject: [PATCH] build: enable RFC 3542 for socket-dynamic on macOS
+
+---
+ src/libcharon/plugins/socket_dynamic/socket_dynamic_socket.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/libcharon/plugins/socket_dynamic/socket_dynamic_socket.c b/src/libcharon/plugins/socket_dynamic/socket_dynamic_socket.c
+index c1c0a32..d7be668 100644
+--- a/src/libcharon/plugins/socket_dynamic/socket_dynamic_socket.c
++++ b/src/libcharon/plugins/socket_dynamic/socket_dynamic_socket.c
+@@ -19,6 +19,8 @@
+ 
+ /* for struct in6_pktinfo */
+ #define _GNU_SOURCE
++/* make sure to use the proper defs on Mac OS X */
++#define __APPLE_USE_RFC_3542
+ 
+ #include "socket_dynamic_socket.h"
+ 
+-- 
+2.55.0
+

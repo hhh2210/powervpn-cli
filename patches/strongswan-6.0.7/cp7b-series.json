@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "version": "6.0.7",
+    "baseCommit": "5973ff8e41deef4e015e1138a2de688acedf6f75"
+  },
+  "lockedCP6": {
+    "commit": "67c9810900e2d8486cb3b11495a8362433494ca0",
+    "seriesManifest": "series.json",
+    "patchSHA256": "6e4c609240ae2a1996a3a547cede72ac1be7121922aa6f576687632609f34213"
+  },
+  "cp7bPatch": {
+    "sequence": 3,
+    "path": "0003-build-enable-RFC-3542-for-socket-dynamic-on-macOS.patch",
+    "commit": "a81298234753f314dbf2c4f2867a9a144006bd8c",
+    "sha256": "3c7615e5bf2ec284f04177e903b88fb3b452f1ce9d1f39968fd89c40ea6771c4",
+    "scope": "macOS RFC 3542 compile definitions for the serverless socket-dynamic CP7B build"
+  },
+  "boundary": {
+    "buildOnly": true,
+    "serverVisibleProtocolChanged": false,
+    "socketOpenedWithoutSend": false,
+    "privilegedBackendTested": false,
+    "serverTested": false
+  },
+  "safety": {
+    "containsSecrets": false,
+    "containsReplayableCapture": false,
+    "containsVendorBinaryOrObject": false
+  }
+}

@@ -394,9 +394,86 @@ Remaining: A privileged macOS backend, SA/policy installation, server
 interoperability, credential handoff, IKE/CHILD SA, ADDRULE acceptance, resource
 route/data path, and recovery all remain unproven. None is implied by CP7A.
 
-Next command: none until explicit CP7B approval. The proposed window is a
-serverless PF_KEY/PF_ROUTE smoke with random high ports, at most two launches
-and five minutes, native Touch ID authorization, PowerVPN and Surge kept
-running, and mandatory generation-owned rollback.
+Next command at this historical gate: request CP7B preflight authorization.
+The later CP7B material finding supersedes the random-high-port proposal; see
+the following entry.
 
-Approval required: yes, before any CP7B implementation or privileged launch.
+Approval required at this historical gate: yes. Preflight implementation was
+subsequently authorized, but privileged launch still requires separate approval.
+
+## 2026-08-09 — Checkpoint 7B preflight
+
+State: **WAITING FOR APPROVAL.** The cumulative preflight is PASS; root/live
+execution has not run and requires a second explicit approval.
+
+Evidence level: L1/L3/L4 source, build, review, and dry-preflight evidence only.
+No privileged backend constructor has run, so L5 is not proven.
+
+Verified: `socket-default` is excluded because its macOS PF_KEY NAT-T path writes
+global `net.inet.ipsec.esp_port` without teardown restore. The candidate uses
+`socket-dynamic` with a zero-UDP/no-send contract. A dedicated arm64 closure is
+protected by a root-owned parent and fully revalidated before `exec`/`dlopen`.
+The launcher writes a handshake, commits atomic `starting` state, then releases
+the gate and `execv()`s `charon` with the same PID. The 300-second guard begins
+before the first privileged snapshot. UDP inspection, loaded-plugin equality,
+PowerVPN/Surge process identity, and retained manifest/source/config bindings
+all fail closed.
+
+Evidence: [`../evidence/checkpoint-7b-preflight.md`](../evidence/checkpoint-7b-preflight.md),
+[`../evidence/live-test-plan.md`](../evidence/live-test-plan.md),
+[`../evidence/rollback.md`](../evidence/rollback.md), and the finalized value-free
+approval manifest. Manifest SHA-256 is
+`c5464052f21af585a348a3fced8d1b5cf4fa336f8128fd9e64acc10465add877`.
+
+Canonical commit: this cumulative CP7B preflight checkpoint commit.
+
+StrongSwan commit/patch SHA-256: locked CP6 parent
+`67c9810900e2d8486cb3b11495a8362433494ca0`; CP7B build-only commit
+`a81298234753f314dbf2c4f2867a9a144006bd8c`; patch 0003 SHA-256
+`3c7615e5bf2ec284f04177e903b88fb3b452f1ce9d1f39968fd89c40ea6771c4`.
+It changes macOS RFC 3542 compile declarations only, not IKE/expandrule/wire
+behavior.
+
+Changed files: dedicated build/patch manifest, sealed closure and copied
+`libcrypto`, manifest-bound runner/authorizer/root worker, same-PID gated
+launcher, state/attempt/snapshot/emergency-stop/assert helpers, official-Python
+value-free VICI inventory, negative tests, and evidence/gate/rollback docs.
+
+Tests/commands: `scripts/verify_checkpoint.sh 7b-preflight` PASS; dedicated build
+and arm64/scratch-piddir checks PASS; exact patch replay PASS; same-PID and
+spawn-before-state TERM injection PASS; scratch replacement of charon, plugin,
+and libcrypto is rejected; CP7A lifecycle regression, ShellCheck, AppleScript
+compile, Gitleaks, and cumulative diff checks PASS. Manifest-bound run/stop dry
+runs exit before `osascript`.
+
+Review result: exactly one integrated preflight review initially returned NO-GO
+with two P1 findings (user-replaceable root execution closure and spawn/state
+gap) plus five P2 findings (deadline coverage, no-send observation, exact plugin
+set, process identity, and retained evidence binding). All direct findings were
+fixed and their scoped validations pass. No second independent review ran; no
+live/post-run evidence review has occurred.
+
+Safety/cleanup: No root authorization completed, daemon started, PF_KEY/PF_ROUTE
+constructor ran, UDP socket opened, server traffic occurred, credential was read,
+or SA/SPD/route/utun/PowerVPN/Surge state changed. Final dry validation exposed a
+generic shell `mode` collision that reached an AppleScript authorization wait;
+it was terminated before approval with no root entry or residue. The wrappers
+now use readonly `operation_mode`, and both dry runs exit before authorization.
+
+Last good state: finalized UID-502 closure and manifest hash above; runtime top
+level contains only the reviewed closure, with no state, PID, VICI socket,
+ledger, generation, bootstrap, native charon, or gated-launcher process.
+
+First bad event: static inspection found the unavoidable `socket-default`
+global-ESP-port write. The first implementation review then found the two P1
+ownership/lifecycle gaps; no unsafe live backend attempt was made.
+
+Remaining: obtain the separate manifest-bound live authorization, run one
+serverless PF_KEY/PF_ROUTE window, assert cleanup, then perform the single scoped
+post-run evidence review. Server, credential, IKE, resource, and recovery work
+remain separately gated and unproven.
+
+Next command after explicit approval:
+`scripts/run_cp7b_backend.sh --execute-reviewed --manifest-sha256 c5464052f21af585a348a3fced8d1b5cf4fa336f8128fd9e64acc10465add877`.
+
+Approval required: **yes**, separately, before any CP7B root/live execution.

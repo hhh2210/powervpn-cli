@@ -2,19 +2,19 @@
 title: PowerVPN Apple Silicon 原生协议核心（strongSwan 6.0.7）
 goal_version: 3
 status: active-codex-goal
-updated: 2026-08-08
+updated: 2026-08-09
 goal_type: long-running, evidence-driven native-protocol prototype
 repository: /Users/larry_1/Opensource/powervpn-cli
 scratch_root: /Users/larry_1/scratch-data/powervpn-strongswan
 upstream_target: strongSwan 6.0.7
 upstream_base_commit: 5973ff8e41deef4e015e1138a2de688acedf6f75
 vendor_compatibility_baseline: strongSwan 5.8.0
-canonical_lab_commit: 6122825e37d5061c94d2e1b4e7a88cadcd354e04
+canonical_lab_commit: 3231a3bfe992fcc5f84793543ce9c8687afcd7fa
 strongswan_cp6_commit: 67c9810900e2d8486cb3b11495a8362433494ca0
 strongswan_patch_sha256: 6e4c609240ae2a1996a3a547cede72ac1be7121922aa6f576687632609f34213
-current_checkpoint: live-approval-gate-1
-immediate_next: request-explicit-cp7b-privileged-backend-approval
-next_approval_gate: 7b-privileged-backend-without-server
+current_checkpoint: 7b-privileged-backend-preflight
+immediate_next: request-cp7b-root-live-execution-approval-for-final-manifest
+next_approval_gate: 7b-root-live-execution-after-preflight-review
 review_policy: checkpoint-gated-risk-weighted-single-integrated-review
 commit_policy: canonical-checkpoint-commits-with-local-fixups
 primary_platform: Apple Silicon macOS 27 beta
@@ -33,12 +33,11 @@ three evidence anchors in the front matter as a locked verified baseline.
 Do not repeat their broad analysis or full acceptance runs unless the current
 work changes shared code or new evidence directly conflicts with them.
 
-Work only on CP7A before the Live Approval Gate. Resolve the first VICI version
-response timeout with a bounded official-client/Swift A-B test, then complete
-and dry-validate the launch, stop, snapshot, cleanup and rollback artifacts.
-Do not start a privileged daemon, bind production IKE ports, contact the VPN
-server, alter routes, create an SA/utun, stop PowerVPN, or affect Surge without
-explicit approval.
+Resume from the current checkpoint and its approval gate. CP7A and the CP7B
+preflight are complete; do not launch the privileged backend until the user
+explicitly approves the finalized manifest hash and exact command. That approval
+does not authorize server traffic, credentials, routes, SA/utun creation,
+PowerVPN shutdown, Surge mutation, or later recovery tests.
 
 Review the cumulative checkpoint candidate, not every commit. Use local
 WIP/fixup commits, targeted tests and one integrated checkpoint review. Do not
@@ -61,11 +60,12 @@ codex features enable goals
    全量验收来制造“进度”。
 2. **CP6 是离线 compatibility-port PASS，不是服务器互通 PASS。** 当前仍没有
    原生服务器 IKE_SA、CHILD_SA、resource route、SA/policy/utun 证据。
-3. **当前唯一实施范围是 CP7A。** 在 CP7A PASS 前，不得进入 root/backend、
-   server interop、credential acquisition、网络切换或恢复测试。
-4. **首个 `version` response timeout 是真实 blocker。** 不得因 request bytes
-   与官方 serializer 一致、socket 文件存在、daemon 进程仍在，或 cleanup
-   成功而把 daemon VICI 标为 PASS。
+3. **CP7A 已 PASS；CP7B preflight 已 PASS 并等待 live approval。** 未获得绑定
+   finalized manifest 的第二次明确授权前，不得进入 root/backend；server
+   interop、credential acquisition、网络切换和恢复测试仍在更后的独立 gate。
+4. **CP7B preflight PASS 不是 backend PASS。** arm64 build、root-closure 设计、
+   gated lifecycle 和 dry validation 不证明 PF_KEY/PF_ROUTE constructor 已在本机
+   成功，也不证明任何 SA、policy、route、utun 或 server compatibility。
 5. **一次只改变一个变量。** 对同一个失败假设最多做三次有信息增益的尝试；
    仍不收敛时记录 last-good-state / first-bad-event，并缩小实验。
 6. **review 绑定 checkpoint 和风险，不绑定 commit。** 除 Live lane 的
@@ -429,18 +429,25 @@ CP7A 禁止：
 
 ### 7.3 Live Approval Gate 1 — CP7B privileged backend
 
-CP7A PASS 后必须暂停，并向用户提供一段简短 approval request，包含：
+CP7A PASS 后，CP7B 分为两个独立授权阶段：
 
-- 将执行的精确命令；
-- backend、端口、预计持续时间与最大尝试次数；
-- 是否需要 Touch ID；
-- 是否保持 PowerVPN/Surge 运行；
-- 可能影响；
-- pre-state snapshot；
-- stop/rollback 命令；
-- zero-residue 验证命令。
+1. **preflight authorization**：只允许独立 scratch build、runner/rollback
+   实现、dry validation 和 integrated preflight review；不允许 Touch ID、root
+   daemon、PF_KEY/PF_ROUTE live access 或网络变化；
+2. **live execution authorization**：preflight PASS 且 manifest 全部 hash 固定后，
+   必须再次暂停，并向用户提供一段简短 approval request，包含：
 
-用户对 CP7B 的批准**不自动授权** CP8/CP9 server traffic。
+   - 将执行的精确命令；
+   - backend、端口、预计持续时间与最大尝试次数；
+   - 是否需要 Touch ID；
+   - 是否保持 PowerVPN/Surge 运行；
+   - 可能影响；
+   - pre-state snapshot；
+   - stop/rollback 命令；
+   - zero-residue 验证命令。
+
+截至 2026-08-09，用户只批准了第一阶段。该批准不得解释为 root/live execution。
+用户对任一 CP7B 阶段的批准也**不自动授权** CP8/CP9 server traffic。
 
 ### 7.4 Live Approval Gate 2 — server interop
 
@@ -689,7 +696,11 @@ macOS 启动、接受 VICI 控制并完整清理，同时不破坏 Surge。
 - 第一轮保持 Surge 运行；
 - 第一轮尽量保持 vendor PowerVPN 运行；若存在明确 provider/port conflict，
   停止 PowerVPN 需要单独写入 approval request；
-- 使用 scratch prefix、scratch config、随机高位 IKE ports；
+- 使用独立 CP7B scratch source/build/prefix/piddir 和 scratch config；
+- 不加载 `socket-default`：macOS PF_KEY NAT-T 初始化会写全局
+  `net.inet.ipsec.esp_port`，且 upstream destroy path 不恢复；
+- 使用 `socket-dynamic`；配置保留 `port=0`/`port_nat_t=0`，但 no-send smoke
+  的预期 UDP descriptor 数必须为零；
 - 不联系任何 VPN gateway；
 - 每个 backend 最多两次 launch；
 - PF_KEY/PF_ROUTE 严格 timebox，失败证据充分后切 kernel-libipsec/utun；
@@ -697,21 +708,26 @@ macOS 启动、接受 VICI 控制并完整清理，同时不破坏 Surge。
 
 #### Tasks
 
-1. 采集 before snapshot：process、interfaces、routes、default route、DNS、Surge
-   state、SA/policy inventory；
-2. PF_KEY/PF_ROUTE 最小启动与 stop smoke；
-3. 若失败，记录 exact errno/plugin boundary，不长期纠缠；
-4. 必要时改用 upstream kernel-libipsec + native utun；
-5. VICI `version` 与只读 status PASS；
-6. 不 initiate connection，不发送 server packet；
-7. stop 后执行 zero-residue assertion；
-8. 比较 before/after，Surge default route/DNS/functionality 不变。
+1. 完成 dedicated CP7B arm64 build、manifest、runner/rollback 和 negative tests；
+2. integrated preflight review PASS 后再次请求 live execution approval；
+3. 获批后采集两个稳定 before snapshot：process、interfaces、routes、default
+   route、DNS、Surge/PowerVPN、SAD、SPD 和 global ESP port；
+4. PF_KEY/PF_ROUTE + `socket-dynamic` 最小启动与 stop smoke；
+5. 要求 UDP descriptor 数为零；任何 send 或 ESP-port 变化 fail closed；
+6. 若失败，记录 exact errno/plugin boundary，不长期纠缠；
+7. 必要时改用 upstream kernel-libipsec + native utun，但必须新 review 和新授权；
+8. VICI `version` 与只读 status PASS，connection/SA/policy listing 为空；
+9. 不 load connection/credential，不 initiate，不发送 server packet；
+10. stop 后执行 zero-residue assertion；
+11. 比较 before/during/after，SAD/SPD/ESP port、Surge default route/DNS/
+    functionality、PowerVPN 和 utun inventory 不变。
 
 #### Acceptance
 
 - 至少一个 backend 达到 ready 并能干净 teardown；或形成 evidence-complete
   backend blocker；
 - 不残留 root process、socket、SA、policy、route、utun、PID/config/log；
+- native UDP descriptor 始终为零，`net.inet.ipsec.esp_port` 始终不变；
 - Surge before/after 无非预期变化；
 - `scripts/verify_checkpoint.sh 7b` 在获批窗口中 PASS；
 - 一次 preflight review + 一次 post-run cleanup review；不做额外 broad review；

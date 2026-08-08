@@ -15,6 +15,9 @@ case "$checkpoint" in
 	7a)
 		exec "$repo_root/scripts/verify/checkpoint_7a.sh"
 		;;
+	7b-preflight)
+		exec "$repo_root/scripts/verify/checkpoint_7b_preflight.sh"
+		;;
 	4b)
 		cd "$repo_root"
 		checkpoint_base=${POWERVPN_CHECKPOINT_BASE:-82731013bb97f3dbfcc6f45df099e79e45dc3b64}
@@ -204,7 +207,7 @@ case "$checkpoint" in
 		exit 0
 		;;
 	*)
-		echo "usage: $0 4a|4b|5|6|7a" >&2
+		echo "usage: $0 4a|4b|5|6|7a|7b-preflight" >&2
 		exit 64
 		;;
 esac

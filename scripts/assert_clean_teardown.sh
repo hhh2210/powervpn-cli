@@ -19,7 +19,8 @@ done
 [ -n "$before" ] && [ -n "$after" ] ||
 	pvn_fail "both --before and --after are required" || exit 2
 
-jq -e '.schemaVersion == 1 and .containsSecrets == false and .containsRawRoutes == false' \
+jq -e '.schemaVersion == 1 and .containsSecrets == false and
+  .containsRawRoutes == false and .containsRawSAState == false' \
 	"$before" "$after" >/dev/null
 [ ! -e "$PVN_STATE_FILE" ] || pvn_fail "runtime state file remains after teardown" || exit 1
 [ ! -e "$PVN_PID_FILE" ] || pvn_fail "compiled charon PID file remains after teardown" || exit 1
@@ -49,6 +50,12 @@ jq -e --slurpfile before "$before" '
   .powerVPNProcessCount == $before[0].powerVPNProcessCount and
   .setkeyState == $before[0].setkeyState and
   (if .setkeyState == "available" then .setkeySHA256 == $before[0].setkeySHA256 else true end) and
+  .setkeyPolicyState == $before[0].setkeyPolicyState and
+  (if .setkeyPolicyState == "available" then
+    .setkeyPolicySHA256 == $before[0].setkeyPolicySHA256 else true end) and
+  .espPortState == $before[0].espPortState and
+  (if .espPortState == "available" then
+    .espPortSHA256 == $before[0].espPortSHA256 else true end) and
   ((.utunNames - $before[0].utunNames) | length) == 0
 ' "$after" >/dev/null || pvn_fail "post-run snapshot fails the CP7A clean-teardown gate" || exit 1
 
