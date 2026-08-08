@@ -9,8 +9,56 @@ jobs=${JOBS:-8}
 case "$checkpoint" in
 	4a)
 		;;
+	5)
+		cd "$repo_root"
+		checkpoint_base=${POWERVPN_CHECKPOINT_BASE:-c1e6e5f8dd52028d647e75dc8010c83ba7ee5dec}
+		git cat-file -e "$checkpoint_base^{commit}"
+		git merge-base --is-ancestor "$checkpoint_base" HEAD
+		test -n "$(
+			git diff --name-only "$checkpoint_base"
+			git ls-files --others --exclude-standard
+		)"
+		fixture=fixtures/redacted/protocol-correlation-value-free-v1.json
+		runtime_fixture=fixtures/redacted/protocol-correlation-runtime-metadata-v1.json
+		jq -e '
+		  .schemaVersion == 1 and
+		  .fixtureClass == "value_free_protocol_correlation" and
+		  .redactionMode == "metadata_only_at_collection" and
+		  .source == "synthetic" and
+		  .containsSecrets == false and
+		  .containsReplayableCapture == false and
+		  (.events | length) > 0
+		' "$fixture" >/dev/null
+		jq -e '
+		  .source == "runtime_metadata" and
+		  .containsSecrets == false and
+		  .containsReplayableCapture == false and
+		  ([.events[].boundary] | index("control_plane") != null) and
+		  ([.events[].boundary] | index("xpc") != null)
+		' "$runtime_fixture" >/dev/null
+		swift test --filter valueFreeCorrelationRoundTripPreservesObservationOrder
+		swift test
+		swift build --arch arm64
+		changed_swift=$(
+			{
+				git diff --name-only "$checkpoint_base" -- '*.swift'
+				git ls-files --others --exclude-standard -- '*.swift'
+			} | sort -u
+		)
+		for swift_file in $changed_swift
+		do
+			xcrun swift-format lint --strict "$swift_file"
+		done
+		swift run powervpn oracle correlate "$fixture" --json |
+			jq -e '.valid == true and .issues == []' >/dev/null
+		swift run powervpn oracle correlate "$runtime_fixture" --json |
+			jq -e '.valid == true and .issues == []' >/dev/null
+		scripts/verify_no_secrets.sh
+		git diff --check "$checkpoint_base"
+		exit 0
+		;;
 	*)
-		echo "usage: $0 4a" >&2
+		echo "usage: $0 4a|5" >&2
 		exit 64
 		;;
 esac

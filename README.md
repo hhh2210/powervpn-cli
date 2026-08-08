@@ -26,6 +26,10 @@ upstream strongSwan 6.0.7.
 - CP4A now has a strict offline 6.0.7 codec for the five observed expandrule
   wire forms. Seven synthetic byte vectors cover nine logical contexts; the
   payload's opaque fields deliberately remain unnamed until CP5/CP4B evidence.
+- CP5 correlates the recovered portal/helper schemas with one authorized legal
+  session. The value-free runtime fixture confirms session-check request/status
+  metadata and the GUI resource-toggle producer shape; WebSocket behavior and
+  the exact portal-field-to-PSK/resource mapping remain explicitly unknown.
 
 The target is therefore:
 
@@ -48,6 +52,8 @@ swift run powervpn status
 swift run powervpn probe --timeout 5
 swift run powervpn diagnose --json
 swift run powervpn oracle inventory --json
+swift run powervpn oracle correlate fixtures/redacted/protocol-correlation-value-free-v1.json --json
+swift run powervpn oracle correlate fixtures/redacted/protocol-correlation-runtime-metadata-v1.json --json
 swift run powervpn spec validate-redacted fixtures/redacted/tunnel-spec.example.json
 ```
 
@@ -61,7 +67,8 @@ does not advance the native replacement.
   and end-to-end probe logic.
 - `Sources/PowerVPNCLI`: thin command routing and rendering.
 - `docs/protocol-*.md`: verified protocol facts, unknowns, and next experiments.
-- `fixtures/redacted`: synthetic, commit-safe structures only.
+- `fixtures/redacted`: synthetic structures and derived value-free runtime
+  metadata only; no captured values or replayable payloads.
 - `patches/strongswan-6.0.7`: minimal patches replayable on the official tag.
 - `captures`: policy and manifests only; raw packet captures never enter Git.
 
@@ -76,6 +83,7 @@ swift test
 BIN="$(swift build --show-bin-path)/powervpn"
 file "$BIN"
 scripts/verify_checkpoint.sh 4a
+scripts/verify_checkpoint.sh 5
 ```
 
 The Swift package has one executable product, `powervpn`, and one reusable
@@ -87,8 +95,9 @@ library target, `PowerVPNCore`.
   committed or printed by the CLI.
 - Raw evidence belongs under a mode-700 directory in `~/scratch-data`, not in
   this repository.
-- `/Applications/PowerVPN.app`, its helpers, code signature, and live network
-  state are never modified by the lab.
+- `/Applications/PowerVPN.app`, its helpers, and code signature are never
+  modified. Live network state changes only inside an explicit approval window
+  and must be immediately restored and verified.
 - A live backend test requiring root or a VPN configuration change is a
   separately approved isolation-window experiment because it may interact with
   Surge.

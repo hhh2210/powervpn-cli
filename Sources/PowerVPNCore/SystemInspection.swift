@@ -93,7 +93,8 @@ public enum TunnelLogAnalyzer {
     if let staleIndex, establishedIndex.map({ staleIndex > $0 }) ?? true {
       return TunnelLogState(
         health: .staleAuthentication,
-        latestEvent: "historical log hint: IKE authentication failed after the last established tunnel"
+        latestEvent:
+          "historical log hint: IKE authentication failed after the last established tunnel"
       )
     }
     if let retryIndex, establishedIndex.map({ retryIndex > $0 }) ?? true {
@@ -121,7 +122,11 @@ public enum TunnelStateResolver {
         historicalHint: false
       )
     }
-    return analyzedLogState
+    return TunnelLogState(
+      health: .unknown,
+      latestEvent: "\(analyzedLogState.latestEvent); current helper generation is uncorrelated",
+      historicalHint: true
+    )
   }
 }
 

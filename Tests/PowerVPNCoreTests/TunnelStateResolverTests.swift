@@ -24,7 +24,7 @@ import Testing
   #expect(!resolved.historicalHint)
 }
 
-@Test func runningHelperKeepsAnalyzedLogState() {
+@Test func runningHelperCannotPromoteHistoricalLogToCurrentHealth() {
   let helper = HelperState(
     state: "running",
     pid: 123,
@@ -35,6 +35,7 @@ import Testing
   let retrying = TunnelLogState(health: .retrying, latestEvent: "retrying")
 
   let resolved = TunnelStateResolver.resolve(helper: helper, analyzedLogState: retrying)
-  #expect(resolved.health == .retrying)
+  #expect(resolved.health == .unknown)
+  #expect(resolved.latestEvent.contains("current helper generation is uncorrelated"))
   #expect(resolved.historicalHint)
 }

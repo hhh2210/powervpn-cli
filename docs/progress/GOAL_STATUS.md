@@ -155,3 +155,58 @@ Next command: establish the CP5 redacted field/type/order correlation table
 without recording values.
 
 Approval required: no.
+
+## 2026-08-08 17:18 +08:00 — Checkpoint 5
+
+State: PASS
+
+Verified: Closed value-free correlation schema and CLI validator; ordered
+control/XPC event and field model; independent auth/control/resource/helper
+state domains; static portal request and response-parser order; `cs -> nc ->
+ipsec` object lineage; charon/ipsec helper consumer types and order; confirmed
+GUI `kDeleteActionKey` versus helper `tunnel-name` toggle mismatch; hash-locked
+x86_64 LLDB observer; legal runtime session-check request/HTTP 200 correlation;
+live GUI resource-toggle producer metadata; first session-timeout boundary;
+resource restoration and Surge coexistence checks.
+
+Evidence: [`../evidence/checkpoint-5-static-correlation.md`](../evidence/checkpoint-5-static-correlation.md),
+[`../../fixtures/redacted/protocol-correlation-value-free-v1.json`](../../fixtures/redacted/protocol-correlation-value-free-v1.json),
+[`../../fixtures/redacted/protocol-correlation-runtime-metadata-v1.json`](../../fixtures/redacted/protocol-correlation-runtime-metadata-v1.json),
+and the correlation tests in `PowerVPNCoreTests`.
+
+Canonical commit: this checkpoint commit.
+
+Changed files: value-free Core model/decoder/validator, shared closed-JSON
+shape helper, thin `oracle correlate` CLI route, tests, synthetic fixture, and
+the control-plane/XPC evidence documents. The temporary debugger observer
+remains outside Git in mode-700 scratch.
+
+Tests/commands: `scripts/verify_checkpoint.sh 5` exit 0; 41 Swift tests PASS;
+arm64 Swift build PASS; changed-file Swift format lint PASS; both fixture CLI
+validations PASS; Gitleaks and cumulative diff checks PASS. The scratch observer
+has eight sanitizer/dedup/family tests; runtime output is mode 600 under a
+mode-700 root and passes the same closed validator.
+
+Review lane and result: Guarded. Exactly one integrated checkpoint review ran.
+Its direct findings—operation field profiles, helper-family discrimination,
+identity-safe paths/fields, confidence consistency, cumulative staged/commit
+verification, and README live-boundary wording—were fixed. Final acceptance
+passed; no second review ran.
+
+Safety/cleanup: No installed app/helper/signature, log body, Keychain, packet,
+credential value, session value, or raw XPC description was changed or read.
+One explicitly approved resource off/on cycle was restored; both fresh SSH
+banner probes succeeded, the PowerVPN resource routes returned, Surge retained
+the default route, and LLDB detached cleanly while the legal session remained
+running.
+
+Remaining: CP4B must compare this evidence with the opaque expandrule fields.
+WebSocket behavior, live `start_connection` ordering, and exact
+portal-field-to-PSK/resource mapping remain explicitly unknown and cannot be
+guessed into CP4B names.
+
+Next command: run the CP4B semantic-promotion gate and leave every wire field
+opaque unless two independent evidence classes agree.
+
+Approval required: no. The live observation and approved resource cycle are
+complete; no further network action is part of CP5.

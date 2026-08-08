@@ -223,15 +223,23 @@ private enum StrictTunnelSpecDecoder {
   static func decode(_ data: Data) throws -> TunnelSpec {
     let object = try JSONSerialization.jsonObject(with: data)
     guard let root = object as? [String: Any],
-      hasOnlyAllowedKeys(root, required: requiredRootKeys, optional: optionalRootKeys),
-      hasExactObject(root["authentication"], keys: authenticationKeys),
-      hasOptionalExactObject(root, key: "sessionBinding", keys: referenceKeys),
-      hasOptionalExactObject(root, key: "credentialReference", keys: referenceKeys),
+      ClosedJSONShape.hasOnlyAllowedKeys(
+        root,
+        required: requiredRootKeys,
+        optional: optionalRootKeys
+      ),
+      ClosedJSONShape.hasExactObject(root["authentication"], keys: authenticationKeys),
+      ClosedJSONShape.hasOptionalExactObject(root, key: "sessionBinding", keys: referenceKeys),
+      ClosedJSONShape.hasOptionalExactObject(
+        root,
+        key: "credentialReference",
+        keys: referenceKeys
+      ),
       let routes = root["routes"] as? [[String: Any]],
       routes.allSatisfy({ Set($0.keys) == routeKeys }),
       let resources = root["resources"] as? [[String: Any]],
       resources.allSatisfy({
-        hasOnlyAllowedKeys(
+        ClosedJSONShape.hasOnlyAllowedKeys(
           $0,
           required: requiredResourceKeys,
           optional: optionalResourceKeys
@@ -243,28 +251,6 @@ private enum StrictTunnelSpecDecoder {
     return try JSONDecoder().decode(TunnelSpec.self, from: data)
   }
 
-  private static func hasExactObject(_ value: Any?, keys: Set<String>) -> Bool {
-    guard let object = value as? [String: Any] else { return false }
-    return Set(object.keys) == keys
-  }
-
-  private static func hasOptionalExactObject(
-    _ root: [String: Any],
-    key: String,
-    keys: Set<String>
-  ) -> Bool {
-    guard let value = root[key] else { return true }
-    return hasExactObject(value, keys: keys)
-  }
-
-  private static func hasOnlyAllowedKeys(
-    _ object: [String: Any],
-    required: Set<String>,
-    optional: Set<String>
-  ) -> Bool {
-    let keys = Set(object.keys)
-    return required.isSubset(of: keys) && keys.isSubset(of: required.union(optional))
-  }
 }
 
 private enum TunnelSpecDecodingError: Error {

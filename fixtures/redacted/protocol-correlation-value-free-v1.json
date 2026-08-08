@@ -1,0 +1,331 @@
+{
+  "schemaVersion": 1,
+  "fixtureClass": "value_free_protocol_correlation",
+  "redactionMode": "metadata_only_at_collection",
+  "source": "synthetic",
+  "containsSecrets": false,
+  "containsReplayableCapture": false,
+  "events": [
+    {
+      "sequence": 1,
+      "relativeMilliseconds": 0,
+      "boundary": "control_plane",
+      "transport": "https",
+      "direction": "client_to_server",
+      "kind": "request",
+      "operation": "login",
+      "method": "POST",
+      "pathTemplate": "/vpn/user/auth/password",
+      "evidenceClass": "synthetic",
+      "confidence": "unknown",
+      "fields": [
+        {
+          "name": "type",
+          "type": "string",
+          "length": 8,
+          "lengthUnit": "bytes",
+          "order": 1,
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        },
+        {
+          "name": "mac",
+          "type": "string",
+          "length": 17,
+          "lengthUnit": "bytes",
+          "order": 2,
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        },
+        {
+          "name": "verifycode",
+          "type": "string",
+          "length": 6,
+          "lengthUnit": "bytes",
+          "order": 3,
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        },
+        {
+          "name": "username",
+          "type": "string",
+          "length": 12,
+          "lengthUnit": "bytes",
+          "order": 4,
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        },
+        {
+          "name": "password",
+          "type": "string",
+          "length": 16,
+          "lengthUnit": "bytes",
+          "order": 5,
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        }
+      ],
+      "transitions": [
+        {
+          "domain": "auth_session",
+          "from": "signed_out",
+          "to": "authenticating",
+          "trigger": "request_sent",
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        }
+      ]
+    },
+    {
+      "sequence": 2,
+      "relativeMilliseconds": 40,
+      "boundary": "control_plane",
+      "transport": "https",
+      "direction": "server_to_client",
+      "kind": "response",
+      "operation": "login",
+      "method": "POST",
+      "pathTemplate": "/vpn/user/auth/password",
+      "statusCode": 200,
+      "evidenceClass": "synthetic",
+      "confidence": "unknown",
+      "fields": [
+        {
+          "name": "sessionid",
+          "type": "string",
+          "length": 24,
+          "lengthUnit": "bytes",
+          "order": 1,
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        },
+        {
+          "name": "psk",
+          "type": "string",
+          "length": 32,
+          "lengthUnit": "bytes",
+          "order": 2,
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        },
+        {
+          "name": "vip",
+          "type": "string",
+          "length": 10,
+          "lengthUnit": "bytes",
+          "order": 3,
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        },
+        {
+          "name": "routes",
+          "type": "array",
+          "length": 2,
+          "lengthUnit": "elements",
+          "order": 4,
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        },
+        {
+          "name": "mapid",
+          "type": "string",
+          "length": 8,
+          "lengthUnit": "bytes",
+          "order": 5,
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        },
+        {
+          "name": "tunnelname",
+          "type": "string",
+          "length": 10,
+          "lengthUnit": "bytes",
+          "order": 6,
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        },
+        {
+          "name": "resources",
+          "type": "array",
+          "length": 2,
+          "lengthUnit": "elements",
+          "order": 7,
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        }
+      ],
+      "transitions": [
+        {
+          "domain": "auth_session",
+          "from": "authenticating",
+          "to": "valid",
+          "trigger": "response_success",
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        }
+      ]
+    },
+    {
+      "sequence": 3,
+      "relativeMilliseconds": 60,
+      "boundary": "control_plane",
+      "transport": "websocket",
+      "direction": "client_to_server",
+      "kind": "open",
+      "operation": "websocket_open",
+      "pathTemplate": "/<UNKNOWN_PATH>",
+      "evidenceClass": "synthetic",
+      "confidence": "unknown",
+      "fields": [],
+      "transitions": [
+        {
+          "domain": "control_channel",
+          "from": "disconnected",
+          "to": "online",
+          "trigger": "socket_opened",
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        }
+      ]
+    },
+    {
+      "sequence": 4,
+      "relativeMilliseconds": 80,
+      "boundary": "control_plane",
+      "transport": "websocket",
+      "direction": "server_to_client",
+      "kind": "message",
+      "operation": "resource_list",
+      "evidenceClass": "synthetic",
+      "confidence": "unknown",
+      "fields": [
+        {
+          "name": "resources",
+          "type": "array",
+          "length": 2,
+          "lengthUnit": "elements",
+          "order": 1,
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        },
+        {
+          "name": "resources[].name",
+          "type": "string",
+          "length": 12,
+          "lengthUnit": "bytes",
+          "order": 2,
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        }
+      ],
+      "transitions": [
+        {
+          "domain": "resource_catalog",
+          "from": "unavailable",
+          "to": "ready",
+          "trigger": "catalog_received",
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        }
+      ]
+    },
+    {
+      "sequence": 5,
+      "relativeMilliseconds": 100,
+      "boundary": "xpc",
+      "transport": "xpc",
+      "direction": "gui_to_helper",
+      "kind": "call",
+      "operation": "start_connection",
+      "helperFamily": "charon",
+      "evidenceClass": "synthetic",
+      "confidence": "unknown",
+      "fields": [
+        {
+          "name": "type",
+          "type": "string",
+          "order": 1,
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        },
+        {
+          "name": "rpc",
+          "type": "string",
+          "order": 2,
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        },
+        {
+          "name": "common",
+          "type": "dictionary",
+          "length": 2,
+          "lengthUnit": "fields",
+          "order": 3,
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        },
+        {
+          "name": "tunnels",
+          "type": "array",
+          "length": 1,
+          "lengthUnit": "elements",
+          "order": 4,
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        },
+        {
+          "name": "common.sessionid",
+          "type": "string",
+          "length": 24,
+          "lengthUnit": "bytes",
+          "order": 5,
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        },
+        {
+          "name": "common.psk",
+          "type": "string",
+          "length": 32,
+          "lengthUnit": "bytes",
+          "order": 6,
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        }
+      ],
+      "transitions": [
+        {
+          "domain": "helper_tunnel",
+          "from": "idle",
+          "to": "connecting",
+          "trigger": "helper_call",
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        }
+      ]
+    },
+    {
+      "sequence": 6,
+      "relativeMilliseconds": 120,
+      "boundary": "xpc",
+      "transport": "xpc",
+      "direction": "helper_to_gui",
+      "kind": "reply",
+      "operation": "start_connection",
+      "helperFamily": "charon",
+      "resultClass": "success",
+      "evidenceClass": "synthetic",
+      "confidence": "unknown",
+      "fields": [],
+      "transitions": [
+        {
+          "domain": "helper_tunnel",
+          "from": "connecting",
+          "to": "established",
+          "trigger": "helper_reply",
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        }
+      ]
+    }
+  ]
+}

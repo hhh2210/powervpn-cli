@@ -46,10 +46,47 @@ struct PowerVPNCommand {
 
   private static func runOracle(_ arguments: [String], json: Bool) throws {
     let subcommand = arguments.dropFirst().first { !$0.hasPrefix("--") } ?? "inventory"
-    guard subcommand == "inventory" else {
-      throw CLIError.unknownSubcommand(command: "oracle", subcommand: subcommand)
+    if subcommand == "inventory" {
+      renderOracle(SystemInspector().oracleInventory(), json: json)
+      return
     }
-    renderOracle(SystemInspector().oracleInventory(), json: json)
+    if subcommand == "correlate" {
+      guard let subcommandIndex = arguments.firstIndex(of: subcommand),
+        arguments.indices.contains(subcommandIndex + 1),
+        !arguments[subcommandIndex + 1].hasPrefix("--")
+      else {
+        throw CLIError.invalidArguments(
+          "usage: powervpn oracle correlate <value-free-trace.json> [--json]"
+        )
+      }
+      renderCorrelationValidation(
+        try ProtocolCorrelationRedactedValidator.validate(
+          contentsOf: URL(fileURLWithPath: arguments[subcommandIndex + 1])
+        ),
+        json: json
+      )
+      return
+    }
+    throw CLIError.unknownSubcommand(command: "oracle", subcommand: subcommand)
+  }
+
+  private static func renderCorrelationValidation(
+    _ report: ProtocolCorrelationValidationReport,
+    json: Bool
+  ) {
+    if json {
+      printJSON(report)
+    } else if report.valid {
+      print("valid value-free protocol correlation fixture")
+    } else {
+      print("invalid value-free protocol correlation fixture")
+      for issue in report.issues {
+        print("  \(issue.path): \(issue.message) [\(issue.code)]")
+      }
+    }
+    if !report.valid {
+      Foundation.exit(2)
+    }
   }
 
   private static func validateSpec(_ arguments: [String], json: Bool) throws {
@@ -173,6 +210,8 @@ struct PowerVPNCommand {
         probe [--timeout N]    Read SSH banners from thu21 and thu52
         diagnose              Run status and probe together
         oracle [inventory]     Read-only vendor helper and protocol inventory
+        oracle correlate <value-free-trace.json>
+                               Validate metadata-only control/XPC correlation
         spec validate-redacted <path>
                                Validate a commit-safe redacted TunnelSpec fixture
 

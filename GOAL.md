@@ -7,8 +7,8 @@ repository: /Users/larry_1/Opensource/powervpn-cli
 scratch_root: /Users/larry_1/scratch-data/powervpn-strongswan
 upstream_target: strongSwan 6.0.7
 vendor_compatibility_baseline: strongSwan 5.8.0
-current_checkpoint: 4a-expandrule-wire-syntax
-immediate_next: implement-and-verify-offline-expandrule-codec
+current_checkpoint: 4b-semantic-promotion
+immediate_next: apply-two-evidence-class-semantic-promotion-gate
 next_approval_gate: checkpoint-7-live-backend
 review_policy: checkpoint-gated-risk-weighted
 commit_policy: checkpoint-squash
@@ -488,7 +488,7 @@ Surge coexistence、server interoperability。
 以后不得重新把完整日志载入 String，也不得把测试数量 `19` 固定成产品
 contract。
 
-### Checkpoint 4A — expandrule wire syntax and strict codec — IN PROGRESS
+### Checkpoint 4A — expandrule wire syntax and strict codec — PASS
 
 目的：恢复并实现 **wire syntax**，不提前给 opaque field 绑定未经证实的业务
 语义。
@@ -529,7 +529,7 @@ contract。
 验收：targeted codec suite、完整 strongSwan relevant tests、artifact diff 和
 secret scan PASS；schema/tests 足以解释 wire syntax，不依赖 raw secret capture。
 
-### Checkpoint 5 — control-plane and XPC semantic correlation
+### Checkpoint 5 — control-plane and XPC semantic correlation — PASS
 
 经用户合法登录或复用合法现有 session，只记录：
 

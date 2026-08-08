@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "fixtureClass": "value_free_protocol_correlation",
+  "redactionMode": "metadata_only_at_collection",
+  "source": "runtime_metadata",
+  "containsSecrets": false,
+  "containsReplayableCapture": false,
+  "events": [
+    {
+      "sequence": 1,
+      "relativeMilliseconds": 12734,
+      "boundary": "control_plane",
+      "transport": "https",
+      "direction": "client_to_server",
+      "kind": "request",
+      "operation": "session_check",
+      "method": "GET",
+      "pathTemplate": "/vpn/user/check/session",
+      "evidenceClass": "runtime_metadata",
+      "confidence": "confirmed",
+      "fields": [
+        {
+          "name": "key",
+          "type": "string",
+          "length": 6,
+          "lengthUnit": "bytes",
+          "order": 1,
+          "evidenceClass": "runtime_metadata",
+          "confidence": "confirmed"
+        }
+      ],
+      "transitions": []
+    },
+    {
+      "sequence": 2,
+      "relativeMilliseconds": 13042,
+      "boundary": "control_plane",
+      "transport": "https",
+      "direction": "server_to_client",
+      "kind": "response",
+      "operation": "session_check",
+      "method": "GET",
+      "pathTemplate": "/vpn/user/check/session",
+      "statusCode": 200,
+      "evidenceClass": "runtime_metadata",
+      "confidence": "confirmed",
+      "fields": [],
+      "transitions": []
+    },
+    {
+      "sequence": 3,
+      "relativeMilliseconds": 168111,
+      "boundary": "xpc",
+      "transport": "xpc",
+      "direction": "gui_to_helper",
+      "kind": "call",
+      "operation": "resource_toggle_nc",
+      "helperFamily": "charon",
+      "evidenceClass": "runtime_metadata",
+      "confidence": "confirmed",
+      "fields": [
+        {
+          "name": "type",
+          "type": "string",
+          "order": 1,
+          "evidenceClass": "runtime_metadata",
+          "confidence": "inferred"
+        },
+        {
+          "name": "rpc",
+          "type": "string",
+          "order": 2,
+          "evidenceClass": "runtime_metadata",
+          "confidence": "inferred"
+        },
+        {
+          "name": "updown",
+          "type": "boolean",
+          "order": 3,
+          "evidenceClass": "runtime_metadata",
+          "confidence": "inferred"
+        },
+        {
+          "name": "kDeleteActionKey",
+          "type": "string",
+          "length": 7,
+          "lengthUnit": "bytes",
+          "order": 4,
+          "evidenceClass": "runtime_metadata",
+          "confidence": "confirmed"
+        }
+      ],
+      "transitions": []
+    }
+  ]
+}
