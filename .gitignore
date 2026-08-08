@@ -1,9 +1,11 @@
 .build/
 .swiftpm/
+__pycache__/
 .DS_Store
 build/
 prefix/
 secrets/
+runtime/
 
 # Raw captures and private fixtures may contain credentials or session material.
 captures/*.pcap

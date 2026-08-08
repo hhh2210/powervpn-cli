@@ -51,10 +51,18 @@ upstream strongSwan 6.0.7.
   `load-conn` request matches the official Python VICI encoder. This does not
   prove live vendor differential behavior or server acceptance, both of which
   remain unproven.
-- A separate non-root daemon smoke remains **BLOCKED**: its first VICI `version`
-  request timed out before `load-conn`. It was cleaned up without a new utun or
-  residual process/socket. This blocker is outside deterministic dry-run
-  acceptance and remains the next bounded control-path task.
+- CP7A is **PASS (local runtime, no backend/server)**. The old VICI
+  timeout was caused by a four-worker pool fully occupied by long-running
+  CRITICAL jobs. With five workers, the official 6.0.7 Python client and the
+  Swift client receive byte-identical `version` responses from the same daemon,
+  then both complete a credential-free synthetic load/list/unload lifecycle.
+  The accepted run used ephemeral ports and a fake kernel, created no route or
+  utun, preserved Surge/default-route/DNS, and left no generation-owned residue.
+  Its one integrated review was closed by rejecting streamed command failures,
+  preserving ownership state on unexpected cleanup residue, and detecting
+  orphan fixed sockets and generation directories.
+- CP7B remains behind an explicit Live Approval Gate. No privileged backend,
+  IKE SA, server traffic, credential handoff, or resource data path has passed.
 
 The target is therefore:
 
@@ -105,11 +113,16 @@ swift run powervpn oracle correlate fixtures/redacted/protocol-correlation-value
 swift run powervpn oracle correlate fixtures/redacted/protocol-correlation-runtime-metadata-v1.json --json
 swift run powervpn spec validate-redacted fixtures/redacted/tunnel-spec.example.json
 swift run powervpn spec vici-dry-run fixtures/redacted/tunnel-spec.vici-dry-run.json --json
+swift run powervpn vici version --socket <scratch-charon.vici> --timeout-ms 2000 --json
+swift run powervpn vici cp7a-smoke --socket <scratch-charon.vici> --timeout-ms 2000 --json
 ```
 
-All current commands are read-only. The old `reconnect` command was removed
-because terminating and relaunching the vendor GUI automates a workaround; it
-does not advance the native replacement.
+The VICI runtime commands connect only to an explicitly supplied local socket;
+`cp7a-smoke` loads and removes one RFC-5737 synthetic config with
+`start_action=none`, no credential, and no initiation. Other CLI commands are
+read-only. The old `reconnect` command was removed because terminating and
+relaunching the vendor GUI automates a workaround; it does not advance the
+native replacement.
 
 ## Repository map
 
@@ -135,6 +148,7 @@ file "$BIN"
 scripts/verify_checkpoint.sh 4a
 scripts/verify_checkpoint.sh 5
 scripts/verify_checkpoint.sh 6
+scripts/verify_checkpoint.sh 7a
 ```
 
 The Swift package has one executable product, `powervpn`, and one reusable

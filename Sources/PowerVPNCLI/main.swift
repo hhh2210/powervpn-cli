@@ -37,6 +37,8 @@ struct PowerVPNCommand {
       try runOracle(arguments, json: json)
     case "spec":
       try runSpec(arguments, json: json)
+    case "vici":
+      try runVICICommand(arguments, json: json)
     case "help", "--help", "-h":
       printUsage()
     default:
@@ -232,6 +234,10 @@ struct PowerVPNCommand {
                                Validate a commit-safe redacted TunnelSpec fixture
         spec vici-dry-run <path>
                                Build and hash a pure-Swift VICI load-conn payload
+        vici version --socket <path> [--timeout-ms N]
+                               Run a value-free version request against charon
+        vici cp7a-smoke --socket <path> [--timeout-ms N]
+                               Run bounded synthetic load/list/unload over VICI
 
       Options:
         --json                 Emit JSON

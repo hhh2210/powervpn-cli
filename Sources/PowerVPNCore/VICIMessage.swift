@@ -14,7 +14,7 @@ public indirect enum VICIElement: Equatable, Sendable {
     .list(name: name, values: values.map { Data($0.utf8) })
   }
 
-  fileprivate var name: String {
+  var name: String {
     switch self {
     case .section(let name, _), .keyValue(let name, _), .list(let name, _):
       return name

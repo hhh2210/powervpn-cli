@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "fixtureClass": "cp7a_vici_runtime_summary",
+  "evidenceLevel": "L5",
+  "source": "bounded_unprivileged_local_runtime",
+  "containsSecrets": false,
+  "containsReplayableCapture": false,
+  "containsRawRoutes": false,
+  "containsServerEndpoint": false,
+  "lockedAnchors": {
+    "repositoryCommit": "6122825e37d5061c94d2e1b4e7a88cadcd354e04",
+    "strongSwanCommit": "67c9810900e2d8486cb3b11495a8362433494ca0",
+    "strongSwanPatchSHA256": "6e4c609240ae2a1996a3a547cede72ac1be7121922aa6f576687632609f34213"
+  },
+  "runtime": {
+    "version": "6.0.7",
+    "architecture": "arm64",
+    "binarySHA256": "a2f6813d3c21ed8f907072754051d40afb2630ffc7101dd40576fa0c81fdfc2a",
+    "scratchPiddir": true,
+    "fakeKernel": true,
+    "ephemeralIKEPorts": true,
+    "serverTraffic": false,
+    "credentialLoaded": false
+  },
+  "timeoutDiagnosis": {
+    "lastGoodState": "unix_socket_listening_and_client_connect_completed",
+    "firstBadEvent": "first_vici_version_response_header_timeout",
+    "cause": "four_worker_pool_exhausted_by_long_running_critical_jobs",
+    "thread4": {
+      "officialClientResult": "timeout_before_response_header",
+      "swiftClientResult": "timeout_before_response_header",
+      "sameBinary": true,
+      "sameDaemonWindow": true,
+      "cleanTeardown": true
+    },
+    "thread5": {
+      "officialClientResult": "command_response",
+      "swiftClientResult": "command_response",
+      "sameBinary": true,
+      "sameDaemonWindow": true
+    }
+  },
+  "officialOracle": {
+    "implementation": "strongSwan_6.0.7_python_vici",
+    "moduleRelativePath": "vici/protocol.py",
+    "moduleSHA256": "f86247d58ce36a84a651bc7fcce9b5acd789b185c056e8fc6dc7015bfc07d3a5"
+  },
+  "versionExchange": {
+    "requestPayloadBytes": 9,
+    "requestWireBytes": 13,
+    "requestPayloadSHA256": "6f16c46a69a0dec36d5dbc94ee213c083ee0e2b2082a8ba4e1ba0885054e58bf",
+    "responseOperation": 1,
+    "responsePayloadBytes": 83,
+    "responseWireBytes": 87,
+    "responsePayloadSHA256": "17c180686f2bf41c5b6de883424758f647a134eb977f1fdb96799464c4bc7ec9",
+    "responseKeyNames": [
+      "daemon",
+      "version",
+      "sysname",
+      "release",
+      "machine"
+    ],
+    "officialAndSwiftExactAgreement": true
+  },
+  "syntheticLifecycle": {
+    "profile": "rfc5737_no_start_action_no_credential",
+    "daemonBaselineConnectionEventCount": 1,
+    "afterLoadConnectionEventCount": 2,
+    "afterLoadSyntheticMatches": 1,
+    "afterUnloadConnectionEventCount": 1,
+    "afterUnloadSyntheticMatches": 0,
+    "officialClientPass": true,
+    "swiftClientPass": true,
+    "initiateCalled": false,
+    "installCalled": false,
+    "credentialRead": false,
+    "credentialSerialized": false
+  },
+  "safetyAndCleanup": {
+    "rootUsed": false,
+    "productionIKEPortsBound": false,
+    "syntheticRouteObserved": false,
+    "newUtunObserved": false,
+    "defaultRouteAndDNSStableInAcceptedRun": true,
+    "surgeProcessStableInAcceptedRun": true,
+    "surgeGUIExtensionAndHelperStableInAcceptedRun": true,
+    "generationOwnedResidue": false,
+    "failedStartSignalsBoundedAndChildReaped": true,
+    "unexpectedGenerationResiduePreservesState": true,
+    "orphanFixedSocketRejected": true,
+    "orphanGenerationDirectoryRejected": true,
+    "globalRouteTableHashEqual": false,
+    "globalRouteTableHashIsInformational": true
+  },
+  "notProven": [
+    "privileged_backend",
+    "kernel_sa_or_policy_installation",
+    "server_interoperability",
+    "credential_handoff",
+    "ike_sa",
+    "child_sa",
+    "addrule_server_acceptance",
+    "resource_route_or_data_path",
+    "recovery"
+  ]
+}

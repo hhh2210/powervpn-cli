@@ -342,3 +342,61 @@ state.
 
 Approval required: no for the bounded diagnosis; explicit approval remains
 required before any Checkpoint 7 live-backend action.
+
+## 2026-08-08 — Checkpoint 7A
+
+State: PASS (local runtime only). Workflow state: WAITING FOR APPROVAL at Live
+Approval Gate 1.
+
+Verified: The locked arm64 CP6 `charon` now has a real VICI control path. The
+old timeout was causally isolated to four workers being occupied by four
+long-running CRITICAL jobs. Changing only `threads=4` to `threads=5` changed
+both official-Python and Swift clients from response-header timeout to the same
+valid `version` response on the same daemon/socket window. Both clients then
+completed the credential-free RFC-5737 load/list/unload lifecycle and restored
+the daemon baseline.
+
+Evidence: [`../evidence/vici-runtime-diagnosis.md`](../evidence/vici-runtime-diagnosis.md),
+[`../evidence/live-test-plan.md`](../evidence/live-test-plan.md),
+[`../evidence/rollback.md`](../evidence/rollback.md), and
+[`../../fixtures/redacted/vici-runtime-cp7a-summary-v1.json`](../../fixtures/redacted/vici-runtime-cp7a-summary-v1.json).
+This is L5 local-runtime evidence, not privileged-backend or server evidence.
+
+Canonical commit: this checkpoint commit. Locked strongSwan runtime commit
+`67c9810900e2d8486cb3b11495a8362433494ca0`; arm64 runtime binary SHA-256
+`a2f6813d3c21ed8f907072754051d40afb2630ffc7101dd40576fa0c81fdfc2a`.
+
+Changed files: framed Unix-domain VICI transport/session/runtime probe, thin CLI
+commands, official 6.0.7 Python runtime oracle, pinned scratch-piddir build,
+generation-owned launch/stop/snapshot/assert scripts, tests, value-free fixture,
+and evidence/rollback documentation. CP6 strongSwan source and patch anchors are
+unchanged.
+
+Tests/commands: `scripts/verify_checkpoint.sh 7a` exit 0; candidate run had 25
+targeted VICI tests and 74 full Swift tests PASS, arm64 build PASS, shell
+negative tests PASS, strict Swift format PASS, Gitleaks PASS, and diff check
+PASS. Post-review affected validation added a sixth session test, reran the
+lifecycle negative suite, brought the targeted VICI total to 26/26, and passed
+a bounded unprivileged `start -> version -> stop` cleanup smoke.
+
+Review lane and result: Exactly one integrated review ran. It found three
+direct issues: streamed terminal `success=no` was ignored, failed-start cleanup
+did not explicitly wait/reap, and missing state could mask a fixed socket or
+generation-directory residue. All were fixed with fail-closed tests. No second
+or unrelated history review ran.
+
+Safety/cleanup: All accepted runs were unprivileged, fake-kernel, credential-free,
+serverless, and on ephemeral ports. No SA, policy, route, utun, production IKE
+port, PowerVPN process, or Surge configuration was changed. Final teardown has
+no state, PID file, fixed socket, generation directory, or native process.
+
+Remaining: A privileged macOS backend, SA/policy installation, server
+interoperability, credential handoff, IKE/CHILD SA, ADDRULE acceptance, resource
+route/data path, and recovery all remain unproven. None is implied by CP7A.
+
+Next command: none until explicit CP7B approval. The proposed window is a
+serverless PF_KEY/PF_ROUTE smoke with random high ports, at most two launches
+and five minutes, native Touch ID authorization, PowerVPN and Surge kept
+running, and mandatory generation-owned rollback.
+
+Approval required: yes, before any CP7B implementation or privileged launch.
