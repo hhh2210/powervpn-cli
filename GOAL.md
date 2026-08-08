@@ -7,8 +7,8 @@ repository: /Users/larry_1/Opensource/powervpn-cli
 scratch_root: /Users/larry_1/scratch-data/powervpn-strongswan
 upstream_target: strongSwan 6.0.7
 vendor_compatibility_baseline: strongSwan 5.8.0
-current_checkpoint: 6-patch-skeleton-vici-dry-run
-immediate_next: integrate-neutral-expandrule-codec-with-task-and-vici-dry-run
+current_checkpoint: 7-live-backend-approval-prep
+immediate_next: diagnose-vici-version-timeout-and-write-live-gate-artifacts
 next_approval_gate: checkpoint-7-live-backend
 review_policy: checkpoint-gated-risk-weighted
 commit_policy: checkpoint-squash
@@ -57,6 +57,40 @@ watchdog 或重启 GUI 包装成修复**的前提下，在当前 Apple Silicon M
 > ADDRULE/DELRULE payload、IKEv1 task 时序和 resource data path？
 
 “只编译出 strongSwan”不是完成条件。
+
+### Protocol fidelity invariant：这是兼容性移植，不是协议设计
+
+1. **MUST NOT add/remove/reorder/normalize/reinterpret/symmetrize.** 已观察
+   payload、field、byte order、HASH coverage、request/revoke asymmetry 不得为了
+   API 整洁、RFC 习惯或本地测试方便而增删、重排、归一化、重解释或
+   对称化。
+2. **Every outbound byte MUST have evidence.** 每个可能影响服务端解析、
+   HASH/认证或状态转移的 byte，都必须可追溯到 value-free vendor
+   serializer/HASH-input differential、受保护 reference vector，或经批准的
+   server-acceptance 结果。
+3. **Unknown stays opaque.** 证据未提升的 length-delimited 字段必须保持
+   `opaque`/neutral；不得发明业务名称、编码转换、默认值或跨字段关系。
+4. **Parse != accept != emit.** structural parser 只有界、无损地保留
+   observed variants；canonical compatibility profile 才按
+   direction/dialect/family/exchange/state 决定可否接受或发送。
+5. **The private predicate MUST be complete.** 仅当完整、明确的 private
+   context predicate 成立时才进入移植分支；谓词之外的 payload order、
+   HASH、message rules 和返回值必须与 unmodified upstream 一致。
+6. **Same-implementation round-trip proves self-consistency only.** 同一份新代码
+   generate/verify 自己的向量不是 vendor oracle，不得据此标记 compatibility PASS。
+7. **Observed vendor behavior outranks standards cleanup.** vendor static/runtime 证据
+   与通用 RFC/upstream 直觉冲突时，compatibility profile 以前者为准；标准只用于
+   解释，不得“修正”已观察 wire。
+8. **Wire-neutral safety is allowed; wire-visible improvement/generalization is
+   forbidden.** bounds、memory safety、secret hygiene、fail-closed 等不改变 wire 的
+   安全加固可以加入；更强 proposal、新 fallback、自动 normalization、更宽泛发送
+   等 wire-visible “改进”或泛化禁止进入 compatibility profile。
+9. **Owned internals may be refactored.** 自有 GUI、XPC/control schema、helper 名称、
+   类结构和内部状态机可以重构；必须一致的是 server-observable wire bytes、
+   时序和状态效果。
+10. **Intentional divergence MUST live outside the compatibility profile.** 实验性
+    扩展必须独立 feature gate、default off，且不能被 canonical encoder/profile 或
+    默认 runtime 路径误启用。
 
 ## 2. Verifiable stopping conditions
 
@@ -145,6 +179,12 @@ Goal 只能在下列两个终态之一完全满足后结束。
   `AES_CBC_128/HMAC_SHA1_96/PRF_HMAC_SHA1/MODP_1024`；
 - 已观察 ESP proposal：`AES_CBC_128/HMAC_SHA1_96/NO_EXT_SEQ`；
 - 标准 IKE_SA 和 base CHILD_SA 先建立，随后发送 ADDRULE；
+- vendor `_get_hash_phase2` at `0x10014fa70` 没有 expandrule/custom HASH
+  branch；
+- vendor Quick Mode `_build_i` state 0 先构建标准 SA/NONCE/TS，state 1
+  才追加 ADDRULE；
+- 因此已观察 `[HASH ADDRULE]` 使用标准 Quick Mode `HASH(3) =
+  PRF(SKEYID_a, 0 | M-ID | Ni_b | Nr_b)`；ADDRULE bytes 不在 HASH input 内；
 - 当前成功日志没有观察到 XAuth 或 Mode Config transaction；
 - 二进制中存在 XAuth/Mode Config code 只代表 static capability，不能写成
   negotiated behavior；
@@ -568,20 +608,59 @@ revoke value 均保留 neutral/opaque。CP4A codec、patch 与 synthetic bytes �
 - `fixtures/redacted/semantic-promotion-gate-v1.json`；
 - `scripts/verify_checkpoint.sh 4b`。
 
-### Checkpoint 6 — 6.0.7 patch skeleton + VICI dry run
+### Checkpoint 6 — LeadSec compatibility port — PASS (offline compatibility-port checkpoint)
 
 任务：
 
 - 建立可针对 official 6.0.7 重放的最小 patch series；
 - 加入 payload factory/message rules/task skeleton；
+- 精确复现 Quick Mode state 0 标准 SA/NONCE/TS、state 1 ADDRULE 调度，复用
+  upstream HASH(3)，不增加 custom keymat HASH branch；
 - 将 synthetic TunnelSpec 转为结构化 VICI load-conn；
 - 不解析人类可读 `swanctl` 输出作为核心 API；
 - random ports + scratch VICI socket；
 - credential reference 缺失时安全失败；
-- round-trip proposal、identity、selector 和 resource rule metadata；
+- round-trip proposal、identity 和 selector；仅在本地报告未提升的 resource
+  rule metadata，不把它写入 VICI 或 private wire；
 - dry run 不创建 SA、route、utun。
 
-验收：codec/tests 和 VICI dry run PASS，或精确定位第一个 6.0.7 API 阻塞。
+验收：offline implementation/self-consistency、VICI dry run 与 exact reference
+test 必须共同证明 state-0/state-1 scheduling、标准 HASH(3) input 与
+ADDRULE-byte exclusion，并证明完整 private predicate 之外的 upstream 行为不变。
+该 test 必须用固定
+SKEYID_a/M-ID/Ni/Nr 独立计算 expected HASH(3)，验证 state 0 含标准
+SA/NONCE/TS、state 1 wire order 为 `[HASH ADDRULE]`，ADDRULE-only mutation
+不改变 HASH，而 Ni/Nr mutation 会改变 HASH。
+
+结果：**PASS (offline compatibility-port checkpoint)**。upstream implementation
+commit 为 `67c9810900e2d8486cb3b11495a8362433494ca0`，0002 patch SHA-256 为
+`6e4c609240ae2a1996a3a547cede72ac1be7121922aa6f576687632609f34213`；
+patch replay tree equality PASS。
+
+新的 vendor static evidence 已否定早先的 custom-only HASH 路径：
+`_get_hash_phase2` at `0x10014fa70` 没有 custom branch；Quick Mode
+`_build_i` 在 state 0 构建标准 SA/NONCE/TS，state 1 才追加 ADDRULE。
+移植必须保留标准 `HASH(3) = PRF(SKEYID_a, 0 | M-ID | Ni_b | Nr_b)`，
+且排除 ADDRULE bytes。已有 `[HASH ADDRULE]` generate/verify 只是被新证据
+推翻的旧 self-consistency 实验，不能作为 compatibility evidence。
+
+`fixtures/redacted/leadsec-qm-hash3-static-vector-v1.json` 固化 value-free vendor
+static HASH(3) contract；独立 synthetic reference 与实现输出一致。targeted
+expandrule suite 39/39、full libcharon 5/5、no-IKEv1 build PASS；CP4A base 到
+post-fix commit 的 `keymat_v1.c` 与 `task_manager_v1.c` 均为 zero diff，证明没有
+custom keymat branch 或 task-manager wiring。官方 stock VICI byte oracle 继续
+PASS；其 335-byte request 与 private IKE HASH 相互独立。
+
+这个 PASS 只覆盖 offline compatibility-port checkpoint：static contract、独立
+synthetic reference、replayable patch、codec/task 与 deterministic VICI dry run。
+live vendor differential 和 server acceptance 仍未验证，不能称为 live/server
+compatibility PASS。
+一次隔离的非 root daemon smoke 仍为 **BLOCKED**，精确阻塞在首个 VICI `version` response
+timeout；未发送 `load-conn`，已完整清理，不能写成 daemon/VICI PASS。该
+daemon blocker 不属于 deterministic VICI dry-run acceptance。完整证据和
+replayable patch-series record 见 `docs/evidence/checkpoint-6-validation.md` 与
+`patches/strongswan-6.0.7/series.json`。VICI timeout 是独立 control-path blocker，
+不能替代 private wire compatibility oracle。
 
 ### Live Approval Gate
 

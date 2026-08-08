@@ -25,7 +25,24 @@ public struct TunnelSpecValidationReport: Codable, Equatable, Sendable {
 }
 
 public enum TunnelSpecRedactedValidator {
+  public static let maximumDocumentBytes = 1_048_576
+
+  public static func validate(contentsOf url: URL) throws -> TunnelSpecValidationReport {
+    do {
+      return validate(data: try readBoundedDocument(contentsOf: url))
+    } catch TunnelSpecDocumentReadError.sizeLimit {
+      return TunnelSpecValidationReport(issues: [
+        issue("$", "size_limit", "document exceeds the redacted TunnelSpec size limit")
+      ])
+    }
+  }
+
   public static func validate(data: Data) -> TunnelSpecValidationReport {
+    guard data.count <= maximumDocumentBytes else {
+      return TunnelSpecValidationReport(issues: [
+        issue("$", "size_limit", "document exceeds the redacted TunnelSpec size limit")
+      ])
+    }
     do {
       return validate(try StrictTunnelSpecDecoder.decode(data))
     } catch {
@@ -50,7 +67,7 @@ public enum TunnelSpecRedactedValidator {
     }
 
     requirePlaceholder(spec.gateway, at: "gateway", issues: &issues)
-    requirePlaceholder(
+    requireMachineAuthentication(
       spec.authentication.machine,
       at: "authentication.machine",
       issues: &issues
@@ -119,6 +136,19 @@ public enum TunnelSpecRedactedValidator {
     }
 
     return TunnelSpecValidationReport(issues: issues)
+  }
+
+  private static func requireMachineAuthentication(
+    _ value: String,
+    at path: String,
+    issues: inout [TunnelSpecValidationIssue]
+  ) {
+    guard value.lowercased() == "psk" || isSafePlaceholder(value) else {
+      issues.append(
+        issue(path, "unsafe_value", "must be psk, unknown, redacted, or a safe placeholder")
+      )
+      return
+    }
   }
 
   private static func requireReference(
@@ -203,56 +233,18 @@ public enum TunnelSpecRedactedValidator {
   {
     TunnelSpecValidationIssue(path: path, code: code, message: message)
   }
-}
 
-private enum StrictTunnelSpecDecoder {
-  private static let requiredRootKeys: Set<String> = [
-    "schemaVersion", "gateway", "ikeVersion", "exchangeMode", "authentication",
-    "localIdentifier", "remoteIdentifier", "natTraversal", "ikeProposal", "espProposal",
-    "modeConfig", "vendorIds", "routes", "resourceOperations", "resources",
-  ]
-  private static let optionalRootKeys: Set<String> = [
-    "tunnelName", "virtualIP", "sessionBinding", "mapID", "credentialReference",
-  ]
-  private static let authenticationKeys: Set<String> = ["machine", "extended"]
-  private static let referenceKeys: Set<String> = ["storage", "identifier"]
-  private static let routeKeys: Set<String> = ["identifier", "destination"]
-  private static let requiredResourceKeys: Set<String> = ["name", "remoteTrafficSelectors"]
-  private static let optionalResourceKeys: Set<String> = ["ruleIdentifier"]
-
-  static func decode(_ data: Data) throws -> TunnelSpec {
-    let object = try JSONSerialization.jsonObject(with: data)
-    guard let root = object as? [String: Any],
-      ClosedJSONShape.hasOnlyAllowedKeys(
-        root,
-        required: requiredRootKeys,
-        optional: optionalRootKeys
-      ),
-      ClosedJSONShape.hasExactObject(root["authentication"], keys: authenticationKeys),
-      ClosedJSONShape.hasOptionalExactObject(root, key: "sessionBinding", keys: referenceKeys),
-      ClosedJSONShape.hasOptionalExactObject(
-        root,
-        key: "credentialReference",
-        keys: referenceKeys
-      ),
-      let routes = root["routes"] as? [[String: Any]],
-      routes.allSatisfy({ Set($0.keys) == routeKeys }),
-      let resources = root["resources"] as? [[String: Any]],
-      resources.allSatisfy({
-        ClosedJSONShape.hasOnlyAllowedKeys(
-          $0,
-          required: requiredResourceKeys,
-          optional: optionalResourceKeys
-        )
-      })
-    else {
-      throw TunnelSpecDecodingError.invalidShape
+  static func readBoundedDocument(contentsOf url: URL) throws -> Data {
+    let handle = try FileHandle(forReadingFrom: url)
+    defer { try? handle.close() }
+    let data = try handle.read(upToCount: maximumDocumentBytes + 1) ?? Data()
+    guard data.count <= maximumDocumentBytes else {
+      throw TunnelSpecDocumentReadError.sizeLimit
     }
-    return try JSONDecoder().decode(TunnelSpec.self, from: data)
+    return data
   }
-
 }
 
-private enum TunnelSpecDecodingError: Error {
-  case invalidShape
+enum TunnelSpecDocumentReadError: Error {
+  case sizeLimit
 }

@@ -36,7 +36,7 @@ struct PowerVPNCommand {
     case "oracle":
       try runOracle(arguments, json: json)
     case "spec":
-      try validateSpec(arguments, json: json)
+      try runSpec(arguments, json: json)
     case "help", "--help", "-h":
       printUsage()
     default:
@@ -89,24 +89,40 @@ struct PowerVPNCommand {
     }
   }
 
-  private static func validateSpec(_ arguments: [String], json: Bool) throws {
-    guard arguments.count >= 3, arguments[1] == "validate-redacted" else {
-      throw CLIError.invalidArguments("usage: powervpn spec validate-redacted <path> [--json]")
+  private static func runSpec(_ arguments: [String], json: Bool) throws {
+    guard arguments.count >= 3 else {
+      throw CLIError.invalidArguments(
+        "usage: powervpn spec <validate-redacted|vici-dry-run> <path> [--json]"
+      )
     }
-    let data = try Data(contentsOf: URL(fileURLWithPath: arguments[2]))
-    let report = TunnelSpecRedactedValidator.validate(data: data)
-    if json {
-      printJSON(report)
-    } else if report.valid {
-      print("valid redacted TunnelSpec fixture")
-    } else {
-      print("invalid redacted TunnelSpec fixture")
-      for issue in report.issues {
-        print("  \(issue.path): \(issue.message) [\(issue.code)]")
+    let url = URL(fileURLWithPath: arguments[2])
+    switch arguments[1] {
+    case "validate-redacted":
+      let report = try TunnelSpecRedactedValidator.validate(contentsOf: url)
+      if json {
+        printJSON(report)
+      } else if report.valid {
+        print("valid redacted TunnelSpec fixture")
+      } else {
+        print("invalid redacted TunnelSpec fixture")
+        for issue in report.issues {
+          print("  \(issue.path): \(issue.message) [\(issue.code)]")
+        }
       }
-    }
-    if !report.valid {
-      Foundation.exit(2)
+      if !report.valid {
+        Foundation.exit(2)
+      }
+    case "vici-dry-run":
+      let report = try TunnelSpecVICIDryRun.build(contentsOf: url).report
+      if json {
+        printJSON(report)
+      } else {
+        print("VICI load-conn dry run: \(report.payloadByteCount) bytes")
+        print("sha256: \(report.payloadSHA256)")
+        print("side effects: none")
+      }
+    default:
+      throw CLIError.unknownSubcommand(command: "spec", subcommand: arguments[1])
     }
   }
 
@@ -214,6 +230,8 @@ struct PowerVPNCommand {
                                Validate metadata-only control/XPC correlation
         spec validate-redacted <path>
                                Validate a commit-safe redacted TunnelSpec fixture
+        spec vici-dry-run <path>
+                               Build and hash a pure-Swift VICI load-conn payload
 
       Options:
         --json                 Emit JSON

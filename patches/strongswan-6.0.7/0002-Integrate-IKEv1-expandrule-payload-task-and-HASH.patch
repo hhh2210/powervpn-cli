@@ -1,0 +1,2262 @@
+From 67c9810900e2d8486cb3b11495a8362433494ca0 Mon Sep 17 00:00:00 2001
+From: hhh2210 <hzy2210@gmail.com>
+Date: Sat, 8 Aug 2026 19:05:45 +0800
+Subject: [PATCH] Integrate IKEv1 expandrule payload task and HASH
+
+- Register private IKEv1 payload types 17/18/19 with a raw-header wrapper while reusing the neutral CP4A codec.
+- Keep keymat_v1 unchanged and gate protected custom-only contexts onto existing Phase 2 HASH handling; Quick Mode ADDRULE is limited to the final third packet after SA/NONCE negotiation.
+- Add an unscheduled, fail-closed companion task plus direction/order negatives and a vendor-static HASH(3) reference-vector test.
+- NOTE: task-manager, VICI, SA, route, policy, utun, sender, and live-server integration remain intentionally disconnected.
+---
+ src/libcharon/Makefile.am                     |   4 +
+ src/libcharon/encoding/message.c              | 153 ++++++++-
+ .../encoding/payloads/expandrule_codec.h      |   7 +-
+ .../encoding/payloads/expandrule_payload.c    | 167 ++++++++++
+ .../encoding/payloads/expandrule_payload.h    |  73 +++++
+ src/libcharon/encoding/payloads/payload.c     |  32 +-
+ src/libcharon/encoding/payloads/payload.h     |  15 +
+ src/libcharon/sa/ikev1/tasks/expandrule.c     | 293 ++++++++++++++++++
+ src/libcharon/sa/ikev1/tasks/expandrule.h     |  75 +++++
+ src/libcharon/sa/ikev1/tasks/expandrule_qm.c  | 154 +++++++++
+ src/libcharon/sa/ikev1/tasks/expandrule_qm.h  |  42 +++
+ .../sa/ikev1/tasks/expandrule_task_payload.c  | 107 +++++++
+ .../sa/ikev1/tasks/expandrule_task_payload.h  |  27 ++
+ src/libcharon/sa/task.c                       |   3 +-
+ src/libcharon/sa/task.h                       |   2 +
+ src/libcharon/tests/Makefile.am               |   8 +-
+ .../suites/expandrule_hash_test_helpers.h     |  15 +
+ .../tests/suites/test_expandrule_codec.c      |   8 +
+ .../tests/suites/test_expandrule_hash.c       | 223 +++++++++++++
+ .../suites/test_expandrule_integration.c      |  76 +++++
+ .../suites/test_expandrule_message_context.c  | 122 ++++++++
+ .../tests/suites/test_expandrule_task.c       | 288 +++++++++++++++++
+ 22 files changed, 1886 insertions(+), 8 deletions(-)
+ create mode 100644 src/libcharon/encoding/payloads/expandrule_payload.c
+ create mode 100644 src/libcharon/encoding/payloads/expandrule_payload.h
+ create mode 100644 src/libcharon/sa/ikev1/tasks/expandrule.c
+ create mode 100644 src/libcharon/sa/ikev1/tasks/expandrule.h
+ create mode 100644 src/libcharon/sa/ikev1/tasks/expandrule_qm.c
+ create mode 100644 src/libcharon/sa/ikev1/tasks/expandrule_qm.h
+ create mode 100644 src/libcharon/sa/ikev1/tasks/expandrule_task_payload.c
+ create mode 100644 src/libcharon/sa/ikev1/tasks/expandrule_task_payload.h
+ create mode 100644 src/libcharon/tests/suites/expandrule_hash_test_helpers.h
+ create mode 100644 src/libcharon/tests/suites/test_expandrule_hash.c
+ create mode 100644 src/libcharon/tests/suites/test_expandrule_integration.c
+ create mode 100644 src/libcharon/tests/suites/test_expandrule_message_context.c
+ create mode 100644 src/libcharon/tests/suites/test_expandrule_task.c
+
+diff --git a/src/libcharon/Makefile.am b/src/libcharon/Makefile.am
+index 7d1946b..f5bb802 100644
+--- a/src/libcharon/Makefile.am
++++ b/src/libcharon/Makefile.am
+@@ -126,6 +126,7 @@ encoding/payloads/expandrule_client_codec.c \
+ encoding/payloads/expandrule_client_encode.c \
+ encoding/payloads/expandrule_revoke_codec.c \
+ encoding/payloads/expandrule_profile.c \
++encoding/payloads/expandrule_payload.c encoding/payloads/expandrule_payload.h \
+ sa/ikev1/keymat_v1.c sa/ikev1/keymat_v1.h \
+ sa/ikev1/iv_manager.c sa/ikev1/iv_manager.h \
+ sa/ikev1/task_manager_v1.c sa/ikev1/task_manager_v1.h \
+@@ -146,6 +147,9 @@ sa/ikev1/tasks/xauth.c sa/ikev1/tasks/xauth.h \
+ sa/ikev1/tasks/quick_mode.c sa/ikev1/tasks/quick_mode.h \
+ sa/ikev1/tasks/quick_delete.c sa/ikev1/tasks/quick_delete.h \
+ sa/ikev1/tasks/mode_config.c sa/ikev1/tasks/mode_config.h \
++sa/ikev1/tasks/expandrule.c sa/ikev1/tasks/expandrule.h \
++sa/ikev1/tasks/expandrule_qm.c sa/ikev1/tasks/expandrule_qm.h \
++sa/ikev1/tasks/expandrule_task_payload.c sa/ikev1/tasks/expandrule_task_payload.h \
+ processing/jobs/dpd_timeout_job.c processing/jobs/dpd_timeout_job.h \
+ processing/jobs/adopt_children_job.c processing/jobs/adopt_children_job.h
+ endif
+diff --git a/src/libcharon/encoding/message.c b/src/libcharon/encoding/message.c
+index 8da9a1d..87780cd 100644
+--- a/src/libcharon/encoding/message.c
++++ b/src/libcharon/encoding/message.c
+@@ -690,6 +690,9 @@ static payload_rule_t informational_i_rules_v1[] = {
+ 	{PLV1_NOTIFY,					0,	MAX_NOTIFY_PAYLOADS,	TRUE,	FALSE},
+ 	{PLV1_DELETE,					0,	MAX_DELETE_PAYLOADS,	TRUE,	FALSE},
+ 	{PLV1_VENDOR_ID,				0,	MAX_VID_PAYLOADS,		TRUE,	FALSE},
++	{PLV1_EXPANDRULE_LEGACY_REVOKE,	0,	1,						TRUE,	FALSE},
++	{PLV1_EXPANDRULE_ADD,			0,	1,						TRUE,	FALSE},
++	{PLV1_EXPANDRULE_DELETE,		0,	1,						TRUE,	FALSE},
+ };
+ 
+ /**
+@@ -700,6 +703,9 @@ static payload_order_t informational_i_order_v1[] = {
+ 	{PLV1_NOTIFY,					0},
+ 	{PLV1_DELETE,					0},
+ 	{PLV1_VENDOR_ID,				0},
++	{PLV1_EXPANDRULE_LEGACY_REVOKE,	0},
++	{PLV1_EXPANDRULE_ADD,			0},
++	{PLV1_EXPANDRULE_DELETE,		0},
+ };
+ 
+ /**
+@@ -737,6 +743,7 @@ static payload_rule_t quick_mode_i_rules[] = {
+ 	{PLV1_ID,						0,	2,						TRUE,	FALSE},
+ 	{PLV1_NAT_OA,					0,	2,						TRUE,	FALSE},
+ 	{PLV1_NAT_OA_DRAFT_00_03,		0,	2,						TRUE,	FALSE},
++	{PLV1_EXPANDRULE_ADD,			0,	1,						TRUE,	FALSE},
+ 	{PLV1_FRAGMENT,					0,	1,						FALSE,	TRUE},
+ };
+ 
+@@ -754,6 +761,7 @@ static payload_order_t quick_mode_i_order[] = {
+ 	{PLV1_ID,						0},
+ 	{PLV1_NAT_OA,					0},
+ 	{PLV1_NAT_OA_DRAFT_00_03,		0},
++	{PLV1_EXPANDRULE_ADD,			0},
+ 	{PLV1_FRAGMENT,					0},
+ };
+ 
+@@ -1110,6 +1118,119 @@ static payload_rule_t* get_payload_rule(private_message_t *this,
+ 	return NULL;
+ }
+ 
++/**
++ * Enforce the bounded private-payload contexts that payload_rule_t can't
++ * express (mutual exclusion and the augmented final Quick Mode packet).
++ *
++ * This is shared by outbound generation before HASH calculation and inbound
++ * verification after decryption.  Request/response is message-flow state and
++ * must not be interpreted as client/server actor direction.
++ */
++static status_t validate_expandrule_context(private_message_t *this,
++										 bool generating)
++{
++	enumerator_t *enumerator;
++	payload_t *payload;
++	size_t custom = 0, legacy = 0, hashes = 0, non_hash = 0;
++	bool add_only = TRUE, hash_order = TRUE;
++
++	enumerator = this->payloads->create_enumerator(this->payloads);
++	while (enumerator->enumerate(enumerator, &payload))
++	{
++		payload_type_t type = payload->get_type(payload);
++
++		if (type == PLV1_HASH)
++		{
++			hashes++;
++			if (non_hash)
++			{
++				hash_order = FALSE;
++			}
++			continue;
++		}
++		non_hash++;
++		if (type == PLV1_EXPANDRULE_LEGACY_REVOKE)
++		{
++			legacy++;
++		}
++		if (type == PLV1_EXPANDRULE_LEGACY_REVOKE ||
++			type == PLV1_EXPANDRULE_ADD || type == PLV1_EXPANDRULE_DELETE)
++		{
++			custom++;
++			add_only = add_only && type == PLV1_EXPANDRULE_ADD;
++		}
++	}
++	enumerator->destroy(enumerator);
++
++	if (!custom)
++	{
++		return SUCCESS;
++	}
++	if (this->major_version != IKEV1_MAJOR_VERSION)
++	{
++		return VERIFY_ERROR;
++	}
++	/* HASH is inserted by generate_message(), never by a task.  During parsing,
++	 * at most one HASH may precede the structural custom payload. */
++	if ((generating && hashes) || hashes > 1 || !hash_order ||
++		(generating && legacy))
++	{
++		return VERIFY_ERROR;
++	}
++	switch (this->exchange_type)
++	{
++		case QUICK_MODE:
++			/* LeadSec appends ADDRULE to the standard third Quick Mode packet.
++			 * HASH(3) is produced by the unmodified keymat after Ni/Nr negotiation. */
++			if (this->is_request && custom == 1 && non_hash == 1 && add_only &&
++				((generating && hashes == 0) || (!generating && hashes == 1)))
++			{
++				return SUCCESS;
++			}
++			break;
++		case INFORMATIONAL_V1:
++			/* Observed forms are custom-only requests and mutually exclusive. */
++			if (this->is_request && custom == 1 && non_hash == 1 &&
++				((generating && hashes == 0) || (!generating && hashes == 1)))
++			{
++				return SUCCESS;
++			}
++			break;
++		default:
++			break;
++	}
++	DBG1(DBG_ENC, "invalid private expandrule payload context");
++	return VERIFY_ERROR;
++}
++
++/** Whether a validated exchange contains any private expandrule payload. */
++static bool is_expandrule_exchange(private_message_t *this,
++									 exchange_type_t exchange)
++{
++	enumerator_t *enumerator;
++	payload_t *payload;
++	bool found = FALSE;
++
++	if (this->exchange_type != exchange)
++	{
++		return FALSE;
++	}
++	enumerator = this->payloads->create_enumerator(this->payloads);
++	while (enumerator->enumerate(enumerator, &payload))
++	{
++		payload_type_t type = payload->get_type(payload);
++
++		if (type == PLV1_EXPANDRULE_LEGACY_REVOKE ||
++			type == PLV1_EXPANDRULE_ADD || type == PLV1_EXPANDRULE_DELETE)
++		{
++			found = TRUE;
++			break;
++		}
++	}
++	enumerator->destroy(enumerator);
++	return found;
++}
++
+ METHOD(message_t, set_ike_sa_id, void,
+ 	private_message_t *this,ike_sa_id_t *ike_sa_id)
+ {
+@@ -1768,7 +1889,7 @@ static status_t generate_message(private_message_t *this, keymat_t *keymat,
+ 	chunk_t hash = chunk_empty;
+ 	ike_header_t *ike_header;
+ 	payload_t *payload, *next;
+-	bool encrypting = FALSE;
++	bool encrypting = FALSE, expandrule_protected, phase2_hash = FALSE;
+ 
+ 	if (this->exchange_type == EXCHANGE_TYPE_UNDEFINED)
+ 	{
+@@ -1789,6 +1910,12 @@ static status_t generate_message(private_message_t *this, keymat_t *keymat,
+ 		DBG1(DBG_ENC, "no message rules specified for this message type");
+ 		return NOT_SUPPORTED;
+ 	}
++	if (validate_expandrule_context(this, TRUE) != SUCCESS)
++	{
++		return VERIFY_ERROR;
++	}
++	expandrule_protected = is_expandrule_exchange(this, QUICK_MODE) ||
++						 is_expandrule_exchange(this, INFORMATIONAL_V1);
+ 
+ 	if (!this->sort_disabled)
+ 	{
+@@ -1805,6 +1932,7 @@ static status_t generate_message(private_message_t *this, keymat_t *keymat,
+ 			hash_payload = hash_payload_create(PLV1_HASH);
+ 			hash_payload->set_hash(hash_payload, hash);
+ 			this->payloads->insert_first(this->payloads, hash_payload);
++			phase2_hash = TRUE;
+ 			if (this->exchange_type == INFORMATIONAL_V1)
+ 			{
+ 				this->is_encrypted = encrypting = TRUE;
+@@ -1812,6 +1940,11 @@ static status_t generate_message(private_message_t *this, keymat_t *keymat,
+ 			chunk_free(&hash);
+ 		}
+ 	}
++	if (expandrule_protected && !phase2_hash)
++	{
++		DBG1(DBG_ENC, "private expandrule payload requires Phase 2 HASH state");
++		return VERIFY_ERROR;
++	}
+ 
+ 	if (this->major_version == IKEV2_MAJOR_VERSION)
+ 	{
+@@ -2747,6 +2880,10 @@ static status_t verify(private_message_t *this)
+ 	int i;
+ 
+ 	DBG2(DBG_ENC, "verifying message structure");
++	if (validate_expandrule_context(this, FALSE) != SUCCESS)
++	{
++		return VERIFY_ERROR;
++	}
+ 
+ 	/* check for payloads with wrong count */
+ 	for (i = 0; i < this->rule->rule_count; i++)
+@@ -2798,6 +2935,7 @@ METHOD(message_t, parse_body, status_t,
+ 	private_message_t *this, keymat_t *keymat)
+ {
+ 	status_t status = SUCCESS;
++	bool expandrule_protected = FALSE, phase2_hash = FALSE;
+ 
+ 	DBG2(DBG_ENC, "parsing body of message, first payload is %N",
+ 		 payload_type_names, this->first_payload);
+@@ -2834,6 +2972,8 @@ METHOD(message_t, parse_body, status_t,
+ 	{
+ 		return status;
+ 	}
++	expandrule_protected = is_expandrule_exchange(this, QUICK_MODE) ||
++						 is_expandrule_exchange(this, INFORMATIONAL_V1);
+ 
+ #if DEBUG_LEVEL >= 1
+ 	char str[BUF_LEN];
+@@ -2875,6 +3015,12 @@ METHOD(message_t, parse_body, status_t,
+ 				return FAILED;
+ 			}
+ 			chunk_free(&hash);
++			phase2_hash = TRUE;
++		}
++		if (expandrule_protected && !phase2_hash)
++		{
++			DBG1(DBG_ENC, "private expandrule payload missing Phase 2 HASH state");
++			return VERIFY_ERROR;
+ 		}
+ 		if (this->is_encrypted && this->exchange_type != INFORMATIONAL_V1)
+ 		{	/* message verified, confirm IV */
+@@ -2884,6 +3030,11 @@ METHOD(message_t, parse_body, status_t,
+ 			}
+ 		}
+ 	}
++	if (expandrule_protected && !phase2_hash)
++	{
++		DBG1(DBG_ENC, "private expandrule payload missing Phase 2 HASH state");
++		return VERIFY_ERROR;
++	}
+ 	return SUCCESS;
+ }
+ 
+diff --git a/src/libcharon/encoding/payloads/expandrule_codec.h b/src/libcharon/encoding/payloads/expandrule_codec.h
+index fa116a2..b51c015 100644
+--- a/src/libcharon/encoding/payloads/expandrule_codec.h
++++ b/src/libcharon/encoding/payloads/expandrule_codec.h
+@@ -21,12 +21,13 @@
+ #define EXPANDRULE_CODEC_H_
+ 
+ #include <library.h>
++#include <encoding/payloads/payload.h>
+ 
+ /** Private IKEv1 payload types used by the observed vendor protocol. */
+ enum {
+-	EXPANDRULE_PAYLOAD_LEGACY_REVOKE = 17,
+-	EXPANDRULE_PAYLOAD_ADD = 18,
+-	EXPANDRULE_PAYLOAD_DELETE = 19,
++	EXPANDRULE_PAYLOAD_LEGACY_REVOKE = PLV1_EXPANDRULE_LEGACY_REVOKE,
++	EXPANDRULE_PAYLOAD_ADD = PLV1_EXPANDRULE_ADD,
++	EXPANDRULE_PAYLOAD_DELETE = PLV1_EXPANDRULE_DELETE,
+ };
+ 
+ /** Local count cap plus inferred canonical profile limits, not wire limits. */
+diff --git a/src/libcharon/encoding/payloads/expandrule_payload.c b/src/libcharon/encoding/payloads/expandrule_payload.c
+new file mode 100644
+index 0000000..2f1d74d
+--- /dev/null
++++ b/src/libcharon/encoding/payloads/expandrule_payload.c
+@@ -0,0 +1,167 @@
++/*
++ * Copyright (C) 2026 Zhuoyuan Hao
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
++ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * for more details.
++ */
++
++#include <stddef.h>
++
++#include "expandrule_payload.h"
++
++typedef struct private_expandrule_payload_t private_expandrule_payload_t;
++
++/** Private generic-frame state. */
++struct private_expandrule_payload_t {
++	expandrule_payload_t public;
++	payload_type_t type;
++	uint8_t next_payload;
++	uint8_t raw_flags;
++	uint16_t payload_length;
++	chunk_t data;
++};
++
++/**
++ * Keep the complete second octet intact.  CHUNK_DATA is symbolic because its
++ * numeric encoding-rule value is not stable across strongSwan releases.
++ */
++static encoding_rule_t encodings[] = {
++	{ U_INT_8,          offsetof(private_expandrule_payload_t, next_payload) },
++	{ U_INT_8,          offsetof(private_expandrule_payload_t, raw_flags) },
++	{ PAYLOAD_LENGTH,   offsetof(private_expandrule_payload_t, payload_length) },
++	{ CHUNK_DATA,       offsetof(private_expandrule_payload_t, data) },
++};
++
++static bool is_expandrule_type(payload_type_t type)
++{
++	return type == PLV1_EXPANDRULE_LEGACY_REVOKE ||
++		   type == PLV1_EXPANDRULE_ADD ||
++		   type == PLV1_EXPANDRULE_DELETE;
++}
++
++METHOD(payload_t, verify, status_t,
++	private_expandrule_payload_t *this)
++{
++	if (!is_expandrule_type(this->type) ||
++		this->payload_length != sizeof(uint32_t) + this->data.len)
++	{
++		return FAILED;
++	}
++	return SUCCESS;
++}
++
++METHOD(payload_t, get_encoding_rules, int,
++	private_expandrule_payload_t *this, encoding_rule_t **rules)
++{
++	*rules = encodings;
++	return countof(encodings);
++}
++
++METHOD(payload_t, get_header_length, int,
++	private_expandrule_payload_t *this)
++{
++	return 4;
++}
++
++METHOD(payload_t, get_type, payload_type_t,
++	private_expandrule_payload_t *this)
++{
++	return this->type;
++}
++
++METHOD(payload_t, get_next_type, payload_type_t,
++	private_expandrule_payload_t *this)
++{
++	return this->next_payload;
++}
++
++METHOD(payload_t, set_next_type, void,
++	private_expandrule_payload_t *this, payload_type_t type)
++{
++	this->next_payload = type;
++}
++
++METHOD(payload_t, get_length, size_t,
++	private_expandrule_payload_t *this)
++{
++	return this->payload_length;
++}
++
++METHOD(expandrule_payload_t, get_raw_flags, uint8_t,
++	private_expandrule_payload_t *this)
++{
++	return this->raw_flags;
++}
++
++METHOD(expandrule_payload_t, get_data, chunk_t,
++	private_expandrule_payload_t *this)
++{
++	return this->data;
++}
++
++METHOD2(payload_t, expandrule_payload_t, destroy, void,
++	private_expandrule_payload_t *this)
++{
++	chunk_free(&this->data);
++	free(this);
++}
++
++expandrule_payload_t *expandrule_payload_create(payload_type_t type)
++{
++	private_expandrule_payload_t *this;
++
++	if (!is_expandrule_type(type))
++	{
++		return NULL;
++	}
++	INIT(this,
++		.public = {
++			.payload_interface = {
++				.verify = _verify,
++				.get_encoding_rules = _get_encoding_rules,
++				.get_header_length = _get_header_length,
++				.get_type = _get_type,
++				.get_next_type = _get_next_type,
++				.set_next_type = _set_next_type,
++				.get_length = _get_length,
++				.destroy = _destroy,
++			},
++			.get_raw_flags = _get_raw_flags,
++			.get_data = _get_data,
++			.destroy = _destroy,
++		},
++		.type = type,
++		.next_payload = PL_NONE,
++		.payload_length = 4,
++	);
++	return &this->public;
++}
++
++expandrule_payload_t *expandrule_payload_create_data(payload_type_t type,
++										 uint8_t raw_flags, chunk_t data)
++{
++	private_expandrule_payload_t *this;
++
++	if (data.len > UINT16_MAX - 4 || (!data.ptr && data.len))
++	{
++		chunk_free(&data);
++		return NULL;
++	}
++	this = (private_expandrule_payload_t*)expandrule_payload_create(type);
++	if (!this)
++	{
++		chunk_free(&data);
++		return NULL;
++	}
++	this->raw_flags = raw_flags;
++	this->data = data;
++	this->payload_length = 4 + data.len;
++	return &this->public;
++}
+diff --git a/src/libcharon/encoding/payloads/expandrule_payload.h b/src/libcharon/encoding/payloads/expandrule_payload.h
+new file mode 100644
+index 0000000..adab11f
+--- /dev/null
++++ b/src/libcharon/encoding/payloads/expandrule_payload.h
+@@ -0,0 +1,73 @@
++/*
++ * Copyright (C) 2026 Zhuoyuan Hao
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
++ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * for more details.
++ */
++
++/**
++ * @defgroup expandrule_payload expandrule_payload
++ * @{ @ingroup payloads
++ */
++
++#ifndef EXPANDRULE_PAYLOAD_H_
++#define EXPANDRULE_PAYLOAD_H_
++
++typedef struct expandrule_payload_t expandrule_payload_t;
++
++#include <library.h>
++#include <encoding/payloads/payload.h>
++
++/**
++ * Generic IKEv1 frame for private expandrule payload types 17, 18 and 19.
++ *
++ * Unlike the standard generic IKE header, the second octet is an opaque raw
++ * byte.  In particular, it must not be represented as a critical flag plus
++ * reserved bits.  Body interpretation remains in expandrule_codec.
++ */
++struct expandrule_payload_t {
++
++	/** Implements payload_t. */
++	payload_t payload_interface;
++
++	/** Return the uninterpreted second header octet. */
++	uint8_t (*get_raw_flags)(expandrule_payload_t *this);
++
++	/**
++	 * Return the body bytes after the four-byte generic header.
++	 *
++	 * The returned chunk is borrowed and must not be freed or modified.
++	 */
++	chunk_t (*get_data)(expandrule_payload_t *this);
++
++	/** Destroy this payload. */
++	void (*destroy)(expandrule_payload_t *this);
++};
++
++/**
++ * Create an empty payload for parsing.
++ *
++ * @param type	one of the three PLV1_EXPANDRULE_* types
++ * @return		payload instance, or NULL for any other type
++ */
++expandrule_payload_t *expandrule_payload_create(payload_type_t type);
++
++/**
++ * Create a payload for generation.
++ *
++ * @param type		one of the three PLV1_EXPANDRULE_* types
++ * @param raw_flags	uninterpreted second header octet
++ * @param data		body bytes, adopted by the payload
++ * @return			payload instance, or NULL for any other type
++ */
++expandrule_payload_t *expandrule_payload_create_data(payload_type_t type,
++										 uint8_t raw_flags, chunk_t data);
++
++#endif /** EXPANDRULE_PAYLOAD_H_ @}*/
+diff --git a/src/libcharon/encoding/payloads/payload.c b/src/libcharon/encoding/payloads/payload.c
+index aa1ff99..1464f69 100644
+--- a/src/libcharon/encoding/payloads/payload.c
++++ b/src/libcharon/encoding/payloads/payload.c
+@@ -39,6 +39,9 @@
+ #include <encoding/payloads/eap_payload.h>
+ #include <encoding/payloads/hash_payload.h>
+ #include <encoding/payloads/fragment_payload.h>
++#ifdef USE_IKEV1
++#include <encoding/payloads/expandrule_payload.h>
++#endif
+ #include <encoding/payloads/unknown_payload.h>
+ 
+ ENUM_BEGIN(payload_type_names, PL_NONE, PL_NONE,
+@@ -58,7 +61,12 @@ ENUM_NEXT(payload_type_names, PLV1_SECURITY_ASSOCIATION, PLV1_CONFIGURATION, PL_
+ 	"DELETE_V1",
+ 	"VENDOR_ID_V1",
+ 	"CONFIGURATION_V1");
+-ENUM_NEXT(payload_type_names, PLV1_NAT_D, PLV1_NAT_OA, PLV1_CONFIGURATION,
++ENUM_NEXT(payload_type_names, PLV1_EXPANDRULE_LEGACY_REVOKE, PLV1_EXPANDRULE_DELETE,
++	PLV1_CONFIGURATION,
++	"EXPANDRULE_LEGACY_REVOKE_V1",
++	"EXPANDRULE_ADD_V1",
++	"EXPANDRULE_DELETE_V1");
++ENUM_NEXT(payload_type_names, PLV1_NAT_D, PLV1_NAT_OA, PLV1_EXPANDRULE_DELETE,
+ 	"NAT_D_V1",
+ 	"NAT_OA_V1");
+ ENUM_NEXT(payload_type_names, PLV2_SECURITY_ASSOCIATION, PLV2_FRAGMENT, PLV1_NAT_OA,
+@@ -129,7 +137,13 @@ ENUM_NEXT(payload_type_short_names, PLV1_SECURITY_ASSOCIATION, PLV1_CONFIGURATIO
+ 	"D",
+ 	"V",
+ 	"CP");
+-ENUM_NEXT(payload_type_short_names, PLV1_NAT_D, PLV1_NAT_OA, PLV1_CONFIGURATION,
++ENUM_NEXT(payload_type_short_names, PLV1_EXPANDRULE_LEGACY_REVOKE,
++	PLV1_EXPANDRULE_DELETE, PLV1_CONFIGURATION,
++	"DELRULE-LEGACY",
++	"ADDRULE",
++	"DELRULE");
++ENUM_NEXT(payload_type_short_names, PLV1_NAT_D, PLV1_NAT_OA,
++	PLV1_EXPANDRULE_DELETE,
+ 	"NAT-D",
+ 	"NAT-OA");
+ ENUM_NEXT(payload_type_short_names, PLV2_SECURITY_ASSOCIATION, PLV2_FRAGMENT, PLV1_NAT_OA,
+@@ -259,6 +273,12 @@ payload_t *payload_create(payload_type_t type)
+ 			return (payload_t*)encrypted_payload_create(type);
+ 		case PLV1_FRAGMENT:
+ 			return (payload_t*)fragment_payload_create();
++#ifdef USE_IKEV1
++		case PLV1_EXPANDRULE_LEGACY_REVOKE:
++		case PLV1_EXPANDRULE_ADD:
++		case PLV1_EXPANDRULE_DELETE:
++			return (payload_t*)expandrule_payload_create(type);
++#endif
+ 		case PLV2_FRAGMENT:
+ 			return (payload_t*)encrypted_fragment_payload_create();
+ 		default:
+@@ -287,6 +307,14 @@ bool payload_is_known(payload_type_t type, uint8_t maj_ver)
+ 			{
+ 				return TRUE;
+ 			}
++#ifdef USE_IKEV1
++			if (type == PLV1_EXPANDRULE_LEGACY_REVOKE ||
++				type == PLV1_EXPANDRULE_ADD ||
++				type == PLV1_EXPANDRULE_DELETE)
++			{
++				return TRUE;
++			}
++#endif
+ 			if (type >= PLV1_NAT_D_DRAFT_00_03 && type <= PLV1_FRAGMENT)
+ 			{
+ 				return TRUE;
+diff --git a/src/libcharon/encoding/payloads/payload.h b/src/libcharon/encoding/payloads/payload.h
+index 1eeb2b7..2650be9 100644
+--- a/src/libcharon/encoding/payloads/payload.h
++++ b/src/libcharon/encoding/payloads/payload.h
+@@ -118,6 +118,21 @@ enum payload_type_t {
+ 	 */
+ 	PLV1_CONFIGURATION = 14,
+ 
++	/**
++	 * Receive-only compatibility alias for a private expandrule revoke.
++	 */
++	PLV1_EXPANDRULE_LEGACY_REVOKE = 17,
++
++	/**
++	 * Private expandrule add payload.
++	 */
++	PLV1_EXPANDRULE_ADD = 18,
++
++	/**
++	 * Private expandrule delete/revoke payload.
++	 */
++	PLV1_EXPANDRULE_DELETE = 19,
++
+ 	/**
+ 	 * NAT discovery payload (NAT-D).
+ 	 */
+diff --git a/src/libcharon/sa/ikev1/tasks/expandrule.c b/src/libcharon/sa/ikev1/tasks/expandrule.c
+new file mode 100644
+index 0000000..d3f36d0
+--- /dev/null
++++ b/src/libcharon/sa/ikev1/tasks/expandrule.c
+@@ -0,0 +1,293 @@
++/*
++ * Copyright (C) 2026 Zhuoyuan Hao
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
++ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * for more details.
++ */
++
++#include "expandrule.h"
++#include "expandrule_qm.h"
++#include "expandrule_task_payload.h"
++
++
++typedef struct private_expandrule_t private_expandrule_t;
++
++struct private_expandrule_t {
++	expandrule_t public;
++	expandrule_wire_form_t form;
++	expandrule_dialect_t dialect;
++	chunk_t outbound;
++	expandrule_message_t *decoded;
++	expandrule_error_t error;
++	expandrule_qm_t *qm;
++	bool complete;
++};
++
++/** Local message placement; request/response is distinct from actor direction. */
++static bool get_context(expandrule_wire_form_t form,
++						exchange_type_t *exchange, bool *request)
++{
++	switch (form)
++	{
++		case EXPANDRULE_QM_ADD_SNAPSHOT:
++			*exchange = QUICK_MODE;
++			*request = TRUE;
++			return TRUE;
++		case EXPANDRULE_INFO_ADD_DELTA:
++		case EXPANDRULE_INFO_DELETE_DELTA:
++		case EXPANDRULE_INFO_REVOKE_V1:
++		case EXPANDRULE_INFO_REVOKE_LEGACY:
++			*exchange = INFORMATIONAL_V1;
++			/* process_r handles a remote request; this is not actor direction. */
++			*request = TRUE;
++			return TRUE;
++		default:
++			return FALSE;
++	}
++}
++
++static bool valid_dialect(expandrule_wire_form_t form,
++						  expandrule_dialect_t dialect)
++{
++	if (expandrule_form_direction(form) == EXPANDRULE_CLIENT_TO_SERVER)
++	{
++		return dialect == EXPANDRULE_DIALECT_0 ||
++			   dialect == EXPANDRULE_DIALECT_1;
++	}
++	if (expandrule_form_direction(form) == EXPANDRULE_SERVER_TO_CLIENT)
++	{
++		return dialect == EXPANDRULE_DIALECT_NONE;
++	}
++	return FALSE;
++}
++
++static bool message_has_context(private_expandrule_t *this,
++									message_t *message)
++{
++	exchange_type_t exchange;
++	bool request;
++
++	return get_context(this->form, &exchange, &request) &&
++		   message->get_major_version(message) == IKEV1_MAJOR_VERSION &&
++		   message->get_exchange_type(message) == exchange &&
++			   message->get_request(message) == request;
++}
++
++/** The outbound skeleton is custom-only before message.c inserts a HASH. */
++static bool message_is_empty(message_t *message)
++{
++	enumerator_t *enumerator;
++	payload_t *payload;
++	bool empty;
++
++	enumerator = message->create_payload_enumerator(message);
++	empty = !enumerator->enumerate(enumerator, &payload);
++	enumerator->destroy(enumerator);
++	return empty;
++}
++
++static bool fail(private_expandrule_t *this, expandrule_error_code_t code,
++				 size_t offset, expandrule_error_t *error)
++{
++	this->error = (expandrule_error_t){ .code = code, .offset = offset };
++	if (error)
++	{
++		*error = this->error;
++	}
++	return FALSE;
++}
++
++METHOD(expandrule_t, set_message, bool,
++	private_expandrule_t *this, const expandrule_message_t *message,
++	expandrule_error_t *error)
++{
++	chunk_t encoded;
++
++	chunk_free(&this->outbound);
++	if (this->decoded)
++	{
++		expandrule_message_destroy(this->decoded);
++		this->decoded = NULL;
++	}
++	if (this->complete ||
++		expandrule_form_direction(this->form) != EXPANDRULE_CLIENT_TO_SERVER ||
++		!message || message->kind != EXPANDRULE_CLIENT_ENVELOPE ||
++		message->data.client.dialect != this->dialect)
++	{
++		return fail(this, EXPANDRULE_ERROR_UNSUPPORTED_CONTEXT, 0, error);
++	}
++	if (!expandrule_codec_encode(this->form, message, &encoded, &this->error))
++	{
++		if (error)
++		{
++			*error = this->error;
++		}
++		return FALSE;
++	}
++	this->outbound = encoded;
++	if (error)
++	{
++		*error = this->error;
++	}
++	return TRUE;
++}
++
++METHOD(expandrule_t, get_message, const expandrule_message_t*,
++	private_expandrule_t *this)
++{
++	return this->decoded;
++}
++
++METHOD(expandrule_t, get_error, expandrule_error_t,
++	private_expandrule_t *this)
++{
++	return this->error;
++}
++
++METHOD(task_t, build, status_t,
++	private_expandrule_t *this, message_t *message)
++{
++	status_t status;
++
++	if (expandrule_form_direction(this->form) != EXPANDRULE_CLIENT_TO_SERVER ||
++		!message_has_context(this, message) || this->outbound.len < 4)
++	{
++		fail(this, EXPANDRULE_ERROR_UNSUPPORTED_CONTEXT, 0, NULL);
++		return FAILED;
++	}
++	if (this->form == EXPANDRULE_QM_ADD_SNAPSHOT)
++	{
++		bool append;
++
++		status = this->qm->build(this->qm, message, &append);
++
++		if (status == SUCCESS && append)
++		{
++			status = expandrule_task_append_payload(this->form, this->outbound,
++												message, &this->error);
++			this->complete = status == SUCCESS;
++			return status;
++		}
++		if (status == FAILED)
++		{
++			fail(this, EXPANDRULE_ERROR_UNSUPPORTED_CONTEXT, 0, NULL);
++		}
++		return status;
++	}
++	if (this->complete || !message_is_empty(message))
++	{
++		fail(this, EXPANDRULE_ERROR_UNSUPPORTED_CONTEXT, 0, NULL);
++		return FAILED;
++	}
++	status = expandrule_task_append_payload(this->form, this->outbound,
++										 message, &this->error);
++	this->complete = status == SUCCESS;
++	return status;
++}
++
++METHOD(task_t, process, status_t,
++	private_expandrule_t *this, message_t *message)
++{
++	status_t status;
++
++	if (this->form == EXPANDRULE_QM_ADD_SNAPSHOT)
++	{
++		status_t status = this->qm->process(this->qm, message);
++
++		if (status == FAILED)
++		{
++			fail(this, EXPANDRULE_ERROR_UNSUPPORTED_CONTEXT, 0, NULL);
++		}
++		return status;
++	}
++	if (expandrule_form_direction(this->form) != EXPANDRULE_SERVER_TO_CLIENT ||
++		!message_has_context(this, message))
++	{
++		fail(this, EXPANDRULE_ERROR_UNSUPPORTED_CONTEXT, 0, NULL);
++		return FAILED;
++	}
++	if (this->complete)
++	{
++		fail(this, EXPANDRULE_ERROR_UNSUPPORTED_CONTEXT, 0, NULL);
++		return FAILED;
++	}
++	if (this->decoded)
++	{
++		expandrule_message_destroy(this->decoded);
++		this->decoded = NULL;
++	}
++	status = expandrule_task_decode_revoke(this->form, this->dialect, message,
++										&this->decoded, &this->error);
++	this->complete = status == SUCCESS;
++	return status;
++}
++
++METHOD(task_t, get_type, task_type_t,
++	private_expandrule_t *this)
++{
++	return TASK_EXPANDRULE;
++}
++
++METHOD(task_t, migrate, void,
++	private_expandrule_t *this, ike_sa_t *ike_sa)
++{
++	/* No IKE_SA is retained, but exchange timing never migrates across SAs. */
++	chunk_free(&this->outbound);
++	this->complete = FALSE;
++	if (this->qm)
++	{
++		this->qm->reset(this->qm);
++	}
++	if (this->decoded)
++	{
++		expandrule_message_destroy(this->decoded);
++		this->decoded = NULL;
++	}
++}
++
++METHOD(task_t, destroy, void,
++	private_expandrule_t *this)
++{
++	chunk_free(&this->outbound);
++	expandrule_message_destroy(this->decoded);
++	DESTROY_IF(this->qm);
++	free(this);
++}
++
++expandrule_t *expandrule_create(expandrule_wire_form_t form,
++							expandrule_dialect_t dialect)
++{
++	private_expandrule_t *this;
++	exchange_type_t exchange;
++	bool request;
++
++	if (!get_context(form, &exchange, &request) || !valid_dialect(form, dialect))
++	{
++		return NULL;
++	}
++	INIT(this,
++		.public = {
++			.task = {
++				.build = _build,
++				.process = _process,
++				.get_type = _get_type,
++				.migrate = _migrate,
++				.destroy = _destroy,
++			},
++			.set_message = _set_message,
++			.get_message = _get_message,
++			.get_error = _get_error,
++		},
++		.form = form,
++		.dialect = dialect,
++		.qm = form == EXPANDRULE_QM_ADD_SNAPSHOT ? expandrule_qm_create() : NULL,
++	);
++	return &this->public;
++}
+diff --git a/src/libcharon/sa/ikev1/tasks/expandrule.h b/src/libcharon/sa/ikev1/tasks/expandrule.h
+new file mode 100644
+index 0000000..d43640b
+--- /dev/null
++++ b/src/libcharon/sa/ikev1/tasks/expandrule.h
+@@ -0,0 +1,75 @@
++/*
++ * Copyright (C) 2026 Zhuoyuan Hao
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
++ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * for more details.
++ */
++
++/**
++ * @defgroup expandrule expandrule
++ * @{ @ingroup tasks_v1
++ */
++
++#ifndef EXPANDRULE_H_
++#define EXPANDRULE_H_
++
++typedef struct expandrule_t expandrule_t;
++
++#include <library.h>
++#include <sa/task.h>
++#include <encoding/payloads/expandrule_codec.h>
++
++/**
++ * Neutral IKEv1 expandrule task.
++ *
++ * It translates between the explicit CP4A form/dialect model and an IKE
++ * payload.  For the Quick Mode snapshot it is an unscheduled companion: it
++ * waits for stock SA/NONCE negotiation and appends ADDRULE only to the empty
++ * final request.  It does not hold an IKE_SA, install policies/routes or send
++ * data.
++ */
++struct expandrule_t {
++
++	/** Implements task_t. */
++	task_t task;
++
++	/**
++	 * Configure the model to encode on build().
++	 *
++	 * The model stays owned by the caller.  A canonical encoded copy is stored
++	 * by the task, so the caller may release its buffers after this returns.
++	 */
++	bool (*set_message)(expandrule_t *this,
++					const expandrule_message_t *message,
++					expandrule_error_t *error);
++
++	/**
++	 * Return the decoded model after process().
++	 *
++	 * The result is borrowed and remains owned by the task.
++	 */
++	const expandrule_message_t *(*get_message)(expandrule_t *this);
++
++	/** Return the last value-free codec/profile error. */
++	expandrule_error_t (*get_error)(expandrule_t *this);
++};
++
++/**
++ * Create a neutral task with an explicit wire form and dialect.
++ *
++ * Client forms require dialect 0 or 1.  Revoke forms require dialect NONE.
++ * Invalid combinations return NULL.  The task is intentionally not wired
++ * into task_manager_v1; Quick Mode ordering and automatic scheduling remain a
++ * later gate.
++ */
++expandrule_t *expandrule_create(expandrule_wire_form_t form,
++							expandrule_dialect_t dialect);
++
++#endif /** EXPANDRULE_H_ @}*/
+diff --git a/src/libcharon/sa/ikev1/tasks/expandrule_qm.c b/src/libcharon/sa/ikev1/tasks/expandrule_qm.c
+new file mode 100644
+index 0000000..54bc3f0
+--- /dev/null
++++ b/src/libcharon/sa/ikev1/tasks/expandrule_qm.c
+@@ -0,0 +1,154 @@
++/*
++ * Copyright (C) 2026 Zhuoyuan Hao
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ */
++
++#include "expandrule_qm.h"
++
++#include <encoding/payloads/payload.h>
++
++typedef struct private_expandrule_qm_t private_expandrule_qm_t;
++
++typedef enum {
++	EXPANDRULE_QM_READY,
++	EXPANDRULE_QM_WAIT_RESPONSE,
++	EXPANDRULE_QM_READY_FINAL,
++	EXPANDRULE_QM_COMPLETE,
++} expandrule_qm_state_t;
++
++struct private_expandrule_qm_t {
++	expandrule_qm_t public;
++	expandrule_qm_state_t state;
++	uint32_t mid;
++};
++
++static bool message_is_empty(message_t *message)
++{
++	enumerator_t *enumerator;
++	payload_t *payload;
++	bool empty;
++
++	enumerator = message->create_payload_enumerator(message);
++	empty = !enumerator->enumerate(enumerator, &payload);
++	enumerator->destroy(enumerator);
++	return empty;
++}
++
++static bool message_has_private_payload(message_t *message)
++{
++	enumerator_t *enumerator;
++	payload_t *payload;
++	bool found = FALSE;
++
++	enumerator = message->create_payload_enumerator(message);
++	while (enumerator->enumerate(enumerator, &payload))
++	{
++		payload_type_t type = payload->get_type(payload);
++
++		if (type == PLV1_EXPANDRULE_LEGACY_REVOKE ||
++			type == PLV1_EXPANDRULE_ADD || type == PLV1_EXPANDRULE_DELETE)
++		{
++			found = TRUE;
++			break;
++		}
++	}
++	enumerator->destroy(enumerator);
++	return found;
++}
++
++/** Require the standard Quick Mode SA/NONCE phase, without interpreting it. */
++static bool message_has_standard_payloads(message_t *message)
++{
++	return !message_has_private_payload(message) &&
++		   message->get_payload(message, PLV1_SECURITY_ASSOCIATION) &&
++		   message->get_payload(message, PLV1_NONCE);
++}
++
++static bool has_context(message_t *message, bool request)
++{
++	return message->get_major_version(message) == IKEV1_MAJOR_VERSION &&
++		   message->get_exchange_type(message) == QUICK_MODE &&
++		   message->get_request(message) == request;
++}
++
++METHOD(expandrule_qm_t, build, status_t,
++	private_expandrule_qm_t *this, message_t *message, bool *append)
++{
++	*append = FALSE;
++	if (!has_context(message, TRUE))
++	{
++		return FAILED;
++	}
++	switch (this->state)
++	{
++		case EXPANDRULE_QM_READY:
++			/* Must run after stock quick_mode has added SA/NONCE. */
++			if (!message_has_standard_payloads(message))
++			{
++				return FAILED;
++			}
++			this->mid = message->get_message_id(message);
++			this->state = EXPANDRULE_QM_WAIT_RESPONSE;
++			return NEED_MORE;
++		case EXPANDRULE_QM_READY_FINAL:
++			/* Stock quick_mode has completed and left the final request empty. */
++			if (message->get_message_id(message) != this->mid ||
++				!message_is_empty(message))
++			{
++				return FAILED;
++			}
++			*append = TRUE;
++			this->state = EXPANDRULE_QM_COMPLETE;
++			return SUCCESS;
++		default:
++			return FAILED;
++	}
++}
++
++METHOD(expandrule_qm_t, process, status_t,
++	private_expandrule_qm_t *this, message_t *message)
++{
++	if (this->state != EXPANDRULE_QM_WAIT_RESPONSE ||
++		!has_context(message, FALSE) ||
++		message->get_message_id(message) != this->mid ||
++		!message_has_standard_payloads(message))
++	{
++		return FAILED;
++	}
++	/* Stock quick_mode validates and consumes this response. */
++	this->state = EXPANDRULE_QM_READY_FINAL;
++	return NEED_MORE;
++}
++
++METHOD(expandrule_qm_t, reset, void,
++	private_expandrule_qm_t *this)
++{
++	this->state = EXPANDRULE_QM_READY;
++	this->mid = 0;
++}
++
++METHOD(expandrule_qm_t, destroy, void,
++	private_expandrule_qm_t *this)
++{
++	free(this);
++}
++
++expandrule_qm_t *expandrule_qm_create(void)
++{
++	private_expandrule_qm_t *this;
++
++	INIT(this,
++		.public = {
++			.build = _build,
++			.process = _process,
++			.reset = _reset,
++			.destroy = _destroy,
++		},
++		.state = EXPANDRULE_QM_READY,
++	);
++	return &this->public;
++}
+diff --git a/src/libcharon/sa/ikev1/tasks/expandrule_qm.h b/src/libcharon/sa/ikev1/tasks/expandrule_qm.h
+new file mode 100644
+index 0000000..622bf4b
+--- /dev/null
++++ b/src/libcharon/sa/ikev1/tasks/expandrule_qm.h
+@@ -0,0 +1,42 @@
++/*
++ * Copyright (C) 2026 Zhuoyuan Hao
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ */
++
++#ifndef EXPANDRULE_QM_H_
++#define EXPANDRULE_QM_H_
++
++typedef struct expandrule_qm_t expandrule_qm_t;
++
++#include <library.h>
++#include <encoding/message.h>
++
++/**
++ * Explicit, unscheduled companion for the initiator's three-packet Quick Mode.
++ */
++struct expandrule_qm_t {
++
++	/**
++	 * Observe stock Quick Mode build phases.
++	 *
++	 * append is TRUE only for the empty final request after SA/NONCE negotiation.
++	 */
++	status_t (*build)(expandrule_qm_t *this, message_t *message, bool *append);
++
++	/** Observe the stock Quick Mode response without decoding private payloads. */
++	status_t (*process)(expandrule_qm_t *this, message_t *message);
++
++	/** Reset timing state without retaining an IKE_SA. */
++	void (*reset)(expandrule_qm_t *this);
++
++	/** Destroy this companion. */
++	void (*destroy)(expandrule_qm_t *this);
++};
++
++expandrule_qm_t *expandrule_qm_create(void);
++
++#endif /** EXPANDRULE_QM_H_ */
+diff --git a/src/libcharon/sa/ikev1/tasks/expandrule_task_payload.c b/src/libcharon/sa/ikev1/tasks/expandrule_task_payload.c
+new file mode 100644
+index 0000000..7af88b5
+--- /dev/null
++++ b/src/libcharon/sa/ikev1/tasks/expandrule_task_payload.c
+@@ -0,0 +1,107 @@
++/*
++ * Copyright (C) 2026 Zhuoyuan Hao
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ */
++
++#include "expandrule_task_payload.h"
++
++#include <encoding/generator.h>
++#include <encoding/payloads/expandrule_payload.h>
++
++static status_t fail(expandrule_error_t *error,
++						 expandrule_error_code_t code, size_t offset)
++{
++	*error = (expandrule_error_t){ .code = code, .offset = offset };
++	return FAILED;
++}
++
++status_t expandrule_task_append_payload(expandrule_wire_form_t form,
++										chunk_t encoded, message_t *message,
++										expandrule_error_t *error)
++{
++	expandrule_payload_t *payload;
++	chunk_t data;
++
++	data = chunk_clone(chunk_create(encoded.ptr + 4, encoded.len - 4));
++	payload = expandrule_payload_create_data(
++					(payload_type_t)expandrule_form_payload_type(form),
++					encoded.ptr[1], data);
++	if (!payload)
++	{
++		return fail(error, EXPANDRULE_ERROR_OUT_OF_MEMORY, 4);
++	}
++	message->add_payload(message, &payload->payload_interface);
++	return SUCCESS;
++}
++
++status_t expandrule_task_decode_revoke(expandrule_wire_form_t form,
++									  expandrule_dialect_t dialect,
++									  message_t *message,
++									  expandrule_message_t **decoded,
++									  expandrule_error_t *error)
++{
++	payload_type_t expected =
++					(payload_type_t)expandrule_form_payload_type(form), type;
++	expandrule_payload_t *payload = NULL;
++	payload_t *current;
++	enumerator_t *enumerator;
++	generator_t *generator;
++	chunk_t encoded;
++	size_t count = 0, hash_count = 0, position = 0;
++	bool valid = TRUE;
++
++	*decoded = NULL;
++	enumerator = message->create_payload_enumerator(message);
++	while (enumerator->enumerate(enumerator, &current))
++	{
++		type = current->get_type(current);
++		if (type == PLV1_HASH)
++		{
++			hash_count++;
++			if (position != 0 || hash_count > 1)
++			{
++				valid = FALSE;
++			}
++		}
++		else if (type == PLV1_EXPANDRULE_LEGACY_REVOKE ||
++				type == PLV1_EXPANDRULE_ADD || type == PLV1_EXPANDRULE_DELETE)
++		{
++			count++;
++			if (type == expected)
++			{
++				payload = (expandrule_payload_t*)current;
++			}
++		}
++		else
++		{
++			valid = FALSE;
++		}
++		position++;
++	}
++	enumerator->destroy(enumerator);
++	if (!valid || hash_count != 1 || count != 1 || !payload)
++	{
++		return fail(error, EXPANDRULE_ERROR_INVALID_CARDINALITY, 0);
++	}
++
++	generator = generator_create_no_dbg();
++	generator->generate_payload(generator, &payload->payload_interface);
++	encoded = generator->get_chunk(generator, NULL);
++	if (!expandrule_codec_decode(form, dialect, encoded, decoded, error))
++	{
++		generator->destroy(generator);
++		return FAILED;
++	}
++	generator->destroy(generator);
++	if (!expandrule_profile_validate(form, *decoded, error))
++	{
++		expandrule_message_destroy(*decoded);
++		*decoded = NULL;
++		return FAILED;
++	}
++	return SUCCESS;
++}
+diff --git a/src/libcharon/sa/ikev1/tasks/expandrule_task_payload.h b/src/libcharon/sa/ikev1/tasks/expandrule_task_payload.h
+new file mode 100644
+index 0000000..242e955
+--- /dev/null
++++ b/src/libcharon/sa/ikev1/tasks/expandrule_task_payload.h
+@@ -0,0 +1,27 @@
++/*
++ * Copyright (C) 2026 Zhuoyuan Hao
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ */
++
++#ifndef EXPANDRULE_TASK_PAYLOAD_H_
++#define EXPANDRULE_TASK_PAYLOAD_H_
++
++#include <library.h>
++#include <encoding/message.h>
++#include <encoding/payloads/expandrule_codec.h>
++
++status_t expandrule_task_append_payload(expandrule_wire_form_t form,
++										chunk_t encoded, message_t *message,
++										expandrule_error_t *error);
++
++status_t expandrule_task_decode_revoke(expandrule_wire_form_t form,
++									  expandrule_dialect_t dialect,
++									  message_t *message,
++									  expandrule_message_t **decoded,
++									  expandrule_error_t *error);
++
++#endif /** EXPANDRULE_TASK_PAYLOAD_H_ */
+diff --git a/src/libcharon/sa/task.c b/src/libcharon/sa/task.c
+index 88de449..7aea683 100644
+--- a/src/libcharon/sa/task.c
++++ b/src/libcharon/sa/task.c
+@@ -17,7 +17,7 @@
+ 
+ #include "task.h"
+ 
+-ENUM(task_type_names, TASK_IKE_INIT, TASK_ISAKMP_CERT_POST,
++ENUM(task_type_names, TASK_IKE_INIT, TASK_EXPANDRULE,
+ 	"IKE_INIT",
+ 	"IKE_NATD",
+ 	"IKE_MOBIKE",
+@@ -55,4 +55,5 @@ ENUM(task_type_names, TASK_IKE_INIT, TASK_ISAKMP_CERT_POST,
+ 	"ISAKMP_DPD",
+ 	"ISAKMP_CERT_PRE",
+ 	"ISAKMP_CERT_POST",
++	"EXPANDRULE",
+ );
+diff --git a/src/libcharon/sa/task.h b/src/libcharon/sa/task.h
+index 7b18af3..93a0380 100644
+--- a/src/libcharon/sa/task.h
++++ b/src/libcharon/sa/task.h
+@@ -108,6 +108,8 @@ enum task_type_t {
+ 	TASK_ISAKMP_CERT_PRE,
+ 	/** IKEv1 post-authentication certificate handling */
+ 	TASK_ISAKMP_CERT_POST,
++	/** IKEv1 private expandrule payload integration */
++	TASK_EXPANDRULE,
+ };
+ 
+ /**
+diff --git a/src/libcharon/tests/Makefile.am b/src/libcharon/tests/Makefile.am
+index 7cad89f..b46baa9 100644
+--- a/src/libcharon/tests/Makefile.am
++++ b/src/libcharon/tests/Makefile.am
+@@ -15,7 +15,13 @@ libcharon_tests_SOURCES += \
+   suites/test_expandrule_codec.c \
+   suites/test_expandrule_codec_boundaries.c \
+   suites/test_expandrule_codec_invalid.c \
+-  suites/test_expandrule_codec_profile.c
++  suites/test_expandrule_codec_profile.c \
++  suites/expandrule_hash_test_helpers.h \
++  suites/test_expandrule_integration.c \
++  suites/test_expandrule_hash.c \
++  suites/test_expandrule_message_context.c \
++  suites/test_expandrule_task.c \
++  utils/mock_dh.h utils/mock_dh.c
+ endif
+ 
+ libcharon_tests_CFLAGS = \
+diff --git a/src/libcharon/tests/suites/expandrule_hash_test_helpers.h b/src/libcharon/tests/suites/expandrule_hash_test_helpers.h
+new file mode 100644
+index 0000000..a0c69ea
+--- /dev/null
++++ b/src/libcharon/tests/suites/expandrule_hash_test_helpers.h
+@@ -0,0 +1,15 @@
++#ifndef EXPANDRULE_HASH_TEST_HELPERS_H_
++#define EXPANDRULE_HASH_TEST_HELPERS_H_
++
++#include "test_suite.h"
++
++#include <encoding/payloads/expandrule_payload.h>
++#include <sa/ikev1/keymat_v1.h>
++
++keymat_v1_t *expandrule_test_create_keymat(bool initiator);
++expandrule_payload_t *expandrule_test_create_add_payload_from(chunk_t wire);
++expandrule_payload_t *expandrule_test_create_add_payload(void);
++message_t *expandrule_test_create_phase2(exchange_type_t exchange, uint32_t mid);
++void expandrule_test_add_nonce(message_t *message, chunk_t value);
++
++#endif /** EXPANDRULE_HASH_TEST_HELPERS_H_ */
+diff --git a/src/libcharon/tests/suites/test_expandrule_codec.c b/src/libcharon/tests/suites/test_expandrule_codec.c
+index f470c8e..c1b6a66 100644
+--- a/src/libcharon/tests/suites/test_expandrule_codec.c
++++ b/src/libcharon/tests/suites/test_expandrule_codec.c
+@@ -264,6 +264,10 @@ END_TEST
+ void expandrule_add_invalid_tests(TCase *tc);
+ void expandrule_add_boundary_tests(TCase *tc);
+ void expandrule_add_profile_tests(TCase *tc);
++void expandrule_add_integration_tests(TCase *tc);
++void expandrule_add_hash_tests(TCase *tc);
++void expandrule_add_message_context_tests(TCase *tc);
++void expandrule_add_task_tests(TCase *tc);
+ 
+ Suite *expandrule_codec_suite_create()
+ {
+@@ -282,6 +286,10 @@ Suite *expandrule_codec_suite_create()
+ 	expandrule_add_boundary_tests(tc);
+ 	expandrule_add_invalid_tests(tc);
+ 	expandrule_add_profile_tests(tc);
++	expandrule_add_integration_tests(tc);
++	expandrule_add_hash_tests(tc);
++	expandrule_add_message_context_tests(tc);
++	expandrule_add_task_tests(tc);
+ 	suite_add_tcase(s, tc);
+ 	return s;
+ }
+diff --git a/src/libcharon/tests/suites/test_expandrule_hash.c b/src/libcharon/tests/suites/test_expandrule_hash.c
+new file mode 100644
+index 0000000..bcd5026
+--- /dev/null
++++ b/src/libcharon/tests/suites/test_expandrule_hash.c
+@@ -0,0 +1,223 @@
++/*
++ * Copyright (C) 2026 Zhuoyuan Hao
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ */
++
++#include "test_suite.h"
++#include "expandrule_test_fixtures.h"
++#include "expandrule_hash_test_helpers.h"
++#include "../utils/mock_dh.h"
++
++#include <credentials/keys/shared_key.h>
++#include <crypto/proposal/proposal.h>
++#include <encoding/payloads/expandrule_payload.h>
++#include <encoding/payloads/nonce_payload.h>
++#include <encoding/payloads/notify_payload.h>
++#include <networking/host.h>
++#include <sa/ikev1/keymat_v1.h>
++#include <sa/ikev1/tasks/expandrule.h>
++
++keymat_v1_t *expandrule_test_create_keymat(bool initiator)
++{
++	chunk_t dh_other = chunk_from_chars(
++		0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,
++		0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,
++		0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,
++		0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08);
++	chunk_t nonce_i = chunk_from_chars(
++		0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,
++		0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x1e,0x1f);
++	chunk_t nonce_r = chunk_from_chars(
++		0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27,
++		0x28,0x29,0x2a,0x2b,0x2c,0x2d,0x2e,0x2f);
++	key_exchange_t *dh = mock_dh_create(MODP_1024_BIT);
++	proposal_t *proposal = proposal_create_from_string(PROTO_IKE,
++												 "aes128-sha1-modp1024");
++	shared_key_t *shared = shared_key_create(SHARED_IKE,
++										 chunk_clone(chunk_from_str("test-psk")));
++	ike_sa_id_t *id = ike_sa_id_create(IKEV1_MAJOR_VERSION,
++									 0x0102030405060708,
++									 0x1112131415161718, initiator);
++	keymat_v1_t *keymat = keymat_v1_create(initiator);
++
++	ck_assert(proposal);
++	ck_assert(keymat->derive_ike_keys(keymat, proposal, dh, dh_other,
++									 nonce_i, nonce_r, id, AUTH_PSK, shared));
++	id->destroy(id);
++	shared->destroy(shared);
++	proposal->destroy(proposal);
++	dh->destroy(dh);
++	return keymat;
++}
++
++expandrule_payload_t *expandrule_test_create_add_payload_from(chunk_t wire)
++{
++	return expandrule_payload_create_data(PLV1_EXPANDRULE_ADD, wire.ptr[1],
++						chunk_clone(chunk_create(wire.ptr + 4, wire.len - 4)));
++}
++
++expandrule_payload_t *expandrule_test_create_add_payload(void)
++{
++	return expandrule_test_create_add_payload_from(
++		expandrule_fixture(expandrule_empty_v4_bytes,
++											 sizeof(expandrule_empty_v4_bytes)));
++}
++
++message_t *expandrule_test_create_phase2(exchange_type_t exchange, uint32_t mid)
++{
++	message_t *message = message_create(IKEV1_MAJOR_VERSION,
++									IKEV1_MINOR_VERSION);
++
++	message->set_exchange_type(message, exchange);
++	message->set_message_id(message, mid);
++	return message;
++}
++
++void expandrule_test_add_nonce(message_t *message, chunk_t value)
++{
++	nonce_payload_t *nonce = nonce_payload_create(PLV1_NONCE);
++
++	nonce->set_nonce(nonce, value);
++	message->add_payload(message, &nonce->payload_interface);
++}
++
++static void prime_quick_mode_with(keymat_v1_t *keymat, uint32_t mid,
++								  chunk_t n_i, chunk_t n_r)
++{
++	message_t *message;
++	chunk_t hash;
++
++	message = expandrule_test_create_phase2(QUICK_MODE, mid);
++	expandrule_test_add_nonce(message, n_i);
++	ck_assert(keymat->get_hash_phase2(keymat, message, &hash));
++	chunk_free(&hash);
++	message->destroy(message);
++
++	message = expandrule_test_create_phase2(QUICK_MODE, mid);
++	message->set_request(message, FALSE);
++	expandrule_test_add_nonce(message, n_r);
++	ck_assert(keymat->get_hash_phase2(keymat, message, &hash));
++	chunk_free(&hash);
++	message->destroy(message);
++}
++
++static void prime_quick_mode(keymat_v1_t *keymat, uint32_t mid)
++{
++	prime_quick_mode_with(keymat, mid,
++		chunk_from_chars(
++			0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,
++			0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x1e,0x1f),
++		chunk_from_chars(
++			0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27,
++			0x28,0x29,0x2a,0x2b,0x2c,0x2d,0x2e,0x2f));
++}
++
++START_TEST(test_augmented_quick_mode_uses_stock_hash3_reference)
++{
++	chunk_t expected = chunk_from_chars(
++		0x5a,0xc5,0xeb,0x05,0x2d,0xd4,0x04,0x34,0x37,0xfa,
++		0xea,0x7b,0xfb,0x73,0xab,0x30,0x65,0x67,0xe5,0xa6);
++	chunk_t fixtures[] = {
++		expandrule_fixture(expandrule_empty_v4_bytes,
++						   sizeof(expandrule_empty_v4_bytes)),
++		expandrule_fixture(expandrule_v4_d0_bytes,
++						   sizeof(expandrule_v4_d0_bytes)),
++	};
++	size_t i;
++
++	for (i = 0; i < countof(fixtures); i++)
++	{
++		keymat_v1_t *keymat = expandrule_test_create_keymat(TRUE);
++		message_t *final = expandrule_test_create_phase2(QUICK_MODE, 0x10203040);
++		chunk_t hash;
++
++		prime_quick_mode(keymat, 0x10203040);
++		final->add_payload(final,
++			&expandrule_test_create_add_payload_from(fixtures[i])->payload_interface);
++		ck_assert(keymat->get_hash_phase2(keymat, final, &hash));
++		ck_assert_msg(chunk_equals(hash, expected),
++					  "stock HASH(3) %B != reference %B", &hash, &expected);
++		chunk_free(&hash);
++		final->destroy(final);
++		keymat->keymat.destroy(&keymat->keymat);
++	}
++	{
++		keymat_v1_t *keymat = expandrule_test_create_keymat(TRUE);
++		message_t *final = expandrule_test_create_phase2(QUICK_MODE, 0x10203040);
++		chunk_t hash;
++
++		prime_quick_mode_with(keymat, 0x10203040,
++			chunk_from_chars(
++				0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,
++				0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x1e,0x1f),
++			chunk_from_chars(
++				0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27,
++				0x28,0x29,0x2a,0x2b,0x2c,0x2d,0x2e,0x30));
++		final->add_payload(final,
++			&expandrule_test_create_add_payload()->payload_interface);
++		ck_assert(keymat->get_hash_phase2(keymat, final, &hash));
++		ck_assert_msg(!chunk_equals(hash, expected),
++					  "HASH(3) did not bind the responder nonce");
++		chunk_free(&hash);
++		final->destroy(final);
++		keymat->keymat.destroy(&keymat->keymat);
++	}
++}
++END_TEST
++
++START_TEST(test_synthetic_augmented_qm_roundtrip_has_hash_then_addrule)
++{
++	keymat_v1_t *initiator = expandrule_test_create_keymat(TRUE);
++	keymat_v1_t *responder = expandrule_test_create_keymat(FALSE);
++	ike_sa_id_t *id = ike_sa_id_create(IKEV1_MAJOR_VERSION,
++									 0x0102030405060708,
++									 0x1112131415161718, TRUE);
++	message_t *message, *parsed;
++	packet_t *packet;
++	enumerator_t *enumerator;
++	payload_t *payload;
++	payload_type_t expected[] = { PLV1_HASH, PLV1_EXPANDRULE_ADD };
++	size_t count = 0;
++
++	prime_quick_mode(initiator, 0x50607080);
++	prime_quick_mode(responder, 0x50607080);
++	message = expandrule_test_create_phase2(QUICK_MODE, 0x50607080);
++	message->set_ike_sa_id(message, id);
++	message->set_source(message, host_create_from_string("192.0.2.1", 500));
++	message->set_destination(message, host_create_from_string("192.0.2.2", 500));
++	message->add_payload(message,
++						 &expandrule_test_create_add_payload()->payload_interface);
++	ck_assert_int_eq(message->generate(message, &initiator->keymat, &packet),
++					 SUCCESS);
++	ck_assert_int_eq(packet->get_data(packet).ptr[16], PLV1_HASH);
++
++	parsed = message_create_from_packet(packet);
++	ck_assert_int_eq(parsed->parse_header(parsed), SUCCESS);
++	ck_assert_int_eq(parsed->parse_body(parsed, &responder->keymat), SUCCESS);
++	enumerator = parsed->create_payload_enumerator(parsed);
++	while (enumerator->enumerate(enumerator, &payload))
++	{
++		ck_assert(count < countof(expected));
++		ck_assert_int_eq(payload->get_type(payload), expected[count]);
++		count++;
++	}
++	enumerator->destroy(enumerator);
++	ck_assert_int_eq(count, countof(expected));
++
++	parsed->destroy(parsed);
++	message->destroy(message);
++	id->destroy(id);
++	initiator->keymat.destroy(&initiator->keymat);
++	responder->keymat.destroy(&responder->keymat);
++}
++END_TEST
++
++void expandrule_add_hash_tests(TCase *tc)
++{
++	tcase_add_test(tc, test_augmented_quick_mode_uses_stock_hash3_reference);
++	tcase_add_test(tc, test_synthetic_augmented_qm_roundtrip_has_hash_then_addrule);
++}
+diff --git a/src/libcharon/tests/suites/test_expandrule_integration.c b/src/libcharon/tests/suites/test_expandrule_integration.c
+new file mode 100644
+index 0000000..788d98f
+--- /dev/null
++++ b/src/libcharon/tests/suites/test_expandrule_integration.c
+@@ -0,0 +1,76 @@
++/*
++ * Copyright (C) 2026 Zhuoyuan Hao
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ */
++
++#include "test_suite.h"
++
++#include <encoding/generator.h>
++#include <encoding/message.h>
++#include <encoding/parser.h>
++#include <encoding/payloads/expandrule_payload.h>
++
++START_TEST(test_raw_flags_frame_roundtrip)
++{
++	expandrule_payload_t *payload, *decoded;
++	generator_t *generator;
++	parser_t *parser;
++	payload_t *parsed;
++	chunk_t wire, expected = chunk_from_chars(0x00,0xa5,0x00,0x07,
++										  0x01,0x02,0x03);
++
++	payload = expandrule_payload_create_data(PLV1_EXPANDRULE_ADD, 0xa5,
++										 chunk_clone(chunk_from_chars(0x01,0x02,0x03)));
++	ck_assert(payload);
++	generator = generator_create_no_dbg();
++	generator->generate_payload(generator, &payload->payload_interface);
++	wire = generator->get_chunk(generator, NULL);
++	ck_assert_msg(chunk_equals(wire, expected), "raw flag byte was rewritten");
++	parser = parser_create(wire);
++	parser->set_major_version(parser, IKEV1_MAJOR_VERSION);
++	ck_assert_int_eq(parser->parse_payload(parser, PLV1_EXPANDRULE_ADD, &parsed),
++					 SUCCESS);
++	ck_assert_int_eq(parsed->verify(parsed), SUCCESS);
++	decoded = (expandrule_payload_t*)parsed;
++	ck_assert_int_eq(decoded->get_raw_flags(decoded), 0xa5);
++	ck_assert(chunk_equals(decoded->get_data(decoded),
++						  chunk_from_chars(0x01,0x02,0x03)));
++	parsed->destroy(parsed);
++	parser->destroy(parser);
++	generator->destroy(generator);
++	payload->destroy(payload);
++}
++END_TEST
++
++START_TEST(test_payload_factory_is_ikev1_only)
++{
++	payload_type_t types[] = {
++		PLV1_EXPANDRULE_LEGACY_REVOKE,
++		PLV1_EXPANDRULE_ADD,
++		PLV1_EXPANDRULE_DELETE,
++	};
++	payload_t *payload;
++	size_t i;
++
++	for (i = 0; i < countof(types); i++)
++	{
++		ck_assert(payload_is_known(types[i], IKEV1_MAJOR_VERSION));
++		ck_assert(!payload_is_known(types[i], IKEV2_MAJOR_VERSION));
++		payload = payload_create(types[i]);
++		ck_assert(payload);
++		ck_assert_int_eq(payload->get_type(payload), types[i]);
++		payload->destroy(payload);
++	}
++	ck_assert(!expandrule_payload_create(PLV1_NOTIFY));
++}
++END_TEST
++
++void expandrule_add_integration_tests(TCase *tc)
++{
++	tcase_add_test(tc, test_raw_flags_frame_roundtrip);
++	tcase_add_test(tc, test_payload_factory_is_ikev1_only);
++}
+diff --git a/src/libcharon/tests/suites/test_expandrule_message_context.c b/src/libcharon/tests/suites/test_expandrule_message_context.c
+new file mode 100644
+index 0000000..c3e520b
+--- /dev/null
++++ b/src/libcharon/tests/suites/test_expandrule_message_context.c
+@@ -0,0 +1,122 @@
++/*
++ * Copyright (C) 2026 Zhuoyuan Hao
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ */
++
++#include "test_suite.h"
++#include "expandrule_hash_test_helpers.h"
++
++#include <encoding/payloads/notify_payload.h>
++#include <networking/host.h>
++
++START_TEST(test_custom_quick_mode_mixed_or_wrong_type_rejected)
++{
++	keymat_v1_t *keymat = expandrule_test_create_keymat(TRUE);
++	message_t *message;
++	expandrule_payload_t *payload;
++	chunk_t nonce = chunk_from_chars(
++		0x30,0x31,0x32,0x33,0x34,0x35,0x36,0x37);
++
++	message = expandrule_test_create_phase2(QUICK_MODE, 0x20304050);
++	message->set_source(message, host_create_from_string("192.0.2.1", 500));
++	message->set_destination(message, host_create_from_string("192.0.2.2", 500));
++	message->add_payload(message,
++						 &expandrule_test_create_add_payload()->payload_interface);
++	ck_assert_int_eq(message->generate(message, &keymat->keymat, NULL),
++					 VERIFY_ERROR);
++	message->destroy(message);
++
++	message = expandrule_test_create_phase2(QUICK_MODE, 0x20304051);
++	message->set_source(message, host_create_from_string("192.0.2.1", 500));
++	message->set_destination(message, host_create_from_string("192.0.2.2", 500));
++	message->add_payload(message,
++						 &expandrule_test_create_add_payload()->payload_interface);
++	expandrule_test_add_nonce(message, nonce);
++	ck_assert_int_eq(message->generate(message, &keymat->keymat, NULL),
++					 VERIFY_ERROR);
++	message->destroy(message);
++
++	message = expandrule_test_create_phase2(QUICK_MODE, 0x20304052);
++	message->set_source(message, host_create_from_string("192.0.2.1", 500));
++	message->set_destination(message, host_create_from_string("192.0.2.2", 500));
++	expandrule_test_add_nonce(message, nonce);
++	message->add_payload(message,
++						 &expandrule_test_create_add_payload()->payload_interface);
++	ck_assert_int_eq(message->generate(message, &keymat->keymat, NULL),
++					 VERIFY_ERROR);
++	message->destroy(message);
++
++	message = expandrule_test_create_phase2(QUICK_MODE, 0x30405060);
++	message->set_source(message, host_create_from_string("192.0.2.1", 500));
++	message->set_destination(message, host_create_from_string("192.0.2.2", 500));
++	payload = expandrule_payload_create_data(PLV1_EXPANDRULE_DELETE, 0,
++										 chunk_clone(chunk_from_chars(0x01)));
++	message->add_payload(message, &payload->payload_interface);
++	ck_assert_int_eq(message->generate(message, &keymat->keymat, NULL),
++					 VERIFY_ERROR);
++	message->destroy(message);
++
++	message = expandrule_test_create_phase2(QUICK_MODE, 0x30405061);
++	message->set_request(message, FALSE);
++	message->set_source(message, host_create_from_string("192.0.2.1", 500));
++	message->set_destination(message, host_create_from_string("192.0.2.2", 500));
++	message->add_payload(message,
++						 &expandrule_test_create_add_payload()->payload_interface);
++	ck_assert_int_eq(message->generate(message, &keymat->keymat, NULL),
++					 VERIFY_ERROR);
++	message->destroy(message);
++	keymat->keymat.destroy(&keymat->keymat);
++}
++END_TEST
++
++START_TEST(test_informational_custom_types_are_mutually_exclusive)
++{
++	keymat_v1_t *keymat = expandrule_test_create_keymat(TRUE);
++	message_t *message = expandrule_test_create_phase2(
++										INFORMATIONAL_V1, 0x40506070);
++	expandrule_payload_t *payload;
++
++	message->set_source(message, host_create_from_string("192.0.2.1", 500));
++	message->set_destination(message, host_create_from_string("192.0.2.2", 500));
++	message->add_payload(message,
++						 &expandrule_test_create_add_payload()->payload_interface);
++	payload = expandrule_payload_create_data(PLV1_EXPANDRULE_DELETE, 0,
++										 chunk_clone(chunk_from_chars(0x01)));
++	message->add_payload(message, &payload->payload_interface);
++	ck_assert_int_eq(message->generate(message, &keymat->keymat, NULL),
++					 VERIFY_ERROR);
++	message->destroy(message);
++
++	message = expandrule_test_create_phase2(INFORMATIONAL_V1, 0x40506071);
++	message->set_source(message, host_create_from_string("192.0.2.1", 500));
++	message->set_destination(message, host_create_from_string("192.0.2.2", 500));
++	message->add_payload(message,
++						 &expandrule_test_create_add_payload()->payload_interface);
++	message->add_payload(message,
++						 &notify_payload_create(PLV1_NOTIFY)->payload_interface);
++	ck_assert_int_eq(message->generate(message, &keymat->keymat, NULL),
++					 VERIFY_ERROR);
++	message->destroy(message);
++
++	message = expandrule_test_create_phase2(INFORMATIONAL_V1, 0x40506072);
++	message->set_source(message, host_create_from_string("192.0.2.1", 500));
++	message->set_destination(message, host_create_from_string("192.0.2.2", 500));
++	payload = expandrule_payload_create_data(PLV1_EXPANDRULE_LEGACY_REVOKE, 0,
++										 chunk_clone(chunk_from_chars(0x01,0x41)));
++	message->add_payload(message, &payload->payload_interface);
++	ck_assert_int_eq(message->generate(message, &keymat->keymat, NULL),
++					 VERIFY_ERROR);
++	message->destroy(message);
++	keymat->keymat.destroy(&keymat->keymat);
++}
++END_TEST
++
++void expandrule_add_message_context_tests(TCase *tc)
++{
++	tcase_add_test(tc, test_custom_quick_mode_mixed_or_wrong_type_rejected);
++	tcase_add_test(tc, test_informational_custom_types_are_mutually_exclusive);
++}
+diff --git a/src/libcharon/tests/suites/test_expandrule_task.c b/src/libcharon/tests/suites/test_expandrule_task.c
+new file mode 100644
+index 0000000..c2a1902
+--- /dev/null
++++ b/src/libcharon/tests/suites/test_expandrule_task.c
+@@ -0,0 +1,288 @@
++/*
++ * Copyright (C) 2026 Zhuoyuan Hao
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ */
++
++#include "test_suite.h"
++#include "expandrule_test_fixtures.h"
++
++#include <encoding/generator.h>
++#include <encoding/payloads/expandrule_payload.h>
++#include <encoding/payloads/hash_payload.h>
++#include <encoding/payloads/nonce_payload.h>
++#include <sa/ikev1/tasks/expandrule.h>
++
++static message_t *create_message(expandrule_wire_form_t form)
++{
++	message_t *message = message_create(IKEV1_MAJOR_VERSION, IKEV1_MINOR_VERSION);
++	message->set_exchange_type(message, form == EXPANDRULE_QM_ADD_SNAPSHOT ?
++									 QUICK_MODE : INFORMATIONAL_V1);
++	return message;
++}
++
++static void add_standard_qm_payloads(message_t *message)
++{
++	payload_t *sa = payload_create(PLV1_SECURITY_ASSOCIATION);
++	nonce_payload_t *nonce = nonce_payload_create(PLV1_NONCE);
++	ck_assert(sa);
++	nonce->set_nonce(nonce, chunk_from_chars(
++		0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17));
++	message->add_payload(message, sa);
++	message->add_payload(message, &nonce->payload_interface);
++}
++
++static void add_synthetic_hash(message_t *message)
++{
++	hash_payload_t *hash = hash_payload_create(PLV1_HASH);
++	hash->set_hash(hash, chunk_from_chars(0x00));
++	message->add_payload(message, &hash->payload_interface);
++}
++
++static expandrule_payload_t *payload_from_fixture(payload_type_t type,
++											  chunk_t fixture)
++{
++	return expandrule_payload_create_data(type, fixture.ptr[1],
++					chunk_clone(chunk_create(fixture.ptr + 4, fixture.len - 4)));
++}
++
++START_TEST(test_task_build_and_explicit_context)
++{
++	expandrule_message_t model = {
++		.kind = EXPANDRULE_CLIENT_ENVELOPE,
++		.data.client = {
++			.family = EXPANDRULE_IPV4,
++			.dialect = EXPANDRULE_DIALECT_0,
++			.leading_address = chunk_from_chars(0xc0,0x00,0x02,0x0a),
++		},
++	};
++	expandrule_t *task;
++	expandrule_error_t error;
++	expandrule_payload_t *payload;
++	message_t *message, *response, *final;
++	generator_t *generator;
++	chunk_t encoded, expected = expandrule_fixture(expandrule_empty_v4_bytes,
++												 sizeof(expandrule_empty_v4_bytes));
++
++	task = expandrule_create(EXPANDRULE_QM_ADD_SNAPSHOT, EXPANDRULE_DIALECT_0);
++	ck_assert(task->set_message(task, &model, &error));
++	message = create_message(EXPANDRULE_QM_ADD_SNAPSHOT);
++	message->set_message_id(message, 0x10203040);
++	ck_assert_int_eq(task->task.build(&task->task, message), FAILED);
++	message->destroy(message);
++	task->task.destroy(&task->task);
++
++	task = expandrule_create(EXPANDRULE_QM_ADD_SNAPSHOT, EXPANDRULE_DIALECT_0);
++	ck_assert_int_eq(task->task.get_type(&task->task), TASK_EXPANDRULE);
++	ck_assert(task->set_message(task, &model, &error));
++	message = create_message(EXPANDRULE_QM_ADD_SNAPSHOT);
++	message->set_message_id(message, 0x10203040);
++	add_standard_qm_payloads(message);
++	ck_assert_int_eq(task->task.build(&task->task, message), NEED_MORE);
++	ck_assert(!message->get_payload(message, PLV1_EXPANDRULE_ADD));
++	response = create_message(EXPANDRULE_QM_ADD_SNAPSHOT);
++	response->set_request(response, FALSE);
++	response->set_message_id(response, 0x10203040);
++	add_standard_qm_payloads(response);
++	ck_assert_int_eq(task->task.process(&task->task, response), NEED_MORE);
++	ck_assert(!task->get_message(task));
++	final = create_message(EXPANDRULE_QM_ADD_SNAPSHOT);
++	final->set_message_id(final, 0x10203040);
++	ck_assert_int_eq(task->task.build(&task->task, final), SUCCESS);
++	payload = (expandrule_payload_t*)final->get_payload(final,
++												 PLV1_EXPANDRULE_ADD);
++	ck_assert(payload);
++	generator = generator_create_no_dbg();
++	generator->generate_payload(generator, &payload->payload_interface);
++	encoded = generator->get_chunk(generator, NULL);
++	ck_assert(chunk_equals(encoded, expected));
++	generator->destroy(generator);
++	message->destroy(message);
++	response->destroy(response);
++	final->destroy(final);
++	task->task.destroy(&task->task);
++
++	task = expandrule_create(EXPANDRULE_QM_ADD_SNAPSHOT, EXPANDRULE_DIALECT_1);
++	ck_assert(!task->set_message(task, &model, &error));
++	ck_assert_int_eq(error.code, EXPANDRULE_ERROR_UNSUPPORTED_CONTEXT);
++	task->task.destroy(&task->task);
++}
++END_TEST
++
++START_TEST(test_task_builds_only_client_informational_forms)
++{
++	expandrule_wire_form_t forms[] = {
++		EXPANDRULE_INFO_ADD_DELTA,
++		EXPANDRULE_INFO_DELETE_DELTA,
++	};
++	payload_type_t types[] = {
++		PLV1_EXPANDRULE_ADD,
++		PLV1_EXPANDRULE_DELETE,
++	};
++	chunk_t fixture = expandrule_fixture(expandrule_single_delta_bytes,
++										 sizeof(expandrule_single_delta_bytes));
++	expandrule_message_t *model;
++	expandrule_error_t error;
++	expandrule_t *task;
++	message_t *message;
++	size_t i;
++
++	for (i = 0; i < countof(forms); i++)
++	{
++		ck_assert(expandrule_codec_decode(forms[i], EXPANDRULE_DIALECT_0,
++									  fixture, &model, &error));
++		task = expandrule_create(forms[i], EXPANDRULE_DIALECT_0);
++		ck_assert(task->set_message(task, model, &error));
++		message = create_message(forms[i]);
++		ck_assert_int_eq(task->task.build(&task->task, message), SUCCESS);
++		ck_assert(message->get_payload(message, types[i]));
++		message->destroy(message);
++		task->task.destroy(&task->task);
++		expandrule_message_destroy(model);
++	}
++}
++END_TEST
++
++START_TEST(test_task_process_all_forms)
++{
++	struct {
++		expandrule_wire_form_t form;
++		expandrule_dialect_t dialect;
++		payload_type_t type;
++		chunk_t fixture;
++	} cases[] = {
++		{ EXPANDRULE_QM_ADD_SNAPSHOT, EXPANDRULE_DIALECT_0,
++		  PLV1_EXPANDRULE_ADD, expandrule_fixture(expandrule_empty_v4_bytes,
++												  sizeof(expandrule_empty_v4_bytes)) },
++		{ EXPANDRULE_INFO_ADD_DELTA, EXPANDRULE_DIALECT_0,
++		  PLV1_EXPANDRULE_ADD, expandrule_fixture(expandrule_single_delta_bytes,
++												  sizeof(expandrule_single_delta_bytes)) },
++		{ EXPANDRULE_INFO_DELETE_DELTA, EXPANDRULE_DIALECT_0,
++		  PLV1_EXPANDRULE_DELETE, expandrule_fixture(expandrule_single_delta_bytes,
++												 sizeof(expandrule_single_delta_bytes)) },
++		{ EXPANDRULE_INFO_REVOKE_V1, EXPANDRULE_DIALECT_NONE,
++		  PLV1_EXPANDRULE_DELETE, expandrule_fixture(expandrule_revoke_bytes,
++											 sizeof(expandrule_revoke_bytes)) },
++		{ EXPANDRULE_INFO_REVOKE_LEGACY, EXPANDRULE_DIALECT_NONE,
++		  PLV1_EXPANDRULE_LEGACY_REVOKE, expandrule_fixture(expandrule_revoke_bytes,
++													 sizeof(expandrule_revoke_bytes)) },
++	};
++	message_t *message;
++	expandrule_payload_t *payload;
++	expandrule_t *task;
++	size_t i;
++
++	for (i = 0; i < countof(cases); i++)
++	{
++		message = create_message(cases[i].form);
++		if (expandrule_form_direction(cases[i].form) ==
++			EXPANDRULE_SERVER_TO_CLIENT)
++		{
++			add_synthetic_hash(message);
++		}
++		payload = payload_from_fixture(cases[i].type, cases[i].fixture);
++		message->add_payload(message, &payload->payload_interface);
++		task = expandrule_create(cases[i].form, cases[i].dialect);
++		if (expandrule_form_direction(cases[i].form) ==
++			EXPANDRULE_SERVER_TO_CLIENT)
++		{
++			ck_assert_int_eq(task->task.process(&task->task, message), SUCCESS);
++			ck_assert(task->get_message(task));
++		}
++		else
++		{
++			ck_assert_int_eq(task->task.process(&task->task, message), FAILED);
++			ck_assert(!task->get_message(task));
++		}
++		task->task.destroy(&task->task);
++		message->destroy(message);
++	}
++}
++END_TEST
++
++START_TEST(test_task_actor_order_and_migration_gates)
++{
++	expandrule_message_t client = {
++		.kind = EXPANDRULE_CLIENT_ENVELOPE,
++		.data.client = {
++			.family = EXPANDRULE_IPV4,
++			.dialect = EXPANDRULE_DIALECT_0,
++			.leading_address = chunk_from_chars(0xc0,0x00,0x02,0x0a),
++		},
++	};
++	expandrule_message_t revoke = {
++		.kind = EXPANDRULE_SERVER_REVOKE,
++		.data.revoke = { .raw_flags = 0,
++						 .opaque_value = chunk_from_chars(0x41) },
++	};
++	expandrule_t *task;
++	expandrule_error_t error;
++	expandrule_payload_t *payload;
++	message_t *message;
++
++	task = expandrule_create(EXPANDRULE_INFO_REVOKE_V1,
++							 EXPANDRULE_DIALECT_NONE);
++	ck_assert(!task->set_message(task, &revoke, &error));
++	message = create_message(EXPANDRULE_INFO_REVOKE_V1);
++	ck_assert_int_eq(task->task.build(&task->task, message), FAILED);
++	message->destroy(message);
++	task->task.destroy(&task->task);
++
++	task = expandrule_create(EXPANDRULE_INFO_REVOKE_LEGACY,
++							 EXPANDRULE_DIALECT_NONE);
++	message = create_message(EXPANDRULE_INFO_REVOKE_LEGACY);
++	payload = payload_from_fixture(PLV1_EXPANDRULE_LEGACY_REVOKE,
++		expandrule_fixture(expandrule_revoke_bytes,
++						   sizeof(expandrule_revoke_bytes)));
++	message->add_payload(message, &payload->payload_interface);
++	add_synthetic_hash(message);
++	ck_assert_int_eq(task->task.process(&task->task, message), FAILED);
++	message->destroy(message);
++	task->task.destroy(&task->task);
++
++	task = expandrule_create(EXPANDRULE_QM_ADD_SNAPSHOT, EXPANDRULE_DIALECT_0);
++	ck_assert(task->set_message(task, &client, &error));
++	task->task.migrate(&task->task, NULL);
++	message = create_message(EXPANDRULE_QM_ADD_SNAPSHOT);
++	add_standard_qm_payloads(message);
++	ck_assert_int_eq(task->task.build(&task->task, message), FAILED);
++	message->destroy(message);
++	task->task.destroy(&task->task);
++}
++END_TEST
++
++START_TEST(test_task_rejects_invalid_profile_and_form)
++{
++	uint8_t invalid[] = { 0x00,0x00,0x00,0x04 };
++	message_t *message = create_message(EXPANDRULE_INFO_REVOKE_V1);
++	expandrule_payload_t *payload;
++	expandrule_t *task;
++
++	ck_assert(!expandrule_create(EXPANDRULE_QM_ADD_SNAPSHOT,
++									 EXPANDRULE_DIALECT_NONE));
++	ck_assert(!expandrule_create(EXPANDRULE_INFO_REVOKE_V1,
++									 EXPANDRULE_DIALECT_0));
++	add_synthetic_hash(message);
++	payload = payload_from_fixture(PLV1_EXPANDRULE_DELETE,
++									chunk_from_thing(invalid));
++	message->add_payload(message, &payload->payload_interface);
++	task = expandrule_create(EXPANDRULE_INFO_REVOKE_V1,
++							 EXPANDRULE_DIALECT_NONE);
++	ck_assert_int_eq(task->task.process(&task->task, message), FAILED);
++	ck_assert(task->get_error(task).code != EXPANDRULE_ERROR_NONE);
++	task->task.destroy(&task->task);
++	message->destroy(message);
++}
++END_TEST
++
++void expandrule_add_task_tests(TCase *tc)
++{
++	tcase_add_test(tc, test_task_build_and_explicit_context);
++	tcase_add_test(tc, test_task_builds_only_client_informational_forms);
++	tcase_add_test(tc, test_task_process_all_forms);
++	tcase_add_test(tc, test_task_actor_order_and_migration_gates);
++	tcase_add_test(tc, test_task_rejects_invalid_profile_and_form);
++}
+-- 
+2.55.0
+

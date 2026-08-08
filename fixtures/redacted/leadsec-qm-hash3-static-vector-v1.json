@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "fixtureClass": "leadsec_qm_hash3_static_vector",
+  "vendorBinary": {
+    "sha256": "ce25374f028216374d386c91a7ee8fea8146b4bfd80f5fde6a59954700555404",
+    "uuid": "D6973685-6A34-30CD-A8A9-94A342B1CA47"
+  },
+  "staticDisassembly": {
+    "getHashPhase2": {
+      "symbol": "_get_hash_phase2",
+      "address": "0x10014fa70"
+    },
+    "quickModeBuildIState1": {
+      "component": "quick_mode",
+      "symbol": "_build_i",
+      "functionEntry": "0x100165db0",
+      "state": 1,
+      "rangeStartInclusive": "0x10016647b",
+      "rangeEndExclusive": "0x10016657e",
+      "callInstruction": "0x100166574",
+      "callTarget": "_add_expandrule",
+      "callTargetAddress": "0x100166bf0"
+    }
+  },
+  "hash3": {
+    "algorithm": "HMAC-SHA1",
+    "formula": "HASH3=HMAC-SHA1(SKEYID_a,0|MID|Ni|Nr)",
+    "addruleBytesIncluded": false,
+    "formulaReference": {
+      "skeyidALabel": "synthetic_skeyid_a",
+      "skeyidAHex": "000102030405060708090a0b0c0d0e0f10111213",
+      "inputLayout": {
+        "zeroHex": "00",
+        "midHex": "01020304",
+        "niHex": "101112131415161718191a1b1c1d1e1f",
+        "nrHex": "202122232425262728292a2b2c2d2e2f"
+      },
+      "inputHex": "0001020304101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "inputByteCount": 37,
+      "outputHex": "b8494c87c1816dacf76df03ce97591efcdbe92fc"
+    },
+    "candidateKeymatReference": {
+      "skeyidALabel": "synthetic_derived_skeyid_a",
+      "skeyidAHex": "1525560a1d9cc81b96c26cfda2f753bfcf4a4f1c",
+      "inputLayout": {
+        "zeroHex": "00",
+        "midHex": "10203040",
+        "niHex": "101112131415161718191a1b1c1d1e1f",
+        "nrHex": "202122232425262728292a2b2c2d2e2f"
+      },
+      "inputHex": "0010203040101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+      "inputByteCount": 37,
+      "outputHex": "5ac5eb052dd4043437faea7bfb73ab306567e5a6"
+    }
+  },
+  "evidence": {
+    "class": "vendor_static_disassembly_plus_independent_synthetic_calculation",
+    "provesOnly": [
+      "vendor_static_hash3_control_flow",
+      "independent_synthetic_hmac_sha1_calculation"
+    ],
+    "vendorStaticHashContractStatus": "established",
+    "independentReferenceVectorObserved": true,
+    "candidateMatchStatus": "validated_by_checkpoint_test",
+    "liveVendorHashCompatibilityStatus": "unproven",
+    "independentVendorOracleObserved": false,
+    "liveDifferentialObserved": false,
+    "vendorServerAcceptanceObserved": false
+  },
+  "safety": {
+    "syntheticOnly": true,
+    "containsSecrets": false,
+    "containsReplayableCapture": false,
+    "containsVendorBinaryOrObject": false
+  }
+}

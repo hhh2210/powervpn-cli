@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "fixtureClass": "vici_daemon_smoke_summary",
+  "upstreamVersion": "6.0.7",
+  "attemptCount": 1,
+  "execution": {
+    "nonRoot": true,
+    "randomHighUdpPorts": true,
+    "scratchPidAndViciSocket": true,
+    "fakeKernel": true,
+    "initiators": 0,
+    "loadTesterControlSocketFailClosed": true,
+    "loadedPlugins": [
+      "openssl",
+      "nonce",
+      "hmac",
+      "kdf",
+      "drbg",
+      "kernel-pfroute",
+      "load-tester",
+      "socket-default",
+      "vici",
+      "counters"
+    ]
+  },
+  "credentialBoundary": {
+    "userOrProjectCredentialLoaded": false,
+    "viciCredentialCommandSent": false,
+    "ephemeralBuiltInLoadTesterCredentialSet": true
+  },
+  "evidenceSemantics": {
+    "selfConsistency": {
+      "evidenceClass": "implementation_self_consistency",
+      "observed": true,
+      "vendorCompatibilityInferred": false
+    },
+    "stockViciByteOracle": {
+      "evidenceClass": "stock_vici_serialization",
+      "observed": true,
+      "provesOnly": [
+        "stock_vici_serialization"
+      ],
+      "daemonAcceptanceInferred": false,
+      "vendorHashCompatibilityInferred": false
+    },
+    "daemonSmoke": {
+      "evidenceClass": "daemon_smoke",
+      "status": "blocked",
+      "acceptancePass": false
+    },
+    "vendorHashCompatibility": {
+      "evidenceClass": "vendor_hash_compatibility",
+      "status": "unproven",
+      "pendingIndependentEvidence": [
+        "independent_hash_oracle",
+        "vendor_server_acceptance"
+      ],
+      "independentHashOracleObserved": false,
+      "vendorServerAcceptanceObserved": false,
+      "promotableFromSelfConsistency": false,
+      "promotableFromStockViciByteOracle": false,
+      "promotableFromBlockedDaemonSmoke": false
+    }
+  },
+  "result": {
+    "classification": "blocked_not_acceptance_pass",
+    "firstOperation": "version",
+    "firstFailure": "response_timeout",
+    "timeoutSeconds": 5,
+    "loadConnSent": false,
+    "daemonSaCountObserved": false,
+    "daemonPolicyCountObserved": false
+  },
+  "cleanup": {
+    "utunSetChanged": false,
+    "syntheticDocumentationRouteObserved": false,
+    "globalRouteSnapshotStable": false,
+    "residualProcess": false,
+    "residualUdpDescriptor": false,
+    "residualPidFile": false,
+    "residualUnixSocket": false
+  },
+  "safety": {
+    "containsSecrets": false,
+    "containsReplayableCapture": false,
+    "vendorSessionTouched": false,
+    "surgeConfigurationTouched": false,
+    "privilegedOperation": false
+  }
+}

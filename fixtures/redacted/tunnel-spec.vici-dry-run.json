@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "gateway": "<gateway>",
+  "ikeVersion": 1,
+  "exchangeMode": "main",
+  "authentication": {
+    "machine": "psk",
+    "extended": "unknown"
+  },
+  "localIdentifier": "<local-identifier>",
+  "remoteIdentifier": "<remote-identifier>",
+  "tunnelName": "<tunnel-name>",
+  "natTraversal": "unknown",
+  "credentialReference": {
+    "storage": "keychain",
+    "identifier": "<credential-reference>"
+  },
+  "ikeProposal": [
+    "aes128-sha1-modp1024"
+  ],
+  "espProposal": [
+    "aes128-sha1"
+  ],
+  "modeConfig": "unknown",
+  "vendorIds": [],
+  "routes": [],
+  "resourceOperations": [
+    "ADDRULE",
+    "DELRULE"
+  ],
+  "resources": [
+    {
+      "name": "<resource-name>",
+      "ruleIdentifier": "<rule-identifier>",
+      "remoteTrafficSelectors": [
+        "<resource-cidr>"
+      ]
+    }
+  ]
+}

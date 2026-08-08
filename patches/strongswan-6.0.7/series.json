@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "version": "6.0.7",
+    "baseCommit": "5973ff8e41deef4e015e1138a2de688acedf6f75"
+  },
+  "patches": [
+    {
+      "sequence": 1,
+      "path": "0001-Add-strict-IKEv1-expandrule-wire-codec.patch",
+      "commit": "1fda864cca91da0aa9a87dd96e1823c3962dbd09",
+      "sha256": "b46031db4589865deef87433fe62ef2437ae0a55fe2f3fe42fa171c240d1aa6e",
+      "scope": "lossless structural codec and canonical profile"
+    },
+    {
+      "sequence": 2,
+      "path": "0002-Integrate-IKEv1-expandrule-payload-task-and-HASH.patch",
+      "commit": "67c9810900e2d8486cb3b11495a8362433494ca0",
+      "sha256": "6e4c609240ae2a1996a3a547cede72ac1be7121922aa6f576687632609f34213",
+      "scope": "IKEv1 payload factory, fail-closed message/profile gates, stock Quick Mode HASH(3), and unscheduled neutral task"
+    }
+  ],
+  "integrationBoundary": {
+    "taskManagerWired": false,
+    "viciCustomCommandWired": false,
+    "securityAssociationMutation": false,
+    "routeOrPolicyMutation": false,
+    "utunMutation": false,
+    "liveServerTested": false
+  },
+  "safety": {
+    "containsSecrets": false,
+    "containsReplayableCapture": false,
+    "containsVendorBinaryOrObject": false
+  }
+}

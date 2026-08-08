@@ -253,3 +253,92 @@ Next command: implement the CP6 replayable patch skeleton and synthetic VICI
 dry run without creating an SA, route, policy, or utun.
 
 Approval required: no.
+
+## 2026-08-08 19:26 +08:00 — Checkpoint 6
+
+State: PASS (offline compatibility-port checkpoint). The post-fix
+implementation matches the vendor static Quick Mode phase/HASH(3) contract and
+an independent synthetic reference. Live vendor differential behavior and
+server acceptance remain unproven. The separate daemon VICI smoke remains
+BLOCKED but is outside deterministic dry-run acceptance.
+
+Verified vendor static evidence: `_get_hash_phase2` at `0x10014fa70` has no
+custom branch; Quick Mode `_build_i` state 0 builds standard SA/NONCE/TS and
+state 1 appends ADDRULE. The `[HASH ADDRULE]` message therefore uses standard
+`HASH(3) = PRF(SKEYID_a, 0 | M-ID | Ni_b | Nr_b)` and excludes ADDRULE bytes.
+
+Verified implementation evidence: private payload factory/raw-header wrapper,
+explicit neutral form/dialect task, exact state-0/state-1 placement, standard
+HASH(3), stock ordered VICI `load-conn` bytes, credential-reference-safe dry
+run, duplicate-key rejection, and no-IKEv1 link isolation. The independent
+synthetic reference calculates the expected PRF and proves ADDRULE-byte
+exclusion with mutation counterchecks.
+
+Protocol fidelity hard rules:
+
+1. MUST NOT add/remove/reorder/normalize/reinterpret/symmetrize observed wire.
+2. Every outbound byte MUST have evidence.
+3. Unknown values MUST remain opaque.
+4. Parse MUST NOT imply accept or emit.
+5. The private predicate MUST be complete; outside it, upstream is unchanged.
+6. Same-implementation round trips prove self-consistency only.
+7. Observed vendor behavior outranks standards cleanup.
+8. Wire-neutral safety is allowed; wire-visible improvement/generalization is
+   forbidden.
+9. Owned XPC/control/internal architecture may be refactored.
+10. Intentional divergence MUST be outside the compatibility profile,
+    independently feature-gated, and default off.
+
+Evidence: [`../evidence/checkpoint-6-validation.md`](../evidence/checkpoint-6-validation.md),
+[`../../patches/strongswan-6.0.7/series.json`](../../patches/strongswan-6.0.7/series.json),
+[`../../fixtures/redacted/leadsec-qm-hash3-static-vector-v1.json`](../../fixtures/redacted/leadsec-qm-hash3-static-vector-v1.json),
+[`../../fixtures/redacted/vici-load-conn-dry-run-v1.json`](../../fixtures/redacted/vici-load-conn-dry-run-v1.json),
+and [`../../fixtures/redacted/vici-daemon-smoke-summary-v1.json`](../../fixtures/redacted/vici-daemon-smoke-summary-v1.json).
+
+Canonical lab commit: this checkpoint commit. Upstream CP6 commit
+`67c9810900e2d8486cb3b11495a8362433494ca0`, 0002 patch SHA-256
+`6e4c609240ae2a1996a3a547cede72ac1be7121922aa6f576687632609f34213`, on CP4A
+commit `1fda864cca91da0aa9a87dd96e1823c3962dbd09`.
+
+Changed files: Pure Swift ordered VICI model/codec and TunnelSpec builder,
+closed JSON duplicate-key scanner, CLI dry-run route, tests, official Python
+oracle fixture verifier, redacted fixtures, two-patch strongSwan series,
+LeadSec HASH(3) static/reference fixture, checkpoint verifier, evidence,
+protocol status, README, Goal state, and this progress record.
+
+Tests/commands: `scripts/verify_checkpoint.sh 6` exit 0; targeted expandrule
+39/39; full libcharon 5/5; full patched strongSwan checks; arm64 `libcharon`;
+independent no-IKEv1 PASS; `keymat_v1.c` and `task_manager_v1.c` zero-diff from
+CP4A; patch replay tree equality; independent HASH(3) synthetic reference;
+14 targeted Swift tests; 55 full Swift tests; arm64 Swift build; official 6.0.7
+Python VICI oracle exact 324/335-byte equality; strict Swift format; Gitleaks
+and cumulative diff checks.
+
+Review lane and result: Exactly one integrated checkpoint review found two P2
+issues: duplicate JSON keys survived Foundation canonicalization, and the
+no-IKEv1 build retained an unlinked expandrule factory reference. Both were
+fixed and tested. The one permitted independent narrow review found one P2:
+reversed `[NONCE, ADDRULE]` order could evade the direct keymat private-payload
+presence flag in the pre-static-evidence candidate. The vendor-faithful post-fix
+implementation supersedes that keymat branch and leaves `keymat_v1.c`
+unchanged. No additional or third review ran.
+
+Safety/cleanup: Offline implementation and dry run performed no socket,
+credential-secret, SA, route, policy, utun, or vendor mutation. One isolated
+non-root daemon attempt used random ports and fake kernel but timed out on its
+first VICI `version` request; it sent no `load-conn` and left no process, UDP
+descriptor, PID, UNIX socket, or new utun. Whole-route-table equality was not
+claimed because unrelated dynamic routes changed during the window.
+
+Remaining: `current_checkpoint` advances to CP7 live-backend approval prep.
+Diagnose the VICI `version` timeout as a bounded unprivileged control-path issue
+and write the live launch/stop/rollback artifacts. Live differential and server
+acceptance, backend SA/policy installation, Surge coexistence, and server interop
+remain unproven.
+
+Next command: diagnose the scratch VICI `version` response timeout and write the
+Live Approval Gate artifacts without loading credentials or mutating network
+state.
+
+Approval required: no for the bounded diagnosis; explicit approval remains
+required before any Checkpoint 7 live-backend action.

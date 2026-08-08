@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 1,
+  "fixtureClass": "vici_load_conn_dry_run",
+  "sourceTunnelSpec": {
+    "path": "fixtures/redacted/tunnel-spec.vici-dry-run.json",
+    "sha256": "69b6f0ad8a032a05c0285f2494c5cc06a6f5208233152873a3a6b8823a6ef576"
+  },
+  "oracle": {
+    "implementation": "strongSwan Python vici.protocol.Message/Packet",
+    "version": "6.0.7",
+    "sourceCommit": "5973ff8e41deef4e015e1138a2de688acedf6f75",
+    "protocolModule": "src/libcharon/plugins/vici/python/vici/protocol.py",
+    "protocolModuleSha256": "f86247d58ce36a84a651bc7fcce9b5acd789b185c056e8fc6dc7015bfc07d3a5"
+  },
+  "safety": {
+    "synthetic": true,
+    "containsSecrets": false,
+    "containsReplayableCapture": false,
+    "usesNetworkOrSocket": false
+  },
+  "command": "load-conn",
+  "orderedTree": [
+    {
+      "kind": "section",
+      "name": "<tunnel-name>",
+      "entries": [
+        {
+          "kind": "value",
+          "name": "version",
+          "value": "1"
+        },
+        {
+          "kind": "value",
+          "name": "aggressive",
+          "value": "no"
+        },
+        {
+          "kind": "list",
+          "name": "remote_addrs",
+          "values": [
+            "<gateway>"
+          ]
+        },
+        {
+          "kind": "list",
+          "name": "proposals",
+          "values": [
+            "aes128-sha1-modp1024"
+          ]
+        },
+        {
+          "kind": "section",
+          "name": "local",
+          "entries": [
+            {
+              "kind": "value",
+              "name": "auth",
+              "value": "psk"
+            },
+            {
+              "kind": "value",
+              "name": "id",
+              "value": "<local-identifier>"
+            }
+          ]
+        },
+        {
+          "kind": "section",
+          "name": "remote",
+          "entries": [
+            {
+              "kind": "value",
+              "name": "auth",
+              "value": "psk"
+            },
+            {
+              "kind": "value",
+              "name": "id",
+              "value": "<remote-identifier>"
+            }
+          ]
+        },
+        {
+          "kind": "section",
+          "name": "children",
+          "entries": [
+            {
+              "kind": "section",
+              "name": "<resource-name>",
+              "entries": [
+                {
+                  "kind": "list",
+                  "name": "local_ts",
+                  "values": [
+                    "dynamic"
+                  ]
+                },
+                {
+                  "kind": "list",
+                  "name": "remote_ts",
+                  "values": [
+                    "<resource-cidr>"
+                  ]
+                },
+                {
+                  "kind": "list",
+                  "name": "esp_proposals",
+                  "values": [
+                    "aes128-sha1"
+                  ]
+                },
+                {
+                  "kind": "value",
+                  "name": "start_action",
+                  "value": "none"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "resourceRuleMetadata": {
+    "semanticStatus": "unresolved_cp4b",
+    "includedInViciTree": false,
+    "excludedTunnelSpecFields": [
+      "credentialReference",
+      "sessionBinding",
+      "mapID",
+      "natTraversal",
+      "modeConfig",
+      "vendorIds",
+      "routes",
+      "resourceOperations",
+      "resources[].ruleIdentifier"
+    ]
+  },
+  "canonicalMessage": {
+    "definition": "Message.serialize(orderedTree)",
+    "length": 324,
+    "sha256": "994e8884c42618b643595a46e2a9744428df3ce06be7df52151f01e8f884eb3a"
+  },
+  "canonicalCommandPacket": {
+    "definition": "Packet.request(command, Message.serialize(orderedTree)); excludes the four-byte Transport length prefix",
+    "includesTransportLengthPrefix": false,
+    "length": 335,
+    "sha256": "07e9e6de79024f6c2d879e410942e7a402ce2f2c99d6b2fc8064ddea9819fa15"
+  }
+}

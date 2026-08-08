@@ -30,6 +30,31 @@ upstream strongSwan 6.0.7.
   session. The value-free runtime fixture confirms session-check request/status
   metadata and the GUI resource-toggle producer shape; WebSocket behavior and
   the exact portal-field-to-PSK/resource mapping remain explicitly unknown.
+- CP4B made zero business-semantic wire promotions: the complete static writer
+  chain remains one evidence class, so opaque resource fields stay opaque.
+- CP6 is **PASS (offline compatibility-port checkpoint)**. Upstream commit
+  `67c9810900e2d8486cb3b11495a8362433494ca0` and replayable 0002 patch SHA-256
+  `6e4c609240ae2a1996a3a547cede72ac1be7121922aa6f576687632609f34213`
+  implement the payload/factory/task surface while leaving `keymat_v1.c` and
+  `task_manager_v1.c` unchanged from CP4A.
+- New static evidence fixes the private Quick Mode contract: vendor
+  `_get_hash_phase2` at `0x10014fa70` has no custom branch; `_build_i` state 0
+  builds standard SA/NONCE/TS and state 1 appends ADDRULE. The resulting
+  `[HASH ADDRULE]` uses standard
+  `HASH(3)=PRF(SKEYID_a,0|M-ID|Ni_b|Nr_b)` and excludes ADDRULE bytes.
+- `fixtures/redacted/leadsec-qm-hash3-static-vector-v1.json` records the
+  value-free static contract, and an independent synthetic HASH(3) reference
+  matches the implementation. Targeted expandrule tests pass 39/39, full
+  libcharon suites pass 5/5, the no-IKEv1 build passes, and patch replay equals
+  the implementation tree.
+- The strict Swift VICI dry run remains accepted: its 335-byte stock
+  `load-conn` request matches the official Python VICI encoder. This does not
+  prove live vendor differential behavior or server acceptance, both of which
+  remain unproven.
+- A separate non-root daemon smoke remains **BLOCKED**: its first VICI `version`
+  request timed out before `load-conn`. It was cleaned up without a new utun or
+  residual process/socket. This blocker is outside deterministic dry-run
+  acceptance and remains the next bounded control-path task.
 
 The target is therefore:
 
@@ -45,6 +70,30 @@ The vendor 5.8.0 code is a behavioral reference only. Its x86_64 plugin is not
 reused, and strongSwan 6.0.3+ rejects plugins built for a different version in
 any case.
 
+## Protocol fidelity invariant
+
+This repository is a compatibility port, not a protocol-design project:
+
+1. It MUST NOT add, remove, reorder, normalize, reinterpret, or symmetrize any
+   observed payload, field, byte order, HASH coverage, or directional asymmetry.
+2. Every outbound byte MUST trace to vendor evidence, a protected reference
+   vector, or an explicitly approved server-acceptance result.
+3. Unknown length-delimited values MUST remain opaque and neutral.
+4. Structural parseability MUST NOT imply profile acceptance or permission to
+   emit; parse, accept, and emit are separate decisions.
+5. The private-context predicate MUST be complete; outside it, payload order,
+   HASH behavior, message rules, and results remain identical to upstream.
+6. A same-implementation generate/verify round trip proves self-consistency
+   only and MUST NOT be reported as compatibility evidence.
+7. Observed vendor behavior outranks standards-driven cleanup or upstream
+   intuition inside the compatibility profile.
+8. Wire-neutral bounds, memory safety, secret hygiene, and fail-closed checks are
+   allowed; wire-visible improvements or generalizations are forbidden.
+9. Owned GUI, XPC/control schema, helper names, classes, and state machines may
+   be refactored; only server-observable bytes, timing, and effects must match.
+10. Intentional divergence MUST live outside the compatibility profile behind
+    an independent feature gate that is default off.
+
 ## Commands
 
 ```bash
@@ -55,6 +104,7 @@ swift run powervpn oracle inventory --json
 swift run powervpn oracle correlate fixtures/redacted/protocol-correlation-value-free-v1.json --json
 swift run powervpn oracle correlate fixtures/redacted/protocol-correlation-runtime-metadata-v1.json --json
 swift run powervpn spec validate-redacted fixtures/redacted/tunnel-spec.example.json
+swift run powervpn spec vici-dry-run fixtures/redacted/tunnel-spec.vici-dry-run.json --json
 ```
 
 All current commands are read-only. The old `reconnect` command was removed
@@ -84,6 +134,7 @@ BIN="$(swift build --show-bin-path)/powervpn"
 file "$BIN"
 scripts/verify_checkpoint.sh 4a
 scripts/verify_checkpoint.sh 5
+scripts/verify_checkpoint.sh 6
 ```
 
 The Swift package has one executable product, `powervpn`, and one reusable
