@@ -210,3 +210,46 @@ opaque unless two independent evidence classes agree.
 
 Approval required: no. The live observation and approved resource cycle are
 complete; no further network action is part of CP5.
+
+## 2026-08-08 18:25 +08:00 — Checkpoint 4B
+
+State: PASS with zero semantic promotions
+
+Verified: Eight candidate wire slots were evaluated under the
+two-independent-direct-mapping-class rule. A hash-locked static chain maps the
+XPC consumer into the vendor expandrule writer, but it remains one
+`vendor_static_disassembly` evidence class. CP5 runtime and differential
+observations did not cross `start_connection` or a plaintext serializer slot,
+so they do not qualify as a second direct mapping class.
+
+Evidence: [`../evidence/checkpoint-4b-semantic-promotion.md`](../evidence/checkpoint-4b-semantic-promotion.md)
+and [`../../fixtures/redacted/semantic-promotion-gate-v1.json`](../../fixtures/redacted/semantic-promotion-gate-v1.json).
+
+Changed files: Machine-readable promotion gate, evidence matrix, independent
+CP4B verifier, IKE status, Goal checkpoint state, and this progress record. No
+Swift, codec, upstream patch, or synthetic wire-vector file changed.
+
+Tests/commands: `scripts/verify_checkpoint.sh 4b` exit 0; targeted expandrule
+encode/decode/profile suite PASS; the seven JSON vectors remain byte-identical
+to the compiled C fixture and CP4A commit; 41 Swift tests PASS; arm64 Swift
+build PASS; Gitleaks and cumulative diff checks PASS.
+
+Review lane and result: Exactly one integrated checkpoint review ran. Its two
+P1 findings were fixed by pinning the complete candidate decision tuples,
+linking candidates and promotions bidirectionally, and scoping each direct
+evidence edge to an exact wire slot and candidate semantic. Final acceptance
+passed; no additional independent review ran.
+
+Safety/cleanup: Offline only. No installed app/helper, live VPN process,
+session, route, SA, utun, packet, credential, Keychain, raw capture, or raw log
+was read or changed. The CP4A upstream worktree remains clean at its canonical
+commit.
+
+Remaining: CP6 must integrate the neutral codec into the minimum
+payload/message/task skeleton and a credential-reference-safe VICI dry run. It
+must not reinterpret opaque fields during integration.
+
+Next command: implement the CP6 replayable patch skeleton and synthetic VICI
+dry run without creating an SA, route, policy, or utun.
+
+Approval required: no.

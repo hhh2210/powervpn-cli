@@ -1,8 +1,9 @@
 # IKE and data-plane evidence
 
 Status: base protocol and private resource extension identified; the CP4A
-wire-syntax codec is implemented as an offline checkpoint candidate. Opaque
-field semantics, task integration, and backend equivalence remain unverified.
+wire-syntax codec and CP4B semantic gate are complete. No business-semantic
+field promotion passed the two-evidence-class gate. Task integration and
+backend equivalence remain unverified.
 
 ## Vendor baseline
 
@@ -54,6 +55,23 @@ CP4A intentionally calls the two encodings dialect 0/1 and keeps their
 length-delimited fields opaque. Names such as map ID, resource ID, or resource
 name require CP5 correlation and the CP4B two-evidence promotion gate.
 
+## CP4B semantic-promotion result
+
+The hash-locked vendor writer chain strongly correlates `leadingAddress` with
+the XPC VIP fields, dialect-0 records with converted route/name inputs, and
+dialect-1 opaque records with the XPC map-ID input. That complete chain is
+still one `vendor_static_disassembly` evidence class. CP5 did not observe live
+`start_connection` or a plaintext serialization slot, so its runtime resource
+toggle and recovery observations do not directly map any body field.
+
+The promotion set is therefore empty. Counts retain positional category names;
+dialect-0 address/mask/prefix names remain syntax-only; every length-delimited
+identity value and the short server revoke value remain opaque. The exact
+matrix and machine gate are recorded in
+[`evidence/checkpoint-4b-semantic-promotion.md`](evidence/checkpoint-4b-semantic-promotion.md)
+and `fixtures/redacted/semantic-promotion-gate-v1.json`. CP6 must integrate
+this neutral model and may not introduce semantic aliases as a shortcut.
+
 ## macOS backend evidence
 
 The vendor helper contains custom kernel-ipsec, PF_ROUTE, utun, and
@@ -72,10 +90,9 @@ This proves build/ABI viability but not SA installation or server interop.
 
 ## Remaining checkpoint sequence
 
-1. At CP5, correlate control-plane/XPC differential observations with the
-   still-opaque wire fields; retain any raw evidence only in protected scratch.
-2. At CP4B, promote a field name only when two independent evidence classes
-   agree.
+1. CP5 correlated the legal value-free control/XPC observations; no raw value
+   entered Git.
+2. CP4B applied the two-independent-class gate and made zero promotions.
 3. At CP6, add the minimal payload/message/task/VICI skeleton and keep it dry;
    CP4A itself does not touch message factories or IKE tasks.
 4. In an approved CP7/CP8 window, use 6.0.7 to establish the standard base SA

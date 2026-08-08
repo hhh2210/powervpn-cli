@@ -1,0 +1,277 @@
+{
+  "schemaVersion": 1,
+  "fixtureClass": "expandrule_semantic_promotion_gate",
+  "provenance": "value_free_static_and_runtime_metadata_only",
+  "containsSecrets": false,
+  "containsReplayableCapture": false,
+  "sourceCheckpoints": {
+    "cp4aRepositoryCommit": "c1e6e5f8dd52028d647e75dc8010c83ba7ee5dec",
+    "cp4aUpstreamCommit": "1fda864cca91da0aa9a87dd96e1823c3962dbd09",
+    "cp5RepositoryCommit": "82731013bb97f3dbfcc6f45df099e79e45dc3b64"
+  },
+  "policy": {
+    "minimumIndependentDirectMappingClasses": 2,
+    "staticEvidenceAcrossVendorBinariesCountsAsOneClass": true,
+    "shapeOrNameSimilarityQualifies": false,
+    "syntheticVectorsQualifyForSemantics": false,
+    "absenceObservationQualifies": false
+  },
+  "evidenceCatalog": [
+    {
+      "id": "CP4A-STATIC-03",
+      "class": "vendor_static_disassembly",
+      "supportsDirectMapping": false,
+      "scope": "wire_layout_only"
+    },
+    {
+      "id": "CP4A-UNKNOWN-01",
+      "class": "declared_unknown",
+      "supportsDirectMapping": false,
+      "scope": "business_semantics_unknown"
+    },
+    {
+      "id": "CP4A-SYNTHETIC-01",
+      "class": "synthetic_fixture",
+      "supportsDirectMapping": false,
+      "scope": "codec_identity_only"
+    },
+    {
+      "id": "CP4B-STATIC-WRITER-01",
+      "class": "vendor_static_disassembly",
+      "supportsDirectMapping": false,
+      "scope": "shared_writer_chain_and_category_count_dataflow"
+    },
+    {
+      "id": "CP4B-STATIC-LEADING-01",
+      "class": "vendor_static_disassembly",
+      "supportsDirectMapping": true,
+      "scope": "xpc_consumer_to_expandrule_writer_edge",
+      "wireSlot": "client.leading_address",
+      "candidateSemantic": "virtual_ip"
+    },
+    {
+      "id": "CP4B-STATIC-D0-PRIMARY-01",
+      "class": "vendor_static_disassembly",
+      "supportsDirectMapping": true,
+      "scope": "xpc_consumer_to_expandrule_writer_edge",
+      "wireSlot": "client.dialect0.primary_record",
+      "candidateSemantic": "route_prefix"
+    },
+    {
+      "id": "CP4B-STATIC-D0-SECONDARY-01",
+      "class": "vendor_static_disassembly",
+      "supportsDirectMapping": true,
+      "scope": "xpc_consumer_to_expandrule_writer_edge",
+      "wireSlot": "client.dialect0.secondary_opaque",
+      "candidateSemantic": "resource_name_or_id"
+    },
+    {
+      "id": "CP4B-STATIC-D1-PRIMARY-01",
+      "class": "vendor_static_disassembly",
+      "supportsDirectMapping": true,
+      "scope": "xpc_consumer_to_expandrule_writer_edge",
+      "wireSlot": "client.dialect1.primary_opaque",
+      "candidateSemantic": "map_id"
+    },
+    {
+      "id": "CP4B-STATIC-D1-SECONDARY-01",
+      "class": "vendor_static_disassembly",
+      "supportsDirectMapping": true,
+      "scope": "xpc_consumer_to_expandrule_writer_edge",
+      "wireSlot": "client.dialect1.secondary_opaque",
+      "candidateSemantic": "map_id"
+    },
+    {
+      "id": "CP5-STATIC-PORTAL-XPC-01",
+      "class": "vendor_static_disassembly",
+      "supportsDirectMapping": false,
+      "scope": "portal_object_lineage_without_field_join"
+    },
+    {
+      "id": "CP5-RUNTIME-TOGGLE-01",
+      "class": "runtime_metadata",
+      "supportsDirectMapping": false,
+      "scope": "gui_toggle_producer_without_wire_slot"
+    },
+    {
+      "id": "CP5-DIFFERENTIAL-TOGGLE-01",
+      "class": "differential_observation",
+      "supportsDirectMapping": false,
+      "scope": "resource_off_on_and_recovery_without_wire_slot"
+    },
+    {
+      "id": "CP5-NOTOBSERVED-START-01",
+      "class": "absence_observation",
+      "supportsDirectMapping": false,
+      "scope": "start_connection_and_plaintext_serializer_not_observed"
+    }
+  ],
+  "candidates": [
+    {
+      "id": "leading-address-as-virtual-ip",
+      "wireSlot": "client.leading_address",
+      "syntaxName": "leadingAddress",
+      "candidateSemantic": "virtual_ip",
+      "decision": "retain_neutral",
+      "reasonCode": "one_direct_mapping_class_only",
+      "evidenceIds": [
+        "CP4A-STATIC-03",
+        "CP4A-UNKNOWN-01",
+        "CP4B-STATIC-WRITER-01",
+        "CP4B-STATIC-LEADING-01",
+        "CP5-STATIC-PORTAL-XPC-01",
+        "CP5-NOTOBSERVED-START-01"
+      ],
+      "directMappingEvidenceIds": [
+        "CP4B-STATIC-LEADING-01"
+      ],
+      "directMappingClasses": [
+        "vendor_static_disassembly"
+      ],
+      "independentDirectMappingClassCount": 1
+    },
+    {
+      "id": "primary-count-as-route-count",
+      "wireSlot": "client.primary_count",
+      "syntaxName": "primaryCount",
+      "candidateSemantic": "route_count",
+      "decision": "retain_neutral",
+      "reasonCode": "candidate_disconfirmed_by_static_category_count",
+      "evidenceIds": [
+        "CP4A-STATIC-03",
+        "CP4A-UNKNOWN-01",
+        "CP4B-STATIC-WRITER-01"
+      ],
+      "directMappingEvidenceIds": [],
+      "directMappingClasses": [],
+      "independentDirectMappingClassCount": 0
+    },
+    {
+      "id": "secondary-count-as-resource-count",
+      "wireSlot": "client.secondary_count",
+      "syntaxName": "secondaryCount",
+      "candidateSemantic": "resource_count",
+      "decision": "retain_neutral",
+      "reasonCode": "category_business_semantics_unknown",
+      "evidenceIds": [
+        "CP4A-STATIC-03",
+        "CP4A-UNKNOWN-01",
+        "CP4B-STATIC-WRITER-01"
+      ],
+      "directMappingEvidenceIds": [],
+      "directMappingClasses": [],
+      "independentDirectMappingClassCount": 0
+    },
+    {
+      "id": "dialect0-primary-as-route-prefix",
+      "wireSlot": "client.dialect0.primary_record",
+      "syntaxName": "dialect0PrimaryRecord",
+      "candidateSemantic": "route_prefix",
+      "decision": "retain_neutral",
+      "reasonCode": "one_direct_mapping_class_only",
+      "evidenceIds": [
+        "CP4A-STATIC-03",
+        "CP4A-UNKNOWN-01",
+        "CP4B-STATIC-WRITER-01",
+        "CP4B-STATIC-D0-PRIMARY-01",
+        "CP5-DIFFERENTIAL-TOGGLE-01",
+        "CP5-NOTOBSERVED-START-01"
+      ],
+      "directMappingEvidenceIds": [
+        "CP4B-STATIC-D0-PRIMARY-01"
+      ],
+      "directMappingClasses": [
+        "vendor_static_disassembly"
+      ],
+      "independentDirectMappingClassCount": 1
+    },
+    {
+      "id": "dialect0-secondary-as-resource-name-or-id",
+      "wireSlot": "client.dialect0.secondary_opaque",
+      "syntaxName": "dialect0SecondaryOpaque",
+      "candidateSemantic": "resource_name_or_id",
+      "decision": "retain_opaque",
+      "reasonCode": "one_direct_mapping_class_and_identity_ambiguous",
+      "evidenceIds": [
+        "CP4A-STATIC-03",
+        "CP4A-UNKNOWN-01",
+        "CP4B-STATIC-WRITER-01",
+        "CP4B-STATIC-D0-SECONDARY-01",
+        "CP5-RUNTIME-TOGGLE-01",
+        "CP5-DIFFERENTIAL-TOGGLE-01",
+        "CP5-NOTOBSERVED-START-01"
+      ],
+      "directMappingEvidenceIds": [
+        "CP4B-STATIC-D0-SECONDARY-01"
+      ],
+      "directMappingClasses": [
+        "vendor_static_disassembly"
+      ],
+      "independentDirectMappingClassCount": 1
+    },
+    {
+      "id": "dialect1-primary-as-map-id",
+      "wireSlot": "client.dialect1.primary_opaque",
+      "syntaxName": "dialect1PrimaryOpaque",
+      "candidateSemantic": "map_id",
+      "decision": "retain_opaque",
+      "reasonCode": "one_direct_mapping_class_only",
+      "evidenceIds": [
+        "CP4A-STATIC-03",
+        "CP4A-UNKNOWN-01",
+        "CP4B-STATIC-WRITER-01",
+        "CP4B-STATIC-D1-PRIMARY-01",
+        "CP5-STATIC-PORTAL-XPC-01",
+        "CP5-NOTOBSERVED-START-01"
+      ],
+      "directMappingEvidenceIds": [
+        "CP4B-STATIC-D1-PRIMARY-01"
+      ],
+      "directMappingClasses": [
+        "vendor_static_disassembly"
+      ],
+      "independentDirectMappingClassCount": 1
+    },
+    {
+      "id": "dialect1-secondary-as-map-id",
+      "wireSlot": "client.dialect1.secondary_opaque",
+      "syntaxName": "dialect1SecondaryOpaque",
+      "candidateSemantic": "map_id",
+      "decision": "retain_opaque",
+      "reasonCode": "one_direct_mapping_class_only",
+      "evidenceIds": [
+        "CP4A-STATIC-03",
+        "CP4A-UNKNOWN-01",
+        "CP4B-STATIC-WRITER-01",
+        "CP4B-STATIC-D1-SECONDARY-01",
+        "CP5-STATIC-PORTAL-XPC-01",
+        "CP5-NOTOBSERVED-START-01"
+      ],
+      "directMappingEvidenceIds": [
+        "CP4B-STATIC-D1-SECONDARY-01"
+      ],
+      "directMappingClasses": [
+        "vendor_static_disassembly"
+      ],
+      "independentDirectMappingClassCount": 1
+    },
+    {
+      "id": "server-revoke-as-resource-match-key",
+      "wireSlot": "server_revoke.opaque_value",
+      "syntaxName": "serverRevokeOpaque",
+      "candidateSemantic": "resource_match_key",
+      "decision": "retain_opaque",
+      "reasonCode": "no_control_or_xpc_producer_link",
+      "evidenceIds": [
+        "CP4A-STATIC-03",
+        "CP4A-UNKNOWN-01",
+        "CP5-NOTOBSERVED-START-01"
+      ],
+      "directMappingEvidenceIds": [],
+      "directMappingClasses": [],
+      "independentDirectMappingClassCount": 0
+    }
+  ],
+  "promotions": [],
+  "wireSchemaChanged": false
+}

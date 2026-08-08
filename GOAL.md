@@ -7,8 +7,8 @@ repository: /Users/larry_1/Opensource/powervpn-cli
 scratch_root: /Users/larry_1/scratch-data/powervpn-strongswan
 upstream_target: strongSwan 6.0.7
 vendor_compatibility_baseline: strongSwan 5.8.0
-current_checkpoint: 4b-semantic-promotion
-immediate_next: apply-two-evidence-class-semantic-promotion-gate
+current_checkpoint: 6-patch-skeleton-vici-dry-run
+immediate_next: integrate-neutral-expandrule-codec-with-task-and-vici-dry-run
 next_approval_gate: checkpoint-7-live-backend
 review_policy: checkpoint-gated-risk-weighted
 commit_policy: checkpoint-squash
@@ -546,7 +546,7 @@ secret scan PASS；schema/tests 足以解释 wire syntax，不依赖 raw secret 
 验收：三边界文档分开，字段均标 confirmed/inferred/unknown；raw capture 在
 mode-700 scratch，Git 仅有脱敏 schema。
 
-### Checkpoint 4B — semantic promotion gate
+### Checkpoint 4B — semantic promotion gate — PASS
 
 在 Checkpoint 5 完成后，将 `opaqueFieldN` 与 control-plane/XPC differential
 observations 做关联。只有至少两类独立证据一致时，才把字段提升命名为
@@ -554,6 +554,19 @@ observations 做关联。只有至少两类独立证据一致时，才把字段�
 
 验收：每次 rename 都有 evidence ID；fixture forward/backward tests PASS；不因
 值“看起来像”某个 ID 就永久命名。
+
+结果：gate 已对 8 个候选 slot 逐项执行，promotion set 为空。完整的
+XPC-consumer-to-expandrule-writer 静态链只构成一类
+`vendor_static_disassembly` 证据；CP5 runtime/differential observations 没有
+命中 `start_connection` 或 plaintext serializer slot，不能充当第二类直接映射
+证据。因此 `leadingAddress`、primary/secondary、dialect-0/1 opaque 和 server
+revoke value 均保留 neutral/opaque。CP4A codec、patch 与 synthetic bytes 未改。
+
+证据与验收入口：
+
+- `docs/evidence/checkpoint-4b-semantic-promotion.md`；
+- `fixtures/redacted/semantic-promotion-gate-v1.json`；
+- `scripts/verify_checkpoint.sh 4b`。
 
 ### Checkpoint 6 — 6.0.7 patch skeleton + VICI dry run
 
