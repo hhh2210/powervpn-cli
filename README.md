@@ -23,6 +23,9 @@ upstream strongSwan 6.0.7.
   PF_ROUTE, PF_KEY, kernel-libipsec, IKEv1, and XAuth support. PF_KEY and
   kernel-libipsec reach their expected root capability gate in an unprivileged
   startup smoke test.
+- CP4A now has a strict offline 6.0.7 codec for the five observed expandrule
+  wire forms. Seven synthetic byte vectors cover nine logical contexts; the
+  payload's opaque fields deliberately remain unnamed until CP5/CP4B evidence.
 
 The target is therefore:
 
@@ -59,6 +62,7 @@ does not advance the native replacement.
 - `Sources/PowerVPNCLI`: thin command routing and rendering.
 - `docs/protocol-*.md`: verified protocol facts, unknowns, and next experiments.
 - `fixtures/redacted`: synthetic, commit-safe structures only.
+- `patches/strongswan-6.0.7`: minimal patches replayable on the official tag.
 - `captures`: policy and manifests only; raw packet captures never enter Git.
 
 Start with [the native replacement plan](docs/2026-08-08-native-replacement-plan.md)
@@ -71,6 +75,7 @@ swift build --arch arm64
 swift test
 BIN="$(swift build --show-bin-path)/powervpn"
 file "$BIN"
+scripts/verify_checkpoint.sh 4a
 ```
 
 The Swift package has one executable product, `powervpn`, and one reusable

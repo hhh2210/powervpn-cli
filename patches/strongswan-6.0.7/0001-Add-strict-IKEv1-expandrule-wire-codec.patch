@@ -1,0 +1,2370 @@
+From 1fda864cca91da0aa9a87dd96e1823c3962dbd09 Mon Sep 17 00:00:00 2001
+From: hhh2210 <hzy2210@gmail.com>
+Date: Sat, 8 Aug 2026 16:27:01 +0800
+Subject: [PATCH] Add strict IKEv1 expandrule wire codec
+
+Implement the five explicit ADDRULE/DELRULE wire forms against the official strongSwan 6.0.7 base while keeping dialect payload values opaque until the semantic promotion gate.
+
+Separate lossless structural decoding from the canonical/local safety profile, clone all input-owned chunks, bound allocation and output size, and return only non-sensitive error code/offset metadata.
+
+Add seven synthetic golden byte vectors with 28 positive and negative codec cases. The CP4A acceptance entrypoint passes the targeted libcharon suite, full make check, arm64 artifact gate, Swift tests, artifact-boundary checks, and secret scans.
+
+Safety: offline codec only; no payload factory, IKE task, VICI, SA, route, utun, credential, or network integration.
+---
+ src/libcharon/Makefile.am                     |   7 +
+ .../payloads/expandrule_client_codec.c        | 258 ++++++++++++++++
+ .../payloads/expandrule_client_encode.c       |  92 ++++++
+ .../encoding/payloads/expandrule_codec.c      | 187 ++++++++++++
+ .../encoding/payloads/expandrule_codec.h      | 189 ++++++++++++
+ .../payloads/expandrule_codec_internal.h      |  49 +++
+ .../payloads/expandrule_codec_support.c       | 133 ++++++++
+ .../encoding/payloads/expandrule_profile.c    | 151 +++++++++
+ .../payloads/expandrule_revoke_codec.c        |  69 +++++
+ src/libcharon/tests/Makefile.am               |   9 +
+ src/libcharon/tests/libcharon_tests.h         |   3 +
+ .../tests/suites/expandrule_test_fixtures.h   |  73 +++++
+ .../tests/suites/test_expandrule_codec.c      | 287 ++++++++++++++++++
+ .../suites/test_expandrule_codec_boundaries.c | 240 +++++++++++++++
+ .../suites/test_expandrule_codec_invalid.c    | 285 +++++++++++++++++
+ .../suites/test_expandrule_codec_profile.c    | 183 +++++++++++
+ 16 files changed, 2215 insertions(+)
+ create mode 100644 src/libcharon/encoding/payloads/expandrule_client_codec.c
+ create mode 100644 src/libcharon/encoding/payloads/expandrule_client_encode.c
+ create mode 100644 src/libcharon/encoding/payloads/expandrule_codec.c
+ create mode 100644 src/libcharon/encoding/payloads/expandrule_codec.h
+ create mode 100644 src/libcharon/encoding/payloads/expandrule_codec_internal.h
+ create mode 100644 src/libcharon/encoding/payloads/expandrule_codec_support.c
+ create mode 100644 src/libcharon/encoding/payloads/expandrule_profile.c
+ create mode 100644 src/libcharon/encoding/payloads/expandrule_revoke_codec.c
+ create mode 100644 src/libcharon/tests/suites/expandrule_test_fixtures.h
+ create mode 100644 src/libcharon/tests/suites/test_expandrule_codec.c
+ create mode 100644 src/libcharon/tests/suites/test_expandrule_codec_boundaries.c
+ create mode 100644 src/libcharon/tests/suites/test_expandrule_codec_invalid.c
+ create mode 100644 src/libcharon/tests/suites/test_expandrule_codec_profile.c
+
+diff --git a/src/libcharon/Makefile.am b/src/libcharon/Makefile.am
+index 86011c5..7d1946b 100644
+--- a/src/libcharon/Makefile.am
++++ b/src/libcharon/Makefile.am
+@@ -119,6 +119,13 @@ endif
+ 
+ if USE_IKEV1
+ libcharon_la_SOURCES += \
++encoding/payloads/expandrule_codec.c encoding/payloads/expandrule_codec.h \
++encoding/payloads/expandrule_codec_internal.h \
++encoding/payloads/expandrule_codec_support.c \
++encoding/payloads/expandrule_client_codec.c \
++encoding/payloads/expandrule_client_encode.c \
++encoding/payloads/expandrule_revoke_codec.c \
++encoding/payloads/expandrule_profile.c \
+ sa/ikev1/keymat_v1.c sa/ikev1/keymat_v1.h \
+ sa/ikev1/iv_manager.c sa/ikev1/iv_manager.h \
+ sa/ikev1/task_manager_v1.c sa/ikev1/task_manager_v1.h \
+diff --git a/src/libcharon/encoding/payloads/expandrule_client_codec.c b/src/libcharon/encoding/payloads/expandrule_client_codec.c
+new file mode 100644
+index 0000000..e5e6bc4
+--- /dev/null
++++ b/src/libcharon/encoding/payloads/expandrule_client_codec.c
+@@ -0,0 +1,258 @@
++/*
++ * Copyright (C) 2026 Zhuoyuan Hao
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ */
++
++#include "expandrule_codec_internal.h"
++
++#include <bio/bio_reader.h>
++
++static size_t current_offset(bio_reader_t *reader, size_t body_length,
++							 size_t body_offset)
++{
++	return body_offset + body_length - reader->remaining(reader);
++}
++
++static bool mask_to_prefix(uint32_t mask, uint8_t *prefix)
++{
++	bool saw_zero = FALSE;
++	uint8_t bits = 0;
++	int i;
++
++	for (i = 31; i >= 0; i--)
++	{
++		if (mask & (1U << i))
++		{
++			if (saw_zero)
++			{
++				return FALSE;
++			}
++			bits++;
++		}
++		else
++		{
++			saw_zero = TRUE;
++		}
++	}
++	*prefix = bits;
++	return TRUE;
++}
++
++static bool clone_record(expandrule_record_t *record, chunk_t value,
++						 uint8_t prefix, expandrule_error_t *error,
++						 size_t offset)
++{
++	record->value = chunk_clone(value);
++	if (value.len && !record->value.ptr)
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_OUT_OF_MEMORY, offset);
++	}
++	record->prefix_length = prefix;
++	return TRUE;
++}
++
++static bool read_address_record(bio_reader_t *reader,
++								expandrule_family_t family,
++								expandrule_record_t *records, size_t index,
++								size_t body_length, size_t body_offset,
++								expandrule_error_t *error)
++{
++	size_t offset = current_offset(reader, body_length, body_offset);
++	uint32_t mask_or_prefix;
++	uint8_t prefix;
++	chunk_t address;
++
++	if (!reader->read_data(reader, expandrule_family_size(family), &address) ||
++		!reader->read_uint32(reader, &mask_or_prefix))
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_TRUNCATED, offset);
++	}
++	if (family == EXPANDRULE_IPV4)
++	{
++		if (!mask_to_prefix(mask_or_prefix, &prefix))
++		{
++			return expandrule_fail(error, EXPANDRULE_ERROR_INVALID_MASK,
++								offset + 4);
++		}
++	}
++	else
++	{
++		if (mask_or_prefix > 128)
++		{
++			return expandrule_fail(error, EXPANDRULE_ERROR_INVALID_PREFIX,
++								offset + 16);
++		}
++		prefix = mask_or_prefix;
++	}
++	return clone_record(&records[index], address, prefix, error, offset);
++}
++
++static bool read_opaque_record(bio_reader_t *reader,
++							   expandrule_record_t *records, size_t index,
++							   size_t body_length, size_t body_offset,
++							   expandrule_error_t *error)
++{
++	size_t offset = current_offset(reader, body_length, body_offset);
++	chunk_t value;
++
++	if (!reader->read_data8(reader, &value))
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_TRUNCATED, offset);
++	}
++	return clone_record(&records[index], value, 0, error, offset);
++}
++
++static bool allocate_records(uint32_t count, expandrule_record_t **records,
++							 size_t offset,
++							 expandrule_error_t *error)
++{
++	if (count > EXPANDRULE_MAX_RECORDS)
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_COUNT_LIMIT, offset);
++	}
++	if (!count)
++	{
++		*records = NULL;
++		return TRUE;
++	}
++	*records = calloc(count, sizeof(**records));
++	if (!*records)
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_OUT_OF_MEMORY, offset);
++	}
++	return TRUE;
++}
++
++static bool read_count(bio_reader_t *reader, uint32_t *count,
++					   size_t minimum_record_size, size_t tail_reserve,
++					   size_t body_length,
++					   size_t body_offset, expandrule_error_t *error)
++{
++	size_t offset = current_offset(reader, body_length, body_offset), remaining;
++
++	if (!reader->read_uint32(reader, count))
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_TRUNCATED, offset);
++	}
++	if (*count > EXPANDRULE_MAX_RECORDS)
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_COUNT_LIMIT, offset);
++	}
++	remaining = reader->remaining(reader);
++	if (remaining < tail_reserve ||
++		(minimum_record_size &&
++		 *count > (remaining - tail_reserve) / minimum_record_size))
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_TRUNCATED, offset);
++	}
++	return TRUE;
++}
++
++bool expandrule_client_decode(expandrule_family_t family,
++							  expandrule_dialect_t dialect, chunk_t body,
++							  size_t body_offset,
++							  expandrule_message_t **message,
++							  expandrule_error_t *error)
++{
++	expandrule_message_t *decoded;
++	bio_reader_t *reader;
++	size_t address_size, primary_minimum, i, offset;
++	uint32_t count;
++	chunk_t leading_address;
++	bool success = FALSE;
++
++	address_size = expandrule_family_size(family);
++	primary_minimum = dialect == EXPANDRULE_DIALECT_0 ?
++					  address_size + 4 : 1;
++	reader = bio_reader_create(body);
++	decoded = calloc(1, sizeof(*decoded));
++	if (!decoded)
++	{
++		expandrule_fail(error, EXPANDRULE_ERROR_OUT_OF_MEMORY, body_offset);
++		reader->destroy(reader);
++		return FALSE;
++	}
++	decoded->kind = EXPANDRULE_CLIENT_ENVELOPE;
++	decoded->data.client.family = family;
++	decoded->data.client.dialect = dialect;
++
++	if (!reader->read_data(reader, address_size, &leading_address))
++	{
++		expandrule_fail(error, EXPANDRULE_ERROR_TRUNCATED, body_offset);
++		goto done;
++	}
++	decoded->data.client.leading_address = chunk_clone(leading_address);
++	if (!decoded->data.client.leading_address.ptr)
++	{
++		expandrule_fail(error, EXPANDRULE_ERROR_OUT_OF_MEMORY, body_offset);
++		goto done;
++	}
++
++	if (!read_count(reader, &count, primary_minimum, 4, body.len, body_offset,
++					error))
++	{
++		goto done;
++	}
++	offset = current_offset(reader, body.len, body_offset) - 4;
++	if (!allocate_records(count, &decoded->data.client.primary, offset, error))
++	{
++		goto done;
++	}
++	decoded->data.client.primary_count = count;
++	for (i = 0; i < count; i++)
++	{
++		if (dialect == EXPANDRULE_DIALECT_0)
++		{
++			if (!read_address_record(reader, family,
++								 decoded->data.client.primary, i, body.len,
++								 body_offset, error))
++			{
++				goto done;
++			}
++		}
++		else if (!read_opaque_record(reader, decoded->data.client.primary, i,
++									body.len, body_offset, error))
++		{
++			goto done;
++		}
++	}
++
++	if (!read_count(reader, &count, 1, 0, body.len, body_offset, error))
++	{
++		goto done;
++	}
++	offset = current_offset(reader, body.len, body_offset) - 4;
++	if (!allocate_records(count, &decoded->data.client.secondary, offset, error))
++	{
++		goto done;
++	}
++	decoded->data.client.secondary_count = count;
++	for (i = 0; i < count; i++)
++	{
++		if (!read_opaque_record(reader, decoded->data.client.secondary, i,
++								body.len, body_offset, error))
++		{
++			goto done;
++		}
++	}
++	if (reader->remaining(reader))
++	{
++		expandrule_fail(error, EXPANDRULE_ERROR_TRAILING_DATA,
++						current_offset(reader, body.len, body_offset));
++		goto done;
++	}
++	success = TRUE;
++	*message = decoded;
++
++done:
++	reader->destroy(reader);
++	if (!success)
++	{
++		expandrule_message_destroy(decoded);
++	}
++	return success;
++}
+diff --git a/src/libcharon/encoding/payloads/expandrule_client_encode.c b/src/libcharon/encoding/payloads/expandrule_client_encode.c
+new file mode 100644
+index 0000000..c0dceba
+--- /dev/null
++++ b/src/libcharon/encoding/payloads/expandrule_client_encode.c
+@@ -0,0 +1,92 @@
++/*
++ * Copyright (C) 2026 Zhuoyuan Hao
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ */
++
++#include "expandrule_codec_internal.h"
++
++#include <bio/bio_writer.h>
++
++static bool checked_add(size_t *length, size_t amount,
++						expandrule_error_t *error)
++{
++	if (amount > UINT16_MAX - 4 - *length)
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_OVERSIZE, 4);
++	}
++	*length += amount;
++	return TRUE;
++}
++
++static uint32_t prefix_to_mask(uint8_t prefix)
++{
++	if (!prefix)
++	{
++		return 0;
++	}
++	return UINT32_MAX << (32 - prefix);
++}
++
++bool expandrule_client_encode(const expandrule_client_envelope_t *client,
++							  chunk_t *body, expandrule_error_t *error)
++{
++	bio_writer_t *writer;
++	size_t body_length, address_size, record_length, i;
++
++	address_size = expandrule_family_size(client->family);
++	body_length = address_size + 8;
++	for (i = 0; i < client->primary_count; i++)
++	{
++		record_length = client->dialect == EXPANDRULE_DIALECT_0 ?
++						address_size + 4 : 1 + client->primary[i].value.len;
++		if (!checked_add(&body_length, record_length, error))
++		{
++			return FALSE;
++		}
++	}
++	for (i = 0; i < client->secondary_count; i++)
++	{
++		if (!checked_add(&body_length, 1 + client->secondary[i].value.len,
++						 error))
++		{
++			return FALSE;
++		}
++	}
++
++	writer = bio_writer_create(body_length);
++	writer->write_data(writer, client->leading_address);
++	writer->write_uint32(writer, client->primary_count);
++	for (i = 0; i < client->primary_count; i++)
++	{
++		if (client->dialect == EXPANDRULE_DIALECT_0)
++		{
++			writer->write_data(writer, client->primary[i].value);
++			if (client->family == EXPANDRULE_IPV4)
++			{
++				writer->write_uint32(writer,
++								 prefix_to_mask(client->primary[i].prefix_length));
++			}
++			else
++			{
++				writer->write_uint32(writer,
++								 client->primary[i].prefix_length);
++			}
++		}
++		else
++		{
++			writer->write_data8(writer, client->primary[i].value);
++		}
++	}
++	writer->write_uint32(writer, client->secondary_count);
++	for (i = 0; i < client->secondary_count; i++)
++	{
++		writer->write_data8(writer, client->secondary[i].value);
++	}
++	*body = writer->extract_buf(writer);
++	writer->destroy(writer);
++	return TRUE;
++}
+diff --git a/src/libcharon/encoding/payloads/expandrule_codec.c b/src/libcharon/encoding/payloads/expandrule_codec.c
+new file mode 100644
+index 0000000..ac86f15
+--- /dev/null
++++ b/src/libcharon/encoding/payloads/expandrule_codec.c
+@@ -0,0 +1,187 @@
++/*
++ * Copyright (C) 2026 Zhuoyuan Hao
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
++ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * for more details.
++ */
++
++#include "expandrule_codec_internal.h"
++
++#include <bio/bio_reader.h>
++#include <bio/bio_writer.h>
++
++bool expandrule_codec_decode(expandrule_wire_form_t form,
++							 expandrule_dialect_t dialect, chunk_t payload,
++							 expandrule_message_t **message,
++							 expandrule_error_t *error)
++{
++	bio_reader_t *reader;
++	expandrule_family_t family;
++	uint8_t next, flags;
++	uint16_t length;
++	chunk_t body;
++	bool success;
++
++	expandrule_clear_error(error);
++	if (message)
++	{
++		*message = NULL;
++	}
++	if (!message || (!payload.ptr && payload.len))
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_INVALID_ARGUMENT, 0);
++	}
++	if ((!expandrule_form_is_client(form) && !expandrule_form_is_revoke(form)) ||
++		(expandrule_form_is_client(form) &&
++		 dialect != EXPANDRULE_DIALECT_0 &&
++		 dialect != EXPANDRULE_DIALECT_1) ||
++		(expandrule_form_is_revoke(form) && dialect != EXPANDRULE_DIALECT_NONE))
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_UNSUPPORTED_CONTEXT, 0);
++	}
++	if (payload.len > UINT16_MAX)
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_OVERSIZE, 0);
++	}
++
++	reader = bio_reader_create(payload);
++	if (!reader->read_uint8(reader, &next) ||
++		!reader->read_uint8(reader, &flags) ||
++		!reader->read_uint16(reader, &length))
++	{
++		expandrule_fail(error, EXPANDRULE_ERROR_TRUNCATED, 0);
++		reader->destroy(reader);
++		return FALSE;
++	}
++	if (length != payload.len || length < 4)
++	{
++		expandrule_fail(error, EXPANDRULE_ERROR_INVALID_LENGTH, 2);
++		reader->destroy(reader);
++		return FALSE;
++	}
++	body = reader->peek(reader);
++	if (expandrule_form_is_client(form))
++	{
++		if (flags == 0)
++		{
++			family = EXPANDRULE_IPV4;
++		}
++		else if (flags == 6)
++		{
++			family = EXPANDRULE_IPV6;
++		}
++		else
++		{
++			expandrule_fail(error, EXPANDRULE_ERROR_INVALID_FLAGS, 1);
++			reader->destroy(reader);
++			return FALSE;
++		}
++		success = expandrule_client_decode(family, dialect, body, 4,
++										   message, error);
++	}
++	else
++	{
++		success = expandrule_revoke_decode(flags, body, 4, message, error);
++	}
++	reader->destroy(reader);
++	if (success)
++	{
++		(*message)->next_payload = next;
++	}
++	return success;
++}
++
++bool expandrule_codec_encode(expandrule_wire_form_t form,
++							 const expandrule_message_t *message,
++							 chunk_t *payload, expandrule_error_t *error)
++{
++	bio_writer_t *writer;
++	chunk_t body = chunk_empty;
++	uint8_t flags;
++
++	expandrule_clear_error(error);
++	if (payload)
++	{
++		*payload = chunk_empty;
++	}
++	if (!message || !payload)
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_INVALID_ARGUMENT, 0);
++	}
++	if (form == EXPANDRULE_INFO_REVOKE_LEGACY ||
++		!expandrule_profile_validate(form, message, error))
++	{
++		if (form == EXPANDRULE_INFO_REVOKE_LEGACY &&
++			(!error || error->code == EXPANDRULE_ERROR_NONE))
++		{
++			expandrule_fail(error, EXPANDRULE_ERROR_UNSUPPORTED_CONTEXT, 0);
++		}
++		return FALSE;
++	}
++	if (expandrule_form_is_client(form))
++	{
++		if (!expandrule_client_encode(&message->data.client, &body, error))
++		{
++			return FALSE;
++		}
++		flags = message->data.client.family == EXPANDRULE_IPV6 ? 6 : 0;
++	}
++	else
++	{
++		if (!expandrule_revoke_encode(&message->data.revoke, &body, error))
++		{
++			return FALSE;
++		}
++		flags = message->data.revoke.raw_flags;
++	}
++	if (body.len > UINT16_MAX - 4)
++	{
++		chunk_free(&body);
++		return expandrule_fail(error, EXPANDRULE_ERROR_OVERSIZE, 4);
++	}
++	writer = bio_writer_create(body.len + 4);
++	writer->write_uint8(writer, 0);
++	writer->write_uint8(writer, flags);
++	writer->write_uint16(writer, body.len + 4);
++	writer->write_data(writer, body);
++	*payload = writer->extract_buf(writer);
++	writer->destroy(writer);
++	chunk_free(&body);
++	return TRUE;
++}
++
++void expandrule_message_destroy(expandrule_message_t *message)
++{
++	size_t i;
++
++	if (!message)
++	{
++		return;
++	}
++	if (message->kind == EXPANDRULE_CLIENT_ENVELOPE)
++	{
++		chunk_free(&message->data.client.leading_address);
++		for (i = 0; i < message->data.client.primary_count; i++)
++		{
++			chunk_free(&message->data.client.primary[i].value);
++		}
++		for (i = 0; i < message->data.client.secondary_count; i++)
++		{
++			chunk_free(&message->data.client.secondary[i].value);
++		}
++		free(message->data.client.primary);
++		free(message->data.client.secondary);
++	}
++	else if (message->kind == EXPANDRULE_SERVER_REVOKE)
++	{
++		chunk_free(&message->data.revoke.opaque_value);
++	}
++	free(message);
++}
+diff --git a/src/libcharon/encoding/payloads/expandrule_codec.h b/src/libcharon/encoding/payloads/expandrule_codec.h
+new file mode 100644
+index 0000000..fa116a2
+--- /dev/null
++++ b/src/libcharon/encoding/payloads/expandrule_codec.h
+@@ -0,0 +1,189 @@
++/*
++ * Copyright (C) 2026 Zhuoyuan Hao
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
++ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * for more details.
++ */
++
++/**
++ * @defgroup expandrule_codec expandrule_codec
++ * @{ @ingroup payloads
++ */
++
++#ifndef EXPANDRULE_CODEC_H_
++#define EXPANDRULE_CODEC_H_
++
++#include <library.h>
++
++/** Private IKEv1 payload types used by the observed vendor protocol. */
++enum {
++	EXPANDRULE_PAYLOAD_LEGACY_REVOKE = 17,
++	EXPANDRULE_PAYLOAD_ADD = 18,
++	EXPANDRULE_PAYLOAD_DELETE = 19,
++};
++
++/** Local count cap plus inferred canonical profile limits, not wire limits. */
++enum {
++	EXPANDRULE_MAX_RECORDS = 4096,
++	EXPANDRULE_MAX_DIALECT0_OPAQUE_LENGTH = 64,
++	EXPANDRULE_MAX_DIALECT1_OPAQUE_LENGTH = 16,
++	EXPANDRULE_MAX_REVOKE_OPAQUE_LENGTH = 63,
++};
++
++typedef enum expandrule_wire_form_t expandrule_wire_form_t;
++typedef enum expandrule_direction_t expandrule_direction_t;
++typedef enum expandrule_dialect_t expandrule_dialect_t;
++typedef enum expandrule_family_t expandrule_family_t;
++typedef enum expandrule_message_kind_t expandrule_message_kind_t;
++typedef enum expandrule_error_code_t expandrule_error_code_t;
++typedef struct expandrule_record_t expandrule_record_t;
++typedef struct expandrule_client_envelope_t expandrule_client_envelope_t;
++typedef struct expandrule_server_revoke_t expandrule_server_revoke_t;
++typedef struct expandrule_message_t expandrule_message_t;
++typedef struct expandrule_error_t expandrule_error_t;
++
++enum expandrule_direction_t {
++	EXPANDRULE_DIRECTION_UNKNOWN,
++	EXPANDRULE_CLIENT_TO_SERVER,
++	EXPANDRULE_SERVER_TO_CLIENT,
++};
++
++/** Canonical flow context; current payload type is carried by the predecessor. */
++enum expandrule_wire_form_t {
++	EXPANDRULE_QM_ADD_SNAPSHOT,
++	EXPANDRULE_INFO_ADD_DELTA,
++	EXPANDRULE_INFO_DELETE_DELTA,
++	EXPANDRULE_INFO_REVOKE_V1,
++	EXPANDRULE_INFO_REVOKE_LEGACY,
++};
++
++enum expandrule_dialect_t {
++	EXPANDRULE_DIALECT_NONE,
++	EXPANDRULE_DIALECT_0,
++	EXPANDRULE_DIALECT_1,
++};
++
++enum expandrule_family_t {
++	EXPANDRULE_IPV4,
++	EXPANDRULE_IPV6,
++};
++
++enum expandrule_message_kind_t {
++	EXPANDRULE_CLIENT_ENVELOPE,
++	EXPANDRULE_SERVER_REVOKE,
++};
++
++/**
++ * Safe error classes.  No payload bytes or opaque values are retained.
++ */
++enum expandrule_error_code_t {
++	EXPANDRULE_ERROR_NONE,
++	EXPANDRULE_ERROR_INVALID_ARGUMENT,
++	EXPANDRULE_ERROR_UNSUPPORTED_CONTEXT,
++	EXPANDRULE_ERROR_INVALID_HEADER,
++	EXPANDRULE_ERROR_INVALID_LENGTH,
++	EXPANDRULE_ERROR_INVALID_FLAGS,
++	EXPANDRULE_ERROR_TRUNCATED,
++	EXPANDRULE_ERROR_COUNT_LIMIT,
++	EXPANDRULE_ERROR_VALUE_LENGTH,
++	EXPANDRULE_ERROR_INVALID_MASK,
++	EXPANDRULE_ERROR_INVALID_PREFIX,
++	EXPANDRULE_ERROR_DUPLICATE,
++	EXPANDRULE_ERROR_INVALID_CARDINALITY,
++	EXPANDRULE_ERROR_TRAILING_DATA,
++	EXPANDRULE_ERROR_OVERSIZE,
++	EXPANDRULE_ERROR_OUT_OF_MEMORY,
++};
++
++/**
++ * A primary or secondary record.
++ *
++ * In dialect 0, primary value has address/prefix wire syntax and
++ * prefix_length is significant.  All other values are opaque bytes and have
++ * a zero prefix_length.  Their business meaning and string encoding remain
++ * deliberately unassigned until the semantic promotion gate.
++ */
++struct expandrule_record_t {
++	chunk_t value;
++	uint8_t prefix_length;
++};
++
++/** Full client-to-server body used by ADDRULE and active DELRULE. */
++struct expandrule_client_envelope_t {
++	expandrule_family_t family;
++	expandrule_dialect_t dialect;
++	chunk_t leading_address;
++	size_t primary_count;
++	expandrule_record_t *primary;
++	size_t secondary_count;
++	expandrule_record_t *secondary;
++};
++
++/** Short server-to-client revoke body used by DELRULE and legacy type 17. */
++struct expandrule_server_revoke_t {
++	uint8_t raw_flags;
++	chunk_t opaque_value;
++};
++
++struct expandrule_message_t {
++	expandrule_message_kind_t kind;
++	uint8_t next_payload;
++	union {
++		expandrule_client_envelope_t client;
++		expandrule_server_revoke_t revoke;
++	} data;
++};
++
++/** Structured, non-sensitive failure metadata. */
++struct expandrule_error_t {
++	expandrule_error_code_t code;
++	size_t offset;
++};
++
++/**
++ * Decode a complete private payload, including its four-byte generic header.
++ *
++ * Dialect is required for client envelopes and must be NONE for server revoke
++ * payloads.  On success, the returned message owns cloned buffers and must be
++ * destroyed with expandrule_message_destroy().
++ */
++bool expandrule_codec_decode(expandrule_wire_form_t form,
++							 expandrule_dialect_t dialect, chunk_t payload,
++							 expandrule_message_t **message,
++							 expandrule_error_t *error);
++
++/**
++ * Encode a complete private payload, including its four-byte generic header.
++ *
++ * Type 17 is receive-only and is rejected by this function.  The input model
++ * remains owned by the caller.  On success, payload owns an allocated buffer.
++ */
++bool expandrule_codec_encode(expandrule_wire_form_t form,
++							 const expandrule_message_t *message,
++							 chunk_t *payload, expandrule_error_t *error);
++
++/** Validate the canonical/local safety profile; inferred limits are not wire facts. */
++bool expandrule_profile_validate(expandrule_wire_form_t form,
++								 const expandrule_message_t *message,
++								 expandrule_error_t *error);
++
++/** Map flow context to the current payload type carried by the predecessor. */
++uint8_t expandrule_form_payload_type(expandrule_wire_form_t form);
++
++/** Map flow context to its observed direction. */
++expandrule_direction_t expandrule_form_direction(expandrule_wire_form_t form);
++
++/** Destroy a message returned by expandrule_codec_decode(). */
++void expandrule_message_destroy(expandrule_message_t *message);
++
++/** Return a stable, non-sensitive name for an error code. */
++const char *expandrule_error_name(expandrule_error_code_t code);
++
++#endif /** EXPANDRULE_CODEC_H_ @}*/
+diff --git a/src/libcharon/encoding/payloads/expandrule_codec_internal.h b/src/libcharon/encoding/payloads/expandrule_codec_internal.h
+new file mode 100644
+index 0000000..1ff3789
+--- /dev/null
++++ b/src/libcharon/encoding/payloads/expandrule_codec_internal.h
+@@ -0,0 +1,49 @@
++/*
++ * Copyright (C) 2026 Zhuoyuan Hao
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ */
++
++#ifndef EXPANDRULE_CODEC_INTERNAL_H_
++#define EXPANDRULE_CODEC_INTERNAL_H_
++
++#include "expandrule_codec.h"
++
++bool expandrule_fail(expandrule_error_t *error,
++					 expandrule_error_code_t code, size_t offset);
++
++void expandrule_clear_error(expandrule_error_t *error);
++
++size_t expandrule_family_size(expandrule_family_t family);
++
++bool expandrule_record_duplicate(const expandrule_record_t *records, size_t count,
++								 chunk_t value, uint8_t prefix,
++								 bool use_prefix);
++
++bool expandrule_chunk_has_nul(chunk_t value);
++
++bool expandrule_form_is_client(expandrule_wire_form_t form);
++
++bool expandrule_form_is_revoke(expandrule_wire_form_t form);
++
++bool expandrule_client_decode(expandrule_family_t family,
++							  expandrule_dialect_t dialect, chunk_t body,
++							  size_t body_offset,
++							  expandrule_message_t **message,
++							  expandrule_error_t *error);
++
++bool expandrule_client_encode(const expandrule_client_envelope_t *client,
++							  chunk_t *body, expandrule_error_t *error);
++
++bool expandrule_revoke_decode(uint8_t raw_flags, chunk_t body,
++							  size_t body_offset,
++							  expandrule_message_t **message,
++							  expandrule_error_t *error);
++
++bool expandrule_revoke_encode(const expandrule_server_revoke_t *revoke,
++							  chunk_t *body, expandrule_error_t *error);
++
++#endif /* EXPANDRULE_CODEC_INTERNAL_H_ */
+diff --git a/src/libcharon/encoding/payloads/expandrule_codec_support.c b/src/libcharon/encoding/payloads/expandrule_codec_support.c
+new file mode 100644
+index 0000000..6e12fec
+--- /dev/null
++++ b/src/libcharon/encoding/payloads/expandrule_codec_support.c
+@@ -0,0 +1,133 @@
++/*
++ * Copyright (C) 2026 Zhuoyuan Hao
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ */
++
++#include "expandrule_codec_internal.h"
++
++#include <string.h>
++
++bool expandrule_fail(expandrule_error_t *error,
++					 expandrule_error_code_t code, size_t offset)
++{
++	if (error)
++	{
++		*error = (expandrule_error_t){
++			.code = code,
++			.offset = offset,
++		};
++	}
++	return FALSE;
++}
++
++void expandrule_clear_error(expandrule_error_t *error)
++{
++	if (error)
++	{
++		*error = (expandrule_error_t){ .code = EXPANDRULE_ERROR_NONE };
++	}
++}
++
++size_t expandrule_family_size(expandrule_family_t family)
++{
++	switch (family)
++	{
++		case EXPANDRULE_IPV4:
++			return 4;
++		case EXPANDRULE_IPV6:
++			return 16;
++	}
++	return 0;
++}
++
++bool expandrule_record_duplicate(const expandrule_record_t *records, size_t count,
++								 chunk_t value, uint8_t prefix,
++								 bool use_prefix)
++{
++	size_t i;
++
++	for (i = 0; i < count; i++)
++	{
++		if (chunk_equals(records[i].value, value) &&
++			(!use_prefix || records[i].prefix_length == prefix))
++		{
++			return TRUE;
++		}
++	}
++	return FALSE;
++}
++
++bool expandrule_chunk_has_nul(chunk_t value)
++{
++	return value.len && memchr(value.ptr, '\0', value.len);
++}
++
++bool expandrule_form_is_client(expandrule_wire_form_t form)
++{
++	return form == EXPANDRULE_QM_ADD_SNAPSHOT ||
++		   form == EXPANDRULE_INFO_ADD_DELTA ||
++		   form == EXPANDRULE_INFO_DELETE_DELTA;
++}
++
++bool expandrule_form_is_revoke(expandrule_wire_form_t form)
++{
++	return form == EXPANDRULE_INFO_REVOKE_V1 ||
++		   form == EXPANDRULE_INFO_REVOKE_LEGACY;
++}
++
++uint8_t expandrule_form_payload_type(expandrule_wire_form_t form)
++{
++	switch (form)
++	{
++		case EXPANDRULE_QM_ADD_SNAPSHOT:
++		case EXPANDRULE_INFO_ADD_DELTA:
++			return EXPANDRULE_PAYLOAD_ADD;
++		case EXPANDRULE_INFO_DELETE_DELTA:
++		case EXPANDRULE_INFO_REVOKE_V1:
++			return EXPANDRULE_PAYLOAD_DELETE;
++		case EXPANDRULE_INFO_REVOKE_LEGACY:
++			return EXPANDRULE_PAYLOAD_LEGACY_REVOKE;
++	}
++	return 0;
++}
++
++expandrule_direction_t expandrule_form_direction(expandrule_wire_form_t form)
++{
++	if (expandrule_form_is_client(form))
++	{
++		return EXPANDRULE_CLIENT_TO_SERVER;
++	}
++	if (expandrule_form_is_revoke(form))
++	{
++		return EXPANDRULE_SERVER_TO_CLIENT;
++	}
++	return EXPANDRULE_DIRECTION_UNKNOWN;
++}
++
++const char *expandrule_error_name(expandrule_error_code_t code)
++{
++	switch (code)
++	{
++		case EXPANDRULE_ERROR_NONE: return "none";
++		case EXPANDRULE_ERROR_INVALID_ARGUMENT: return "invalid_argument";
++		case EXPANDRULE_ERROR_UNSUPPORTED_CONTEXT: return "unsupported_context";
++		case EXPANDRULE_ERROR_INVALID_HEADER: return "invalid_header";
++		case EXPANDRULE_ERROR_INVALID_LENGTH: return "invalid_length";
++		case EXPANDRULE_ERROR_INVALID_FLAGS: return "invalid_flags";
++		case EXPANDRULE_ERROR_TRUNCATED: return "truncated";
++		case EXPANDRULE_ERROR_COUNT_LIMIT: return "count_limit";
++		case EXPANDRULE_ERROR_VALUE_LENGTH: return "value_length";
++		case EXPANDRULE_ERROR_INVALID_MASK: return "invalid_mask";
++		case EXPANDRULE_ERROR_INVALID_PREFIX: return "invalid_prefix";
++		case EXPANDRULE_ERROR_DUPLICATE: return "duplicate";
++		case EXPANDRULE_ERROR_INVALID_CARDINALITY: return "invalid_cardinality";
++		case EXPANDRULE_ERROR_TRAILING_DATA: return "trailing_data";
++		case EXPANDRULE_ERROR_OVERSIZE: return "oversize";
++		case EXPANDRULE_ERROR_OUT_OF_MEMORY: return "out_of_memory";
++	}
++	return "unknown";
++}
+diff --git a/src/libcharon/encoding/payloads/expandrule_profile.c b/src/libcharon/encoding/payloads/expandrule_profile.c
+new file mode 100644
+index 0000000..3ae50bd
+--- /dev/null
++++ b/src/libcharon/encoding/payloads/expandrule_profile.c
+@@ -0,0 +1,151 @@
++/*
++ * Copyright (C) 2026 Zhuoyuan Hao
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ */
++
++#include "expandrule_codec_internal.h"
++
++static bool validate_opaque(const expandrule_record_t *records, size_t index,
++							   size_t maximum, expandrule_error_t *error)
++{
++	const expandrule_record_t *record = &records[index];
++
++	if ((!record->value.ptr && record->value.len) || !record->value.len ||
++		record->value.len > maximum || record->prefix_length != 0)
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_VALUE_LENGTH, 4);
++	}
++	if (expandrule_record_duplicate(records, index, record->value, 0, FALSE))
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_DUPLICATE, 4);
++	}
++	return TRUE;
++}
++
++static bool validate_address(const expandrule_record_t *records, size_t index,
++								expandrule_family_t family,
++								expandrule_error_t *error)
++{
++	const expandrule_record_t *record = &records[index];
++	size_t address_size = expandrule_family_size(family);
++	uint8_t maximum = family == EXPANDRULE_IPV4 ? 32 : 128;
++
++	if (!record->value.ptr || record->value.len != address_size)
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_VALUE_LENGTH, 4);
++	}
++	if (record->prefix_length > maximum)
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_INVALID_PREFIX, 4);
++	}
++	if (expandrule_record_duplicate(records, index, record->value,
++									record->prefix_length, TRUE))
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_DUPLICATE, 4);
++	}
++	return TRUE;
++}
++
++static bool validate_client(expandrule_wire_form_t form,
++							const expandrule_client_envelope_t *client,
++							expandrule_error_t *error)
++{
++	size_t address_size, maximum, i;
++
++	address_size = expandrule_family_size(client->family);
++	if (!address_size ||
++		(client->dialect != EXPANDRULE_DIALECT_0 &&
++		 client->dialect != EXPANDRULE_DIALECT_1))
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_INVALID_ARGUMENT, 4);
++	}
++	if (!client->leading_address.ptr ||
++		client->leading_address.len != address_size)
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_VALUE_LENGTH, 4);
++	}
++	if (client->primary_count > EXPANDRULE_MAX_RECORDS ||
++		client->secondary_count > EXPANDRULE_MAX_RECORDS)
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_COUNT_LIMIT, 4);
++	}
++	if ((client->primary_count && !client->primary) ||
++		(client->secondary_count && !client->secondary))
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_INVALID_ARGUMENT, 4);
++	}
++	if ((form == EXPANDRULE_INFO_ADD_DELTA ||
++		 form == EXPANDRULE_INFO_DELETE_DELTA) &&
++		client->primary_count + client->secondary_count != 1)
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_INVALID_CARDINALITY, 4);
++	}
++
++	for (i = 0; i < client->primary_count; i++)
++	{
++		if (client->dialect == EXPANDRULE_DIALECT_0)
++		{
++			if (!validate_address(client->primary, i, client->family, error))
++			{
++				return FALSE;
++			}
++		}
++		else if (!validate_opaque(client->primary, i,
++									EXPANDRULE_MAX_DIALECT1_OPAQUE_LENGTH, error))
++		{
++			return FALSE;
++		}
++	}
++	maximum = client->dialect == EXPANDRULE_DIALECT_0 ?
++				  EXPANDRULE_MAX_DIALECT0_OPAQUE_LENGTH :
++				  EXPANDRULE_MAX_DIALECT1_OPAQUE_LENGTH;
++	for (i = 0; i < client->secondary_count; i++)
++	{
++		if (!validate_opaque(client->secondary, i, maximum, error))
++		{
++			return FALSE;
++		}
++	}
++	return TRUE;
++}
++
++bool expandrule_profile_validate(expandrule_wire_form_t form,
++								 const expandrule_message_t *message,
++								 expandrule_error_t *error)
++{
++	expandrule_clear_error(error);
++	if (!message || (!expandrule_form_is_client(form) &&
++					 !expandrule_form_is_revoke(form)))
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_INVALID_ARGUMENT, 0);
++	}
++	if (message->next_payload != 0)
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_INVALID_HEADER, 0);
++	}
++	if (expandrule_form_is_client(form))
++	{
++		if (message->kind != EXPANDRULE_CLIENT_ENVELOPE)
++		{
++			return expandrule_fail(error, EXPANDRULE_ERROR_UNSUPPORTED_CONTEXT, 0);
++		}
++		return validate_client(form, &message->data.client, error);
++	}
++	if (message->kind != EXPANDRULE_SERVER_REVOKE)
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_UNSUPPORTED_CONTEXT, 0);
++	}
++	if (!message->data.revoke.opaque_value.ptr ||
++		!message->data.revoke.opaque_value.len ||
++		message->data.revoke.opaque_value.len >
++			EXPANDRULE_MAX_REVOKE_OPAQUE_LENGTH ||
++		expandrule_chunk_has_nul(message->data.revoke.opaque_value))
++	{
++		return expandrule_fail(error, EXPANDRULE_ERROR_VALUE_LENGTH, 5);
++	}
++	return TRUE;
++}
+diff --git a/src/libcharon/encoding/payloads/expandrule_revoke_codec.c b/src/libcharon/encoding/payloads/expandrule_revoke_codec.c
+new file mode 100644
+index 0000000..0ab7d4b
+--- /dev/null
++++ b/src/libcharon/encoding/payloads/expandrule_revoke_codec.c
+@@ -0,0 +1,69 @@
++/*
++ * Copyright (C) 2026 Zhuoyuan Hao
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ */
++
++#include "expandrule_codec_internal.h"
++
++#include <bio/bio_reader.h>
++#include <bio/bio_writer.h>
++
++bool expandrule_revoke_decode(uint8_t raw_flags, chunk_t body,
++							  size_t body_offset,
++							  expandrule_message_t **message,
++							  expandrule_error_t *error)
++{
++	expandrule_message_t *decoded;
++	bio_reader_t *reader;
++	chunk_t opaque_value;
++
++	reader = bio_reader_create(body);
++	if (!reader->read_data8(reader, &opaque_value))
++	{
++		expandrule_fail(error, EXPANDRULE_ERROR_TRUNCATED, body_offset);
++		reader->destroy(reader);
++		return FALSE;
++	}
++	if (reader->remaining(reader))
++	{
++		expandrule_fail(error, EXPANDRULE_ERROR_TRAILING_DATA,
++						body_offset + body.len - reader->remaining(reader));
++		reader->destroy(reader);
++		return FALSE;
++	}
++	decoded = calloc(1, sizeof(*decoded));
++	if (!decoded)
++	{
++		expandrule_fail(error, EXPANDRULE_ERROR_OUT_OF_MEMORY, body_offset);
++		reader->destroy(reader);
++		return FALSE;
++	}
++	decoded->kind = EXPANDRULE_SERVER_REVOKE;
++	decoded->data.revoke.raw_flags = raw_flags;
++	decoded->data.revoke.opaque_value = chunk_clone(opaque_value);
++	reader->destroy(reader);
++	if (opaque_value.len && !decoded->data.revoke.opaque_value.ptr)
++	{
++		expandrule_message_destroy(decoded);
++		return expandrule_fail(error, EXPANDRULE_ERROR_OUT_OF_MEMORY,
++								body_offset + 1);
++	}
++	*message = decoded;
++	return TRUE;
++}
++
++bool expandrule_revoke_encode(const expandrule_server_revoke_t *revoke,
++							  chunk_t *body, expandrule_error_t *error)
++{
++	bio_writer_t *writer;
++
++	writer = bio_writer_create(1 + revoke->opaque_value.len);
++	writer->write_data8(writer, revoke->opaque_value);
++	*body = writer->extract_buf(writer);
++	writer->destroy(writer);
++	return TRUE;
++}
+diff --git a/src/libcharon/tests/Makefile.am b/src/libcharon/tests/Makefile.am
+index 1d92501..7cad89f 100644
+--- a/src/libcharon/tests/Makefile.am
++++ b/src/libcharon/tests/Makefile.am
+@@ -9,6 +9,15 @@ libcharon_tests_SOURCES = \
+   suites/test_message_chapoly.c \
+   libcharon_tests.h libcharon_tests.c
+ 
++if USE_IKEV1
++libcharon_tests_SOURCES += \
++  suites/expandrule_test_fixtures.h \
++  suites/test_expandrule_codec.c \
++  suites/test_expandrule_codec_boundaries.c \
++  suites/test_expandrule_codec_invalid.c \
++  suites/test_expandrule_codec_profile.c
++endif
++
+ libcharon_tests_CFLAGS = \
+   -I$(top_srcdir)/src/libcharon \
+   -I$(top_srcdir)/src/libstrongswan \
+diff --git a/src/libcharon/tests/libcharon_tests.h b/src/libcharon/tests/libcharon_tests.h
+index 7169d1d..190c814 100644
+--- a/src/libcharon/tests/libcharon_tests.h
++++ b/src/libcharon/tests/libcharon_tests.h
+@@ -27,3 +27,6 @@ TEST_SUITE(ike_cfg_suite_create)
+ TEST_SUITE(peer_cfg_suite_create)
+ TEST_SUITE(mem_pool_suite_create)
+ TEST_SUITE_DEPEND(message_chapoly_suite_create, AEAD, ENCR_CHACHA20_POLY1305, 32)
++#ifdef USE_IKEV1
++TEST_SUITE(expandrule_codec_suite_create)
++#endif
+diff --git a/src/libcharon/tests/suites/expandrule_test_fixtures.h b/src/libcharon/tests/suites/expandrule_test_fixtures.h
+new file mode 100644
+index 0000000..2885224
+--- /dev/null
++++ b/src/libcharon/tests/suites/expandrule_test_fixtures.h
+@@ -0,0 +1,73 @@
++/*
++ * Synthetic-only fixtures for the PowerVPN expandrule wire contract.
++ * TEST-NET and RFC 3849 addresses are used intentionally.
++ */
++
++#ifndef EXPANDRULE_TEST_FIXTURES_H_
++#define EXPANDRULE_TEST_FIXTURES_H_
++
++#include <library.h>
++
++typedef struct {
++	const char *id;
++	const char *hex;
++	size_t expected_length;
++	uint8_t *data;
++	size_t length;
++} expandrule_fixture_record_t;
++
++static uint8_t expandrule_v4_d0_bytes[] = {
++	0x00,0x00,0x00,0x1d,0xc0,0x00,0x02,0x0a,0x00,0x00,0x00,0x01,
++	0xc6,0x33,0x64,0x00,0xff,0xff,0xff,0x00,0x00,0x00,0x00,0x01,
++	0x04,0xde,0xad,0xbe,0xef,
++};
++
++static uint8_t expandrule_v6_d0_bytes[] = {
++	0x00,0x06,0x00,0x30,0x20,0x01,0x0d,0xb8,0x00,0x00,0x00,0x00,
++	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x10,0x00,0x00,0x00,0x01,
++	0x20,0x01,0x0d,0xb8,0x00,0x01,0x00,0x00,0x00,0x00,0x00,0x00,
++	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x40,0x00,0x00,0x00,0x00,
++};
++
++static uint8_t expandrule_v4_d1_bytes[] = {
++	0x00,0x00,0x00,0x1a,0xc0,0x00,0x02,0x0a,0x00,0x00,0x00,0x01,
++	0x04,0x01,0x02,0x03,0x04,0x00,0x00,0x00,0x01,0x04,0x05,0x06,
++	0x07,0x08,
++};
++
++static uint8_t expandrule_empty_v4_bytes[] = {
++	0x00,0x00,0x00,0x10,0xc0,0x00,0x02,0x0a,
++	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
++};
++
++static uint8_t expandrule_empty_v6_bytes[] = {
++	0x00,0x06,0x00,0x1c,0x20,0x01,0x0d,0xb8,0x00,0x00,0x00,0x00,
++	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x10,0x00,0x00,0x00,0x00,
++	0x00,0x00,0x00,0x00,
++};
++
++static uint8_t expandrule_single_delta_bytes[] = {
++	0x00,0x00,0x00,0x18,0xc0,0x00,0x02,0x0a,0x00,0x00,0x00,0x01,
++	0xc6,0x33,0x64,0x00,0xff,0xff,0xff,0x00,0x00,0x00,0x00,0x00,
++};
++
++static uint8_t expandrule_revoke_bytes[] = {
++	0x00,0x00,0x00,0x0a,0x05,0xa1,0xb2,0xc3,0xd4,0xe5,
++};
++
++static expandrule_fixture_record_t expandrule_fixture_records[] = {
++	{ "v4-dialect0-quick-snapshot", "0000001dc000020a00000001c6336400ffffff000000000104deadbeef", 29, expandrule_v4_d0_bytes, sizeof(expandrule_v4_d0_bytes) },
++	{ "v6-dialect0-quick-snapshot", "0006003020010db80000000000000000000000100000000120010db80001000000000000000000000000004000000000", 48, expandrule_v6_d0_bytes, sizeof(expandrule_v6_d0_bytes) },
++	{ "v4-dialect1-quick-snapshot", "0000001ac000020a000000010401020304000000010405060708", 26, expandrule_v4_d1_bytes, sizeof(expandrule_v4_d1_bytes) },
++	{ "v4-empty-quick-snapshot", "00000010c000020a0000000000000000", 16, expandrule_empty_v4_bytes, sizeof(expandrule_empty_v4_bytes) },
++	{ "v6-empty-quick-snapshot", "0006001c20010db80000000000000000000000100000000000000000", 28, expandrule_empty_v6_bytes, sizeof(expandrule_empty_v6_bytes) },
++	{ "v4-informational-single-delta", "00000018c000020a00000001c6336400ffffff0000000000", 24, expandrule_single_delta_bytes, sizeof(expandrule_single_delta_bytes) },
++	{ "server-short-opaque", "0000000a05a1b2c3d4e5", 10, expandrule_revoke_bytes, sizeof(expandrule_revoke_bytes) },
++};
++
++static inline chunk_t expandrule_fixture(uint8_t *data, size_t length)
++{
++	return chunk_create(data, length);
++}
++
++#endif /* EXPANDRULE_TEST_FIXTURES_H_ */
+diff --git a/src/libcharon/tests/suites/test_expandrule_codec.c b/src/libcharon/tests/suites/test_expandrule_codec.c
+new file mode 100644
+index 0000000..f470c8e
+--- /dev/null
++++ b/src/libcharon/tests/suites/test_expandrule_codec.c
+@@ -0,0 +1,287 @@
++/*
++ * Copyright (C) 2026 Zhuoyuan Hao
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ */
++
++#include "test_suite.h"
++#include "expandrule_test_fixtures.h"
++
++#include <encoding/payloads/expandrule_codec.h>
++
++static void assert_encode(expandrule_wire_form_t form,
++						  expandrule_message_t *message, chunk_t expected)
++{
++	expandrule_error_t error;
++	chunk_t first, second;
++
++	ck_assert(expandrule_codec_encode(form, message, &first, &error));
++	ck_assert_msg(chunk_equals(first, expected), "encoded bytes differ");
++	ck_assert(expandrule_codec_encode(form, message, &second, &error));
++	ck_assert_msg(chunk_equals(first, second), "encoding is not deterministic");
++	chunk_free(&first);
++	chunk_free(&second);
++}
++
++static expandrule_message_t *decode_profile(expandrule_wire_form_t form,
++											expandrule_dialect_t dialect,
++											chunk_t payload)
++{
++	expandrule_message_t *message;
++	expandrule_error_t error;
++
++	ck_assert_msg(expandrule_codec_decode(form, dialect, payload, &message,
++										&error),
++				  "decode failed: %s", expandrule_error_name(error.code));
++	ck_assert_msg(expandrule_profile_validate(form, message, &error),
++				  "profile failed: %s", expandrule_error_name(error.code));
++	return message;
++}
++
++START_TEST(test_v4_dialect0_snapshot)
++{
++	expandrule_record_t primary[] = {
++		{ .value = chunk_from_chars(0xc6,0x33,0x64,0x00),
++		  .prefix_length = 24 },
++	};
++	expandrule_record_t secondary[] = {
++		{ .value = chunk_from_chars(0xde,0xad,0xbe,0xef) },
++	};
++	expandrule_message_t model = {
++		.kind = EXPANDRULE_CLIENT_ENVELOPE,
++		.data.client = {
++			.family = EXPANDRULE_IPV4,
++			.dialect = EXPANDRULE_DIALECT_0,
++			.leading_address = chunk_from_chars(0xc0,0x00,0x02,0x0a),
++			.primary_count = countof(primary),
++			.primary = primary,
++			.secondary_count = countof(secondary),
++			.secondary = secondary,
++		},
++	};
++	expandrule_message_t *decoded;
++	chunk_t expected = expandrule_fixture(expandrule_v4_d0_bytes,
++										 sizeof(expandrule_v4_d0_bytes));
++
++	assert_encode(EXPANDRULE_QM_ADD_SNAPSHOT, &model, expected);
++	decoded = decode_profile(EXPANDRULE_QM_ADD_SNAPSHOT,
++							 EXPANDRULE_DIALECT_0, expected);
++	ck_assert_int_eq(decoded->data.client.family, EXPANDRULE_IPV4);
++	ck_assert_int_eq(decoded->data.client.primary_count, 1);
++	ck_assert_int_eq(decoded->data.client.secondary_count, 1);
++	ck_assert_int_eq(decoded->data.client.primary[0].prefix_length, 24);
++	ck_assert(chunk_equals(decoded->data.client.secondary[0].value,
++						   secondary[0].value));
++	expandrule_message_destroy(decoded);
++}
++END_TEST
++
++START_TEST(test_v6_dialect0_snapshot)
++{
++	expandrule_record_t primary[] = {
++		{ .value = chunk_from_chars(
++			0x20,0x01,0x0d,0xb8,0x00,0x01,0x00,0x00,
++			0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00),
++		  .prefix_length = 64 },
++	};
++	expandrule_message_t model = {
++		.kind = EXPANDRULE_CLIENT_ENVELOPE,
++		.data.client = {
++			.family = EXPANDRULE_IPV6,
++			.dialect = EXPANDRULE_DIALECT_0,
++			.leading_address = chunk_from_chars(
++				0x20,0x01,0x0d,0xb8,0x00,0x00,0x00,0x00,
++				0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x10),
++			.primary_count = countof(primary),
++			.primary = primary,
++		},
++	};
++	expandrule_message_t *decoded;
++	chunk_t expected = expandrule_fixture(expandrule_v6_d0_bytes,
++										 sizeof(expandrule_v6_d0_bytes));
++
++	assert_encode(EXPANDRULE_QM_ADD_SNAPSHOT, &model, expected);
++	decoded = decode_profile(EXPANDRULE_QM_ADD_SNAPSHOT,
++							 EXPANDRULE_DIALECT_0, expected);
++	ck_assert_int_eq(decoded->data.client.family, EXPANDRULE_IPV6);
++	ck_assert_int_eq(decoded->data.client.primary[0].prefix_length, 64);
++	expandrule_message_destroy(decoded);
++}
++END_TEST
++
++START_TEST(test_dialect1_snapshot)
++{
++	expandrule_record_t primary[] = {
++		{ .value = chunk_from_chars(0x01,0x02,0x03,0x04) },
++	};
++	expandrule_record_t secondary[] = {
++		{ .value = chunk_from_chars(0x05,0x06,0x07,0x08) },
++	};
++	expandrule_message_t model = {
++		.kind = EXPANDRULE_CLIENT_ENVELOPE,
++		.data.client = {
++			.family = EXPANDRULE_IPV4,
++			.dialect = EXPANDRULE_DIALECT_1,
++			.leading_address = chunk_from_chars(0xc0,0x00,0x02,0x0a),
++			.primary_count = countof(primary),
++			.primary = primary,
++			.secondary_count = countof(secondary),
++			.secondary = secondary,
++		},
++	};
++	chunk_t expected = expandrule_fixture(expandrule_v4_d1_bytes,
++										 sizeof(expandrule_v4_d1_bytes));
++	expandrule_message_t *decoded;
++
++	assert_encode(EXPANDRULE_QM_ADD_SNAPSHOT, &model, expected);
++	decoded = decode_profile(EXPANDRULE_QM_ADD_SNAPSHOT,
++							 EXPANDRULE_DIALECT_1, expected);
++	ck_assert(chunk_equals(decoded->data.client.primary[0].value,
++						   primary[0].value));
++	ck_assert(chunk_equals(decoded->data.client.secondary[0].value,
++						   secondary[0].value));
++	expandrule_message_destroy(decoded);
++}
++END_TEST
++
++START_TEST(test_empty_snapshot)
++{
++	bool ipv6 = _i != 0;
++	expandrule_message_t model = {
++		.kind = EXPANDRULE_CLIENT_ENVELOPE,
++		.data.client = {
++			.family = ipv6 ? EXPANDRULE_IPV6 : EXPANDRULE_IPV4,
++			.dialect = ipv6 ? EXPANDRULE_DIALECT_1 :
++								 EXPANDRULE_DIALECT_0,
++			.leading_address = ipv6 ? chunk_from_chars(
++				0x20,0x01,0x0d,0xb8,0x00,0x00,0x00,0x00,
++				0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x10) :
++				chunk_from_chars(0xc0,0x00,0x02,0x0a),
++		},
++	};
++	chunk_t expected = ipv6 ?
++		expandrule_fixture(expandrule_empty_v6_bytes,
++						   sizeof(expandrule_empty_v6_bytes)) :
++		expandrule_fixture(expandrule_empty_v4_bytes,
++						   sizeof(expandrule_empty_v4_bytes));
++	expandrule_message_t *decoded;
++
++	assert_encode(EXPANDRULE_QM_ADD_SNAPSHOT, &model, expected);
++	decoded = decode_profile(EXPANDRULE_QM_ADD_SNAPSHOT,
++							 model.data.client.dialect, expected);
++	ck_assert_int_eq(decoded->data.client.primary_count, 0);
++	ck_assert_int_eq(decoded->data.client.secondary_count, 0);
++	expandrule_message_destroy(decoded);
++}
++END_TEST
++
++START_TEST(test_informational_single_delta)
++{
++	expandrule_record_t primary[] = {
++		{ .value = chunk_from_chars(0xc6,0x33,0x64,0x00),
++		  .prefix_length = 24 },
++	};
++	expandrule_message_t model = {
++		.kind = EXPANDRULE_CLIENT_ENVELOPE,
++		.data.client = {
++			.family = EXPANDRULE_IPV4,
++			.dialect = EXPANDRULE_DIALECT_0,
++			.leading_address = chunk_from_chars(0xc0,0x00,0x02,0x0a),
++			.primary_count = countof(primary),
++			.primary = primary,
++		},
++	};
++	chunk_t expected = expandrule_fixture(expandrule_single_delta_bytes,
++										 sizeof(expandrule_single_delta_bytes));
++	expandrule_message_t *decoded;
++
++	assert_encode(EXPANDRULE_INFO_ADD_DELTA, &model, expected);
++	assert_encode(EXPANDRULE_INFO_DELETE_DELTA, &model, expected);
++	decoded = decode_profile(EXPANDRULE_INFO_DELETE_DELTA,
++							 EXPANDRULE_DIALECT_0, expected);
++	expandrule_message_destroy(decoded);
++	ck_assert_int_eq(expandrule_form_payload_type(EXPANDRULE_INFO_ADD_DELTA), 18);
++	ck_assert_int_eq(expandrule_form_payload_type(EXPANDRULE_INFO_DELETE_DELTA), 19);
++}
++END_TEST
++
++START_TEST(test_server_revoke)
++{
++	expandrule_message_t model = {
++		.kind = EXPANDRULE_SERVER_REVOKE,
++		.data.revoke = {
++			.raw_flags = 0,
++			.opaque_value = chunk_from_chars(0xa1,0xb2,0xc3,0xd4,0xe5),
++		},
++	};
++	chunk_t expected = expandrule_fixture(expandrule_revoke_bytes,
++										 sizeof(expandrule_revoke_bytes));
++	expandrule_message_t *decoded;
++	expandrule_error_t error;
++	chunk_t encoded;
++
++	assert_encode(EXPANDRULE_INFO_REVOKE_V1, &model, expected);
++	decoded = decode_profile(EXPANDRULE_INFO_REVOKE_V1,
++							 EXPANDRULE_DIALECT_NONE, expected);
++	ck_assert(chunk_equals(decoded->data.revoke.opaque_value,
++						   model.data.revoke.opaque_value));
++	expandrule_message_destroy(decoded);
++	decoded = decode_profile(EXPANDRULE_INFO_REVOKE_LEGACY,
++							 EXPANDRULE_DIALECT_NONE, expected);
++	expandrule_message_destroy(decoded);
++	ck_assert(!expandrule_codec_encode(EXPANDRULE_INFO_REVOKE_LEGACY,
++									   &model, &encoded, &error));
++	ck_assert_int_eq(error.code, EXPANDRULE_ERROR_UNSUPPORTED_CONTEXT);
++	ck_assert_int_eq(expandrule_form_payload_type(EXPANDRULE_INFO_REVOKE_V1), 19);
++	ck_assert_int_eq(expandrule_form_payload_type(EXPANDRULE_INFO_REVOKE_LEGACY), 17);
++	ck_assert_int_eq(expandrule_form_direction(EXPANDRULE_INFO_REVOKE_V1),
++					 EXPANDRULE_SERVER_TO_CLIENT);
++}
++END_TEST
++
++START_TEST(test_input_ownership)
++{
++	chunk_t input = chunk_clone(expandrule_fixture(expandrule_single_delta_bytes,
++												   sizeof(expandrule_single_delta_bytes)));
++	chunk_t expected_address = chunk_from_chars(0xc6,0x33,0x64,0x00);
++	expandrule_message_t *message;
++	expandrule_error_t error;
++
++	ck_assert(expandrule_codec_decode(EXPANDRULE_INFO_ADD_DELTA,
++								  EXPANDRULE_DIALECT_0, input,
++								  &message, &error));
++	memwipe(input.ptr, input.len);
++	chunk_free(&input);
++	ck_assert(chunk_equals(message->data.client.primary[0].value,
++						   expected_address));
++	expandrule_message_destroy(message);
++}
++END_TEST
++
++void expandrule_add_invalid_tests(TCase *tc);
++void expandrule_add_boundary_tests(TCase *tc);
++void expandrule_add_profile_tests(TCase *tc);
++
++Suite *expandrule_codec_suite_create()
++{
++	Suite *s;
++	TCase *tc;
++
++	s = suite_create("expandrule codec");
++	tc = tcase_create("synthetic golden vectors");
++	tcase_add_test(tc, test_v4_dialect0_snapshot);
++	tcase_add_test(tc, test_v6_dialect0_snapshot);
++	tcase_add_test(tc, test_dialect1_snapshot);
++	tcase_add_loop_test(tc, test_empty_snapshot, 0, 2);
++	tcase_add_test(tc, test_informational_single_delta);
++	tcase_add_test(tc, test_server_revoke);
++	tcase_add_test(tc, test_input_ownership);
++	expandrule_add_boundary_tests(tc);
++	expandrule_add_invalid_tests(tc);
++	expandrule_add_profile_tests(tc);
++	suite_add_tcase(s, tc);
++	return s;
++}
+diff --git a/src/libcharon/tests/suites/test_expandrule_codec_boundaries.c b/src/libcharon/tests/suites/test_expandrule_codec_boundaries.c
+new file mode 100644
+index 0000000..92c5d3b
+--- /dev/null
++++ b/src/libcharon/tests/suites/test_expandrule_codec_boundaries.c
+@@ -0,0 +1,240 @@
++/*
++ * Copyright (C) 2026 Zhuoyuan Hao
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ */
++
++#include "test_suite.h"
++#include "expandrule_test_fixtures.h"
++
++#include <encoding/payloads/expandrule_codec.h>
++
++static uint8_t single_v4[] = {
++	0x00,0x00,0x00,0x18,0xc0,0x00,0x02,0x0a,0x00,0x00,0x00,0x01,
++	0xc6,0x33,0x64,0x00,0xff,0xff,0xff,0x00,0x00,0x00,0x00,0x00,
++};
++
++static uint8_t single_v6[] = {
++	0x00,0x06,0x00,0x30,0x20,0x01,0x0d,0xb8,0x00,0x00,0x00,0x00,
++	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x10,0x00,0x00,0x00,0x01,
++	0x20,0x01,0x0d,0xb8,0x00,0x01,0x00,0x00,0x00,0x00,0x00,0x00,
++	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x40,0x00,0x00,0x00,0x00,
++};
++
++START_TEST(test_fixture_manifest_matches_compiled_bytes)
++{
++	chunk_t hex;
++	size_t i;
++
++	ck_assert_int_eq(countof(expandrule_fixture_records), 7);
++	for (i = 0; i < countof(expandrule_fixture_records); i++)
++	{
++		expandrule_fixture_record_t *fixture = &expandrule_fixture_records[i];
++
++		ck_assert(fixture->id[0] != '\0');
++		ck_assert_int_eq(fixture->expected_length, fixture->length);
++		hex = chunk_to_hex(chunk_create(fixture->data, fixture->length),
++						   NULL, FALSE);
++		ck_assert(chunk_equals(hex,
++						   chunk_create((uint8_t*)fixture->hex,
++										strlen(fixture->hex))));
++		chunk_free(&hex);
++	}
++}
++END_TEST
++
++START_TEST(test_all_form_mappings)
++{
++	struct {
++		expandrule_wire_form_t form;
++		uint8_t payload_type;
++		expandrule_direction_t direction;
++	} mappings[] = {
++		{ EXPANDRULE_QM_ADD_SNAPSHOT, 18, EXPANDRULE_CLIENT_TO_SERVER },
++		{ EXPANDRULE_INFO_ADD_DELTA, 18, EXPANDRULE_CLIENT_TO_SERVER },
++		{ EXPANDRULE_INFO_DELETE_DELTA, 19, EXPANDRULE_CLIENT_TO_SERVER },
++		{ EXPANDRULE_INFO_REVOKE_V1, 19, EXPANDRULE_SERVER_TO_CLIENT },
++		{ EXPANDRULE_INFO_REVOKE_LEGACY, 17, EXPANDRULE_SERVER_TO_CLIENT },
++	};
++	size_t i;
++
++	for (i = 0; i < countof(mappings); i++)
++	{
++		ck_assert_int_eq(expandrule_form_payload_type(mappings[i].form),
++						 mappings[i].payload_type);
++		ck_assert_int_eq(expandrule_form_direction(mappings[i].form),
++						 mappings[i].direction);
++	}
++}
++END_TEST
++
++START_TEST(test_failure_outputs_and_unknown_context)
++{
++	uint8_t empty[] = {
++		0x00,0x00,0x00,0x10,0xc0,0x00,0x02,0x0a,
++		0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
++	};
++	expandrule_message_t *message = (void*)1;
++	expandrule_error_t error;
++	chunk_t invalid = { .ptr = NULL, .len = 1 };
++	chunk_t output = chunk_from_chars(0xaa);
++
++	ck_assert(!expandrule_codec_decode(EXPANDRULE_QM_ADD_SNAPSHOT,
++								  EXPANDRULE_DIALECT_0, invalid, &message,
++								  &error));
++	ck_assert(message == NULL);
++	ck_assert_int_eq(error.code, EXPANDRULE_ERROR_INVALID_ARGUMENT);
++
++	ck_assert(!expandrule_codec_encode(EXPANDRULE_QM_ADD_SNAPSHOT, NULL,
++								  &output, &error));
++	ck_assert(output.ptr == NULL);
++	ck_assert_int_eq(output.len, 0);
++
++	ck_assert(!expandrule_codec_decode(EXPANDRULE_QM_ADD_SNAPSHOT,
++								  (expandrule_dialect_t)99,
++								  chunk_from_thing(empty), &message, &error));
++	ck_assert_int_eq(error.code, EXPANDRULE_ERROR_UNSUPPORTED_CONTEXT);
++	ck_assert_int_eq(expandrule_form_payload_type((expandrule_wire_form_t)99), 0);
++	ck_assert_int_eq(expandrule_form_direction((expandrule_wire_form_t)99),
++						 EXPANDRULE_DIRECTION_UNKNOWN);
++}
++END_TEST
++
++START_TEST(test_primary_count_reserves_secondary_count)
++{
++	uint8_t missing_tail[] = {
++		0x00,0x00,0x00,0x14,0xc0,0x00,0x02,0x0a,0x00,0x00,0x00,0x01,
++		0xc6,0x33,0x64,0x00,0xff,0xff,0xff,0x00,
++	};
++	expandrule_message_t *message;
++	expandrule_error_t error;
++
++	ck_assert(!expandrule_codec_decode(EXPANDRULE_QM_ADD_SNAPSHOT,
++								  EXPANDRULE_DIALECT_0,
++								  chunk_from_thing(missing_tail), &message,
++								  &error));
++	ck_assert(message == NULL);
++	ck_assert_int_eq(error.code, EXPANDRULE_ERROR_TRUNCATED);
++	ck_assert_int_eq(error.offset, 8);
++}
++END_TEST
++
++START_TEST(test_ipv4_mask_boundaries)
++{
++	struct {
++		uint8_t bytes[4];
++		uint8_t prefix;
++	} valid[] = {
++		{ { 0x00,0x00,0x00,0x00 }, 0 },
++		{ { 0x80,0x00,0x00,0x00 }, 1 },
++		{ { 0xff,0xff,0xff,0x00 }, 24 },
++		{ { 0xff,0xff,0xff,0xff }, 32 },
++	};
++	uint8_t invalid[][4] = {
++		{ 0xff,0x00,0xff,0x00 },
++		{ 0x7f,0xff,0xff,0xff },
++		{ 0xff,0xff,0xff,0x01 },
++	};
++	uint8_t wire[sizeof(single_v4)];
++	expandrule_message_t *message;
++	expandrule_error_t error;
++	size_t i;
++
++	for (i = 0; i < countof(valid); i++)
++	{
++		memcpy(wire, single_v4, sizeof(wire));
++		memcpy(wire + 16, valid[i].bytes, sizeof(valid[i].bytes));
++		ck_assert(expandrule_codec_decode(EXPANDRULE_INFO_ADD_DELTA,
++									  EXPANDRULE_DIALECT_0,
++									  chunk_from_thing(wire), &message, &error));
++		ck_assert_int_eq(message->data.client.primary[0].prefix_length,
++						 valid[i].prefix);
++		ck_assert(expandrule_profile_validate(EXPANDRULE_INFO_ADD_DELTA,
++									message, &error));
++		expandrule_message_destroy(message);
++	}
++	for (i = 0; i < countof(invalid); i++)
++	{
++		memcpy(wire, single_v4, sizeof(wire));
++		memcpy(wire + 16, invalid[i], sizeof(invalid[i]));
++		ck_assert(!expandrule_codec_decode(EXPANDRULE_INFO_ADD_DELTA,
++									   EXPANDRULE_DIALECT_0,
++									   chunk_from_thing(wire), &message, &error));
++		ck_assert_int_eq(error.code, EXPANDRULE_ERROR_INVALID_MASK);
++	}
++}
++END_TEST
++
++START_TEST(test_ipv6_prefix_boundaries)
++{
++	uint8_t prefixes[] = { 0, 128 };
++	uint8_t wire[sizeof(single_v6)];
++	expandrule_message_t *message;
++	expandrule_error_t error;
++	size_t i;
++
++	for (i = 0; i < countof(prefixes); i++)
++	{
++		memcpy(wire, single_v6, sizeof(wire));
++		memset(wire + 40, 0, 4);
++		wire[43] = prefixes[i];
++		ck_assert(expandrule_codec_decode(EXPANDRULE_QM_ADD_SNAPSHOT,
++									  EXPANDRULE_DIALECT_0,
++									  chunk_from_thing(wire), &message, &error));
++		ck_assert_int_eq(message->data.client.primary[0].prefix_length,
++						 prefixes[i]);
++		ck_assert(expandrule_profile_validate(EXPANDRULE_QM_ADD_SNAPSHOT,
++									message, &error));
++		expandrule_message_destroy(message);
++	}
++}
++END_TEST
++
++START_TEST(test_duplicate_scope_preserves_wire_identity)
++{
++	chunk_t same = chunk_from_chars(0xa1,0xb2);
++	expandrule_record_t primary_d1[] = { { .value = same } };
++	expandrule_record_t secondary_d1[] = { { .value = same } };
++	expandrule_record_t primary_d0[] = {
++		{ .value = chunk_from_chars(0xc6,0x33,0x64,0x01), .prefix_length = 24 },
++		{ .value = chunk_from_chars(0xc6,0x33,0x64,0x02), .prefix_length = 24 },
++	};
++	expandrule_message_t message = {
++		.kind = EXPANDRULE_CLIENT_ENVELOPE,
++		.data.client = {
++			.family = EXPANDRULE_IPV4,
++			.dialect = EXPANDRULE_DIALECT_1,
++			.leading_address = chunk_from_chars(0xc0,0x00,0x02,0x0a),
++			.primary_count = 1,
++			.primary = primary_d1,
++			.secondary_count = 1,
++			.secondary = secondary_d1,
++		},
++	};
++	expandrule_error_t error;
++
++	ck_assert(expandrule_profile_validate(EXPANDRULE_QM_ADD_SNAPSHOT,
++									  &message, &error));
++	message.data.client.dialect = EXPANDRULE_DIALECT_0;
++	message.data.client.primary_count = countof(primary_d0);
++	message.data.client.primary = primary_d0;
++	message.data.client.secondary_count = 0;
++	message.data.client.secondary = NULL;
++	ck_assert(expandrule_profile_validate(EXPANDRULE_QM_ADD_SNAPSHOT,
++									  &message, &error));
++}
++END_TEST
++
++void expandrule_add_boundary_tests(TCase *tc)
++{
++	tcase_add_test(tc, test_fixture_manifest_matches_compiled_bytes);
++	tcase_add_test(tc, test_all_form_mappings);
++	tcase_add_test(tc, test_failure_outputs_and_unknown_context);
++	tcase_add_test(tc, test_primary_count_reserves_secondary_count);
++	tcase_add_test(tc, test_ipv4_mask_boundaries);
++	tcase_add_test(tc, test_ipv6_prefix_boundaries);
++	tcase_add_test(tc, test_duplicate_scope_preserves_wire_identity);
++}
+diff --git a/src/libcharon/tests/suites/test_expandrule_codec_invalid.c b/src/libcharon/tests/suites/test_expandrule_codec_invalid.c
+new file mode 100644
+index 0000000..6e0e15e
+--- /dev/null
++++ b/src/libcharon/tests/suites/test_expandrule_codec_invalid.c
+@@ -0,0 +1,285 @@
++/*
++ * Copyright (C) 2026 Zhuoyuan Hao
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ */
++
++#include "test_suite.h"
++#include "expandrule_test_fixtures.h"
++
++#include <encoding/payloads/expandrule_codec.h>
++
++typedef struct {
++	expandrule_wire_form_t form;
++	expandrule_dialect_t dialect;
++	uint8_t *data;
++	size_t length;
++} fixture_context_t;
++
++static void assert_decode_error(expandrule_wire_form_t form,
++								expandrule_dialect_t dialect, chunk_t payload,
++								expandrule_error_code_t code)
++{
++	expandrule_message_t *message = NULL;
++	expandrule_error_t error;
++
++	ck_assert(!expandrule_codec_decode(form, dialect, payload, &message, &error));
++	ck_assert(message == NULL);
++	ck_assert_int_eq(error.code, code);
++}
++
++START_TEST(test_all_strict_prefixes_fail)
++{
++	fixture_context_t fixtures[] = {
++		{ EXPANDRULE_QM_ADD_SNAPSHOT, EXPANDRULE_DIALECT_0,
++		  expandrule_v4_d0_bytes, sizeof(expandrule_v4_d0_bytes) },
++		{ EXPANDRULE_QM_ADD_SNAPSHOT, EXPANDRULE_DIALECT_0,
++		  expandrule_v6_d0_bytes, sizeof(expandrule_v6_d0_bytes) },
++		{ EXPANDRULE_QM_ADD_SNAPSHOT, EXPANDRULE_DIALECT_1,
++		  expandrule_v4_d1_bytes, sizeof(expandrule_v4_d1_bytes) },
++		{ EXPANDRULE_QM_ADD_SNAPSHOT, EXPANDRULE_DIALECT_0,
++		  expandrule_empty_v4_bytes, sizeof(expandrule_empty_v4_bytes) },
++		{ EXPANDRULE_QM_ADD_SNAPSHOT, EXPANDRULE_DIALECT_1,
++		  expandrule_empty_v6_bytes, sizeof(expandrule_empty_v6_bytes) },
++		{ EXPANDRULE_INFO_DELETE_DELTA, EXPANDRULE_DIALECT_0,
++		  expandrule_single_delta_bytes, sizeof(expandrule_single_delta_bytes) },
++		{ EXPANDRULE_INFO_REVOKE_V1, EXPANDRULE_DIALECT_NONE,
++		  expandrule_revoke_bytes, sizeof(expandrule_revoke_bytes) },
++	};
++	expandrule_message_t *message;
++	expandrule_error_t error;
++	size_t fixture, length;
++
++	for (fixture = 0; fixture < countof(fixtures); fixture++)
++	{
++		for (length = 0; length < fixtures[fixture].length; length++)
++		{
++			message = NULL;
++			ck_assert(!expandrule_codec_decode(fixtures[fixture].form,
++							 fixtures[fixture].dialect,
++							 chunk_create(fixtures[fixture].data, length),
++							 &message, &error));
++			ck_assert(message == NULL);
++			ck_assert(error.code != EXPANDRULE_ERROR_NONE);
++		}
++	}
++}
++END_TEST
++
++START_TEST(test_header_and_context_validation)
++{
++	uint8_t buffer[sizeof(expandrule_single_delta_bytes) + 1];
++	chunk_t payload;
++
++	memcpy(buffer, expandrule_single_delta_bytes,
++		   sizeof(expandrule_single_delta_bytes));
++	payload = chunk_create(buffer, sizeof(expandrule_single_delta_bytes));
++	buffer[1] = 1;
++	assert_decode_error(EXPANDRULE_INFO_ADD_DELTA,
++					EXPANDRULE_DIALECT_0, payload,
++					EXPANDRULE_ERROR_INVALID_FLAGS);
++	buffer[1] = 0;
++	buffer[2] = 0;
++	buffer[3] = sizeof(expandrule_single_delta_bytes) - 1;
++	assert_decode_error(EXPANDRULE_INFO_ADD_DELTA,
++					EXPANDRULE_DIALECT_0, payload,
++					EXPANDRULE_ERROR_INVALID_LENGTH);
++	buffer[3] = sizeof(expandrule_single_delta_bytes) + 1;
++	assert_decode_error(EXPANDRULE_INFO_ADD_DELTA,
++					EXPANDRULE_DIALECT_0, payload,
++					EXPANDRULE_ERROR_INVALID_LENGTH);
++
++	assert_decode_error(EXPANDRULE_INFO_ADD_DELTA, EXPANDRULE_DIALECT_NONE,
++					payload, EXPANDRULE_ERROR_UNSUPPORTED_CONTEXT);
++	assert_decode_error(EXPANDRULE_INFO_REVOKE_V1,
++					EXPANDRULE_DIALECT_0,
++					expandrule_fixture(expandrule_revoke_bytes,
++								   sizeof(expandrule_revoke_bytes)),
++					EXPANDRULE_ERROR_UNSUPPORTED_CONTEXT);
++	assert_decode_error((expandrule_wire_form_t)99,
++					EXPANDRULE_DIALECT_NONE, payload,
++					EXPANDRULE_ERROR_UNSUPPORTED_CONTEXT);
++}
++END_TEST
++
++START_TEST(test_noncanonical_header_is_structurally_preserved)
++{
++	uint8_t buffer[sizeof(expandrule_single_delta_bytes)];
++	expandrule_message_t *message;
++	expandrule_error_t error;
++
++	memcpy(buffer, expandrule_single_delta_bytes, sizeof(buffer));
++	buffer[0] = 42;
++	ck_assert(expandrule_codec_decode(EXPANDRULE_INFO_ADD_DELTA,
++								  EXPANDRULE_DIALECT_0,
++								  chunk_create(buffer, sizeof(buffer)),
++								  &message, &error));
++	ck_assert_int_eq(message->next_payload, 42);
++	ck_assert(!expandrule_profile_validate(EXPANDRULE_INFO_ADD_DELTA,
++									   message, &error));
++	ck_assert_int_eq(error.code, EXPANDRULE_ERROR_INVALID_HEADER);
++	expandrule_message_destroy(message);
++}
++END_TEST
++
++START_TEST(test_invalid_mask_and_prefix)
++{
++	uint8_t v4[sizeof(expandrule_single_delta_bytes)];
++	uint8_t v6[sizeof(expandrule_v6_d0_bytes)];
++
++	memcpy(v4, expandrule_single_delta_bytes, sizeof(v4));
++	v4[16] = 0xff;
++	v4[17] = 0x00;
++	v4[18] = 0xff;
++	v4[19] = 0x00;
++	assert_decode_error(EXPANDRULE_INFO_ADD_DELTA,
++					EXPANDRULE_DIALECT_0,
++					chunk_create(v4, sizeof(v4)),
++					EXPANDRULE_ERROR_INVALID_MASK);
++
++	memcpy(v6, expandrule_v6_d0_bytes, sizeof(v6));
++	v6[40] = 0;
++	v6[41] = 0;
++	v6[42] = 0;
++	v6[43] = 129;
++	assert_decode_error(EXPANDRULE_QM_ADD_SNAPSHOT,
++					EXPANDRULE_DIALECT_0,
++					chunk_create(v6, sizeof(v6)),
++					EXPANDRULE_ERROR_INVALID_PREFIX);
++}
++END_TEST
++
++START_TEST(test_count_length_and_trailing_validation)
++{
++	uint8_t count[sizeof(expandrule_empty_v4_bytes)];
++	uint8_t variable[sizeof(expandrule_v4_d1_bytes)];
++	uint8_t trailing[sizeof(expandrule_single_delta_bytes) + 1];
++
++	memcpy(count, expandrule_empty_v4_bytes, sizeof(count));
++	count[8] = 0;
++	count[9] = 0;
++	count[10] = 0x10;
++	count[11] = 0x01;
++	assert_decode_error(EXPANDRULE_QM_ADD_SNAPSHOT,
++					EXPANDRULE_DIALECT_0,
++					chunk_create(count, sizeof(count)),
++					EXPANDRULE_ERROR_COUNT_LIMIT);
++
++	memcpy(variable, expandrule_v4_d1_bytes, sizeof(variable));
++	variable[12] = 0xff;
++	assert_decode_error(EXPANDRULE_QM_ADD_SNAPSHOT,
++					EXPANDRULE_DIALECT_1,
++					chunk_create(variable, sizeof(variable)),
++					EXPANDRULE_ERROR_TRUNCATED);
++
++	memcpy(trailing, expandrule_single_delta_bytes,
++		   sizeof(expandrule_single_delta_bytes));
++	trailing[sizeof(trailing) - 1] = 0xa5;
++	trailing[3] = sizeof(trailing);
++	assert_decode_error(EXPANDRULE_INFO_ADD_DELTA,
++					EXPANDRULE_DIALECT_0,
++					chunk_create(trailing, sizeof(trailing)),
++					EXPANDRULE_ERROR_TRAILING_DATA);
++}
++END_TEST
++
++START_TEST(test_duplicate_and_empty_opaque_are_structural)
++{
++	uint8_t duplicates[] = {
++		0x00,0x00,0x00,0x1a,0xc0,0x00,0x02,0x0a,0x00,0x00,0x00,0x02,
++		0x04,0x01,0x02,0x03,0x04,0x04,0x01,0x02,0x03,0x04,
++		0x00,0x00,0x00,0x00,
++	};
++	uint8_t empty[] = {
++		0x00,0x00,0x00,0x11,0xc0,0x00,0x02,0x0a,0x00,0x00,0x00,0x01,
++		0x00,0x00,0x00,0x00,0x00,
++	};
++	expandrule_message_t *message;
++	expandrule_error_t error;
++
++	ck_assert(expandrule_codec_decode(EXPANDRULE_QM_ADD_SNAPSHOT,
++								  EXPANDRULE_DIALECT_1,
++								  chunk_from_thing(duplicates), &message,
++								  &error));
++	ck_assert(!expandrule_profile_validate(EXPANDRULE_QM_ADD_SNAPSHOT,
++									   message, &error));
++	ck_assert_int_eq(error.code, EXPANDRULE_ERROR_DUPLICATE);
++	expandrule_message_destroy(message);
++
++	ck_assert(expandrule_codec_decode(EXPANDRULE_QM_ADD_SNAPSHOT,
++								  EXPANDRULE_DIALECT_1,
++								  chunk_from_thing(empty), &message, &error));
++	ck_assert_int_eq(message->data.client.primary[0].value.len, 0);
++	ck_assert(!expandrule_profile_validate(EXPANDRULE_QM_ADD_SNAPSHOT,
++									   message, &error));
++	ck_assert_int_eq(error.code, EXPANDRULE_ERROR_VALUE_LENGTH);
++	expandrule_message_destroy(message);
++}
++END_TEST
++
++START_TEST(test_informational_cardinality)
++{
++	expandrule_message_t *message;
++	expandrule_error_t error;
++	chunk_t encoded;
++
++	ck_assert(expandrule_codec_decode(EXPANDRULE_INFO_ADD_DELTA,
++								  EXPANDRULE_DIALECT_0,
++								  expandrule_fixture(expandrule_empty_v4_bytes,
++									  sizeof(expandrule_empty_v4_bytes)),
++								  &message, &error));
++	ck_assert(!expandrule_profile_validate(EXPANDRULE_INFO_ADD_DELTA,
++									   message, &error));
++	ck_assert_int_eq(error.code, EXPANDRULE_ERROR_INVALID_CARDINALITY);
++	ck_assert(!expandrule_codec_encode(EXPANDRULE_INFO_ADD_DELTA, message,
++									   &encoded, &error));
++	ck_assert_int_eq(error.code, EXPANDRULE_ERROR_INVALID_CARDINALITY);
++	expandrule_message_destroy(message);
++}
++END_TEST
++
++START_TEST(test_revoke_profile_and_raw_flags)
++{
++	uint8_t raw[sizeof(expandrule_revoke_bytes)];
++	uint8_t embedded_nul[] = {
++		0x00,0xa5,0x00,0x08,0x03,0x61,0x00,0x62,
++	};
++	expandrule_message_t *message;
++	expandrule_error_t error;
++
++	memcpy(raw, expandrule_revoke_bytes, sizeof(raw));
++	raw[1] = 0xa5;
++	ck_assert(expandrule_codec_decode(EXPANDRULE_INFO_REVOKE_V1,
++								  EXPANDRULE_DIALECT_NONE,
++								  chunk_create(raw, sizeof(raw)), &message,
++								  &error));
++	ck_assert_int_eq(message->data.revoke.raw_flags, 0xa5);
++	ck_assert(expandrule_profile_validate(EXPANDRULE_INFO_REVOKE_V1,
++									  message, &error));
++	expandrule_message_destroy(message);
++
++	ck_assert(expandrule_codec_decode(EXPANDRULE_INFO_REVOKE_V1,
++								  EXPANDRULE_DIALECT_NONE,
++								  chunk_from_thing(embedded_nul), &message,
++								  &error));
++	ck_assert(!expandrule_profile_validate(EXPANDRULE_INFO_REVOKE_V1,
++									   message, &error));
++	ck_assert_int_eq(error.code, EXPANDRULE_ERROR_VALUE_LENGTH);
++	expandrule_message_destroy(message);
++}
++END_TEST
++
++void expandrule_add_invalid_tests(TCase *tc)
++{
++	tcase_add_test(tc, test_all_strict_prefixes_fail);
++	tcase_add_test(tc, test_header_and_context_validation);
++	tcase_add_test(tc, test_noncanonical_header_is_structurally_preserved);
++	tcase_add_test(tc, test_invalid_mask_and_prefix);
++	tcase_add_test(tc, test_count_length_and_trailing_validation);
++	tcase_add_test(tc, test_duplicate_and_empty_opaque_are_structural);
++	tcase_add_test(tc, test_informational_cardinality);
++	tcase_add_test(tc, test_revoke_profile_and_raw_flags);
++}
+diff --git a/src/libcharon/tests/suites/test_expandrule_codec_profile.c b/src/libcharon/tests/suites/test_expandrule_codec_profile.c
+new file mode 100644
+index 0000000..cac1a99
+--- /dev/null
++++ b/src/libcharon/tests/suites/test_expandrule_codec_profile.c
+@@ -0,0 +1,183 @@
++/*
++ * Copyright (C) 2026 Zhuoyuan Hao
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ */
++
++#include "test_suite.h"
++
++#include <encoding/payloads/expandrule_codec.h>
++
++START_TEST(test_client_opaque_nul_is_not_string_semantics)
++{
++	uint8_t wire[] = {
++		0x00,0x00,0x00,0x14,0xc0,0x00,0x02,0x0a,0x00,0x00,0x00,0x01,
++		0x03,0xa1,0x00,0xb2,0x00,0x00,0x00,0x00,
++	};
++	expandrule_message_t *message;
++	expandrule_error_t error;
++	chunk_t encoded;
++
++	ck_assert(expandrule_codec_decode(EXPANDRULE_QM_ADD_SNAPSHOT,
++								  EXPANDRULE_DIALECT_1,
++								  chunk_from_thing(wire), &message, &error));
++	ck_assert_int_eq(message->data.client.primary[0].value.len, 3);
++	ck_assert(expandrule_profile_validate(EXPANDRULE_QM_ADD_SNAPSHOT,
++									  message, &error));
++	ck_assert(expandrule_codec_encode(EXPANDRULE_QM_ADD_SNAPSHOT, message,
++								  &encoded, &error));
++	ck_assert(chunk_equals(encoded, chunk_from_thing(wire)));
++	chunk_free(&encoded);
++	expandrule_message_destroy(message);
++}
++END_TEST
++
++START_TEST(test_len8_wire_limit_is_structural)
++{
++	uint8_t wire[272] = { 0 };
++	expandrule_message_t *message;
++	expandrule_error_t error;
++
++	wire[2] = 0x01;
++	wire[3] = 0x10;
++	wire[4] = 0xc0;
++	wire[6] = 0x02;
++	wire[7] = 0x0a;
++	wire[11] = 0x01;
++	wire[12] = 0xff;
++	memset(wire + 13, 0xa5, 255);
++	ck_assert(expandrule_codec_decode(EXPANDRULE_QM_ADD_SNAPSHOT,
++								  EXPANDRULE_DIALECT_1,
++								  chunk_from_thing(wire), &message, &error));
++	ck_assert_int_eq(message->data.client.primary[0].value.len, 255);
++	ck_assert(!expandrule_profile_validate(EXPANDRULE_QM_ADD_SNAPSHOT,
++									   message, &error));
++	ck_assert_int_eq(error.code, EXPANDRULE_ERROR_VALUE_LENGTH);
++	expandrule_message_destroy(message);
++}
++END_TEST
++
++START_TEST(test_vendor_profile_length_boundaries)
++{
++	uint8_t value[65];
++	expandrule_record_t record = { .value = chunk_create(value, 64) };
++	expandrule_message_t client = {
++		.kind = EXPANDRULE_CLIENT_ENVELOPE,
++		.data.client = {
++			.family = EXPANDRULE_IPV4,
++			.dialect = EXPANDRULE_DIALECT_0,
++			.leading_address = chunk_from_chars(0xc0,0x00,0x02,0x0a),
++			.secondary_count = 1,
++			.secondary = &record,
++		},
++	};
++	expandrule_message_t revoke = {
++		.kind = EXPANDRULE_SERVER_REVOKE,
++		.data.revoke = { .opaque_value = chunk_create(value, 63) },
++	};
++	expandrule_error_t error;
++
++	memset(value, 0xa5, sizeof(value));
++	ck_assert(expandrule_profile_validate(EXPANDRULE_INFO_ADD_DELTA,
++									  &client, &error));
++	record.value.len = 65;
++	ck_assert(!expandrule_profile_validate(EXPANDRULE_INFO_ADD_DELTA,
++									   &client, &error));
++	ck_assert_int_eq(error.code, EXPANDRULE_ERROR_VALUE_LENGTH);
++
++	client.data.client.dialect = EXPANDRULE_DIALECT_1;
++	record.value.len = 16;
++	ck_assert(expandrule_profile_validate(EXPANDRULE_INFO_ADD_DELTA,
++									  &client, &error));
++	record.value.len = 17;
++	ck_assert(!expandrule_profile_validate(EXPANDRULE_INFO_ADD_DELTA,
++									   &client, &error));
++
++	ck_assert(expandrule_profile_validate(EXPANDRULE_INFO_REVOKE_V1,
++									  &revoke, &error));
++	revoke.data.revoke.opaque_value.len = 64;
++	ck_assert(!expandrule_profile_validate(EXPANDRULE_INFO_REVOKE_V1,
++									   &revoke, &error));
++	revoke.data.revoke.opaque_value = chunk_empty;
++	ck_assert(!expandrule_profile_validate(EXPANDRULE_INFO_REVOKE_V1,
++									   &revoke, &error));
++}
++END_TEST
++
++START_TEST(test_revoke_zero_and_len255_are_structural)
++{
++	uint8_t empty[] = { 0x00,0x00,0x00,0x05,0x00 };
++	uint8_t maximum[260] = { 0 };
++	expandrule_message_t *message;
++	expandrule_error_t error;
++
++	ck_assert(expandrule_codec_decode(EXPANDRULE_INFO_REVOKE_V1,
++								  EXPANDRULE_DIALECT_NONE,
++								  chunk_from_thing(empty), &message, &error));
++	ck_assert_int_eq(message->data.revoke.opaque_value.len, 0);
++	ck_assert(!expandrule_profile_validate(EXPANDRULE_INFO_REVOKE_V1,
++									   message, &error));
++	expandrule_message_destroy(message);
++
++	maximum[2] = 0x01;
++	maximum[3] = 0x04;
++	maximum[4] = 0xff;
++	memset(maximum + 5, 0xa5, 255);
++	ck_assert(expandrule_codec_decode(EXPANDRULE_INFO_REVOKE_V1,
++								  EXPANDRULE_DIALECT_NONE,
++								  chunk_from_thing(maximum), &message, &error));
++	ck_assert_int_eq(message->data.revoke.opaque_value.len, 255);
++	ck_assert(!expandrule_profile_validate(EXPANDRULE_INFO_REVOKE_V1,
++									   message, &error));
++	expandrule_message_destroy(message);
++}
++END_TEST
++
++START_TEST(test_encode_rejects_payload_oversize)
++{
++	const size_t count = 1010, width = 64;
++	expandrule_record_t *records = calloc(count, sizeof(*records));
++	uint8_t *values = calloc(count, width);
++	expandrule_message_t message = {
++		.kind = EXPANDRULE_CLIENT_ENVELOPE,
++		.data.client = {
++			.family = EXPANDRULE_IPV4,
++			.dialect = EXPANDRULE_DIALECT_0,
++			.leading_address = chunk_from_chars(0xc0,0x00,0x02,0x0a),
++			.secondary_count = count,
++			.secondary = records,
++		},
++	};
++	expandrule_error_t error;
++	chunk_t output = chunk_empty;
++	size_t i;
++
++	ck_assert(records != NULL);
++	ck_assert(values != NULL);
++	for (i = 0; i < count; i++)
++	{
++		memset(values + i * width, 0xa5, width);
++		values[i * width] = i >> 8;
++		values[i * width + 1] = i;
++		records[i].value = chunk_create(values + i * width, width);
++	}
++	ck_assert(!expandrule_codec_encode(EXPANDRULE_QM_ADD_SNAPSHOT, &message,
++								   &output, &error));
++	ck_assert_int_eq(error.code, EXPANDRULE_ERROR_OVERSIZE);
++	ck_assert(output.ptr == NULL);
++	free(values);
++	free(records);
++}
++END_TEST
++
++void expandrule_add_profile_tests(TCase *tc)
++{
++	tcase_add_test(tc, test_client_opaque_nul_is_not_string_semantics);
++	tcase_add_test(tc, test_len8_wire_limit_is_structural);
++	tcase_add_test(tc, test_vendor_profile_length_boundaries);
++	tcase_add_test(tc, test_revoke_zero_and_len255_are_structural);
++	tcase_add_test(tc, test_encode_rejects_payload_oversize);
++}
+-- 
+2.55.0
+

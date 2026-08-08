@@ -110,3 +110,48 @@ Next command: Establish the offline expandrule evidence table and synthetic
 golden-byte contract.
 
 Approval required: no.
+
+## 2026-08-08 16:26 +08:00 — Checkpoint 4A
+
+State: PASS
+
+Verified: Offline expandrule wire syntax; five explicit direction/type/body
+forms; dialect0/dialect1 and IPv4/IPv6 context; asymmetric client envelope and
+server short body; lossless structural parser; separate canonical/local safety
+profile; deterministic encoder; owned decode buffers; non-sensitive errors;
+seven synthetic byte vectors and nine logical contexts.
+
+Evidence: [`../evidence/expandrule-wire-contract.md`](../evidence/expandrule-wire-contract.md),
+[`../evidence/checkpoint-4a-validation.md`](../evidence/checkpoint-4a-validation.md),
+[`../../fixtures/redacted/expandrule-synthetic-v1.json`](../../fixtures/redacted/expandrule-synthetic-v1.json),
+and the replayable strongSwan patch under `patches/strongswan-6.0.7/`.
+
+Canonical commit: this checkpoint commit in the lab repository; upstream-side
+implementation commit `1fda864cca91da0aa9a87dd96e1823c3962dbd09` based directly
+on official 6.0.7 commit `5973ff8e41deef4e015e1138a2de688acedf6f75`.
+
+Changed files: IKEv1-only codec/model/profile source, IKEv1-only libcharon test
+wiring, 28 codec cases, V2 Goal contract, wire evidence, synthetic fixture,
+checkpoint verifier, protocol status, validation evidence, and one patch file.
+
+Tests/commands: `scripts/verify_checkpoint.sh 4a` exit 0; targeted codec suite
+PASS; full strongSwan `make check` PASS; patched libcharon arm64; 20 Swift tests
+PASS; Swift arm64 build PASS; exact JSON-to-C fixture/context gate PASS;
+`git apply --check` against clean 6.0.7 PASS; Gitleaks and diff checks PASS.
+
+Review lane and result: Guarded. Exactly one integrated review and one
+independent targeted review ran. All direct findings were fixed before final
+acceptance; no third review ran.
+
+Safety/cleanup: Offline only. No vendor modification, live VPN, root process,
+UDP binding, SA, route, policy, utun, Surge mutation, credential, raw capture,
+or secret file. Upstream implementation worktree is clean.
+
+Remaining: CP5 must correlate control-plane/XPC observations while keeping
+wire fields opaque; CP4B may promote a field name only with two independent
+evidence classes. Payload/task/VICI integration remains deferred to CP6.
+
+Next command: establish the CP5 redacted field/type/order correlation table
+without recording values.
+
+Approval required: no.

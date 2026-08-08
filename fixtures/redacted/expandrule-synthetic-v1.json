@@ -1,0 +1,152 @@
+{
+  "schemaVersion": 1,
+  "fixtureClass": "synthetic_wire_contract",
+  "provenance": "invented_test_values_only",
+  "containsSecrets": false,
+  "containsReplayableCapture": false,
+  "semanticPolicy": "opaque_until_cp4b_promotion_gate",
+  "upstreamTarget": {
+    "version": "6.0.7",
+    "commit": "5973ff8e41deef4e015e1138a2de688acedf6f75"
+  },
+  "wireFacts": {
+    "genericHeaderBytes": 4,
+    "totalLengthIncludesHeader": true,
+    "byteOrder": "network",
+    "currentPayloadTypeLocation": "predecessor_next_payload",
+    "clientFamilyFlags": {
+      "ipv4": 0,
+      "ipv6": 6
+    },
+    "opaqueEncoding": "length_prefixed_u8_bytes"
+  },
+  "vectors": [
+    {
+      "id": "v4-dialect0-quick-snapshot",
+      "byteLength": 29,
+      "hex": "0000001dc000020a00000001c6336400ffffff000000000104deadbeef",
+      "contexts": [
+        {
+          "form": "QM_ADD_SNAPSHOT",
+          "direction": "client_to_server",
+          "currentPayloadType": 18,
+          "dialect": "dialect0",
+          "family": "ipv4",
+          "primaryCount": 1,
+          "secondaryCount": 1
+        }
+      ]
+    },
+    {
+      "id": "v6-dialect0-quick-snapshot",
+      "byteLength": 48,
+      "hex": "0006003020010db80000000000000000000000100000000120010db80001000000000000000000000000004000000000",
+      "contexts": [
+        {
+          "form": "QM_ADD_SNAPSHOT",
+          "direction": "client_to_server",
+          "currentPayloadType": 18,
+          "dialect": "dialect0",
+          "family": "ipv6",
+          "primaryCount": 1,
+          "secondaryCount": 0
+        }
+      ]
+    },
+    {
+      "id": "v4-dialect1-quick-snapshot",
+      "byteLength": 26,
+      "hex": "0000001ac000020a000000010401020304000000010405060708",
+      "contexts": [
+        {
+          "form": "QM_ADD_SNAPSHOT",
+          "direction": "client_to_server",
+          "currentPayloadType": 18,
+          "dialect": "dialect1",
+          "family": "ipv4",
+          "primaryCount": 1,
+          "secondaryCount": 1
+        }
+      ]
+    },
+    {
+      "id": "v4-empty-quick-snapshot",
+      "byteLength": 16,
+      "hex": "00000010c000020a0000000000000000",
+      "contexts": [
+        {
+          "form": "QM_ADD_SNAPSHOT",
+          "direction": "client_to_server",
+          "currentPayloadType": 18,
+          "dialect": "dialect0",
+          "family": "ipv4",
+          "primaryCount": 0,
+          "secondaryCount": 0
+        }
+      ]
+    },
+    {
+      "id": "v6-empty-quick-snapshot",
+      "byteLength": 28,
+      "hex": "0006001c20010db80000000000000000000000100000000000000000",
+      "contexts": [
+        {
+          "form": "QM_ADD_SNAPSHOT",
+          "direction": "client_to_server",
+          "currentPayloadType": 18,
+          "dialect": "dialect1",
+          "family": "ipv6",
+          "primaryCount": 0,
+          "secondaryCount": 0
+        }
+      ]
+    },
+    {
+      "id": "v4-informational-single-delta",
+      "byteLength": 24,
+      "hex": "00000018c000020a00000001c6336400ffffff0000000000",
+      "contexts": [
+        {
+          "form": "INFO_ADD_DELTA",
+          "direction": "client_to_server",
+          "currentPayloadType": 18,
+          "dialect": "dialect0",
+          "family": "ipv4",
+          "primaryCount": 1,
+          "secondaryCount": 0
+        },
+        {
+          "form": "INFO_DELETE_DELTA",
+          "direction": "client_to_server",
+          "currentPayloadType": 19,
+          "dialect": "dialect0",
+          "family": "ipv4",
+          "primaryCount": 1,
+          "secondaryCount": 0
+        }
+      ]
+    },
+    {
+      "id": "server-short-opaque",
+      "byteLength": 10,
+      "hex": "0000000a05a1b2c3d4e5",
+      "contexts": [
+        {
+          "form": "INFO_REVOKE_V1",
+          "direction": "server_to_client",
+          "currentPayloadType": 19,
+          "dialect": null,
+          "family": null
+        },
+        {
+          "form": "INFO_REVOKE_LEGACY",
+          "direction": "server_to_client",
+          "currentPayloadType": 17,
+          "dialect": null,
+          "family": null,
+          "encodeAllowed": false
+        }
+      ]
+    }
+  ]
+}

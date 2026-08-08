@@ -1,7 +1,8 @@
 # IKE and data-plane evidence
 
-Status: base protocol and private resource extension identified; payload body
-schema and backend equivalence remain unverified.
+Status: base protocol and private resource extension identified; the CP4A
+wire-syntax codec is implemented as an offline checkpoint candidate. Opaque
+field semantics, task integration, and backend equivalence remain unverified.
 
 ## Vendor baseline
 
@@ -34,6 +35,25 @@ It is therefore incorrect to model `login21`/`login52` as ordinary VICI child
 configs alone. Upstream strongSwan can own the standard IKE/ESP machinery, but
 resource activation needs a maintained payload/task extension.
 
+## CP4A wire-syntax result
+
+Static serializer/parser evidence is sufficient to implement the private body
+without guessing from encrypted packets. The strict contract and seven
+synthetic vectors are recorded in
+[`evidence/expandrule-wire-contract.md`](evidence/expandrule-wire-contract.md)
+and `fixtures/redacted/expandrule-synthetic-v1.json`.
+
+The codec uses five explicit contexts: Quick Mode ADD snapshot, Informational
+ADD delta, Informational DELETE delta, server type-19 short revoke, and a
+receive-only type-17 compatibility revoke. Type 19 is direction-dependent and
+the current type is carried by the predecessor's `Next Payload`, so type,
+direction, exchange, body shape, dialect, and family may not be inferred from
+the custom payload bytes alone.
+
+CP4A intentionally calls the two encodings dialect 0/1 and keeps their
+length-delimited fields opaque. Names such as map ID, resource ID, or resource
+name require CP5 correlation and the CP4B two-evidence promotion gate.
+
 ## macOS backend evidence
 
 The vendor helper contains custom kernel-ipsec, PF_ROUTE, utun, and
@@ -50,15 +70,15 @@ In an unprivileged, random-port startup smoke test, PF_ROUTE and VICI loaded.
 PF_KEY and kernel-libipsec each stopped at the expected `CAP_NET_ADMIN` gate.
 This proves build/ABI viability but not SA installation or server interop.
 
-## Required experiments
+## Remaining checkpoint sequence
 
-1. Capture one successful vendor session on UDP 500/4500 with packet bodies
-   retained only in protected scratch.
-2. Derive the standard Main Mode/Quick Mode sequence and the private
-   ADDRULE/DELRULE ordering.
-3. Recover an offline `expandrule` body schema and build parser/encoder round
-   trips from redacted synthetic fixtures.
-4. In an approved isolation window, use 6.0.7 to establish the standard base SA
+1. At CP5, correlate control-plane/XPC differential observations with the
+   still-opaque wire fields; retain any raw evidence only in protected scratch.
+2. At CP4B, promote a field name only when two independent evidence classes
+   agree.
+3. At CP6, add the minimal payload/message/task/VICI skeleton and keep it dry;
+   CP4A itself does not touch message factories or IKE tasks.
+4. In an approved CP7/CP8 window, use 6.0.7 to establish the standard base SA
    with PF_KEY; repeat with kernel-libipsec only if needed.
 5. Add the minimum resource extension and prove exactly one desired `/32` route
    plus an SSH banner.

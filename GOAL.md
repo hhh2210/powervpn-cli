@@ -1,13 +1,17 @@
 ---
 title: PowerVPN Apple Silicon 原生协议核心（strongSwan 6.0.7）
-status: ready-for-codex-goal
+status: active-codex-goal
 updated: 2026-08-08
 goal_type: long-running, evidence-driven prototype
 repository: /Users/larry_1/Opensource/powervpn-cli
 scratch_root: /Users/larry_1/scratch-data/powervpn-strongswan
 upstream_target: strongSwan 6.0.7
 vendor_compatibility_baseline: strongSwan 5.8.0
-current_checkpoint: 3-oracle-safety-and-schema
+current_checkpoint: 4a-expandrule-wire-syntax
+immediate_next: implement-and-verify-offline-expandrule-codec
+next_approval_gate: checkpoint-7-live-backend
+review_policy: checkpoint-gated-risk-weighted
+commit_policy: checkpoint-squash
 primary_platform: Apple Silicon macOS 27 beta
 ---
 
@@ -19,7 +23,7 @@ primary_platform: Apple Silicon macOS 27 beta
 `/Users/larry_1/Opensource/powervpn-cli` 启动：
 
 ```text
-/goal Implement GOAL.md. Continue checkpoint by checkpoint until Success Path A or Evidence-Complete Blocked Path B is fully satisfied. Treat the verified baseline in GOAL.md as already completed work; do not repeat it without a concrete verification reason. Update docs/progress/GOAL_STATUS.md after every checkpoint. Pause only at the explicit approval gates.
+/goal Implement GOAL.md from current_checkpoint. Work continuously inside the active checkpoint. Do not pause for per-commit review, repository-wide rereads, or progress narration. Use WIP/fixup commits freely, batch related changes, run targeted tests, and invoke only the bounded review gate defined in Section 10 when checkpoint acceptance commands pass or a listed risk trigger fires. Before marking a checkpoint PASS, squash checkpoint-local commits into one evidence-bearing commit and update docs/progress/GOAL_STATUS.md. Pause only at explicit approval gates or exact blockers.
 ```
 
 若 `/goal` 尚未启用：
@@ -27,6 +31,9 @@ primary_platform: Apple Silicon macOS 27 beta
 ```bash
 codex features enable goals
 ```
+
+执行原则：**review 绑定语义风险和 checkpoint 边界，不绑定每一次 Git
+commit。** 普通实现循环不应被“提交一次、全面 review 两次”打断。
 
 ## 1. Durable objective
 
@@ -146,18 +153,22 @@ Goal 只能在下列两个终态之一完全满足后结束。
 
 ### 3.3 Network/data-plane facts
 
-- 历史成功连接由 PowerVPN 创建 `utun9`；
-- 当前 `utun8` 是 Surge Enhanced Mode 的 packet tunnel，地址空间为
+- 历史成功连接的一次带时间戳快照中，PowerVPN 创建了 `utun9`；
+- 当前一次带时间戳快照中，Surge Enhanced Mode 使用 `utun8`，地址空间为
   `198.18.0.1/15`；
 - 把 `utun8` 写成 PowerVPN interface 是已纠正的旧错误；
+- `utunN` 序号不是稳定身份，运行时不得硬编码 Surge=`utun8`、
+  PowerVPNNative=`utun9`；
+- interface identity 必须由创建 generation、地址、route ownership、backend
+  association 和运行时事件动态归因；
 - upstream 6.0.7 自带 macOS utun 创建代码，kernel-libipsec 可直接使用，
   暂不需要自写 PacketTunnelProvider 或 packetFlow adapter；
 - Apple built-in VPN/PacketTunnelProvider 可能禁用其他 app 的 VPN config，
-  不能作为无副作用的便宜实验；
+  这是风险假设，不是已验证 runtime 方案；
 - 目标共存形态是：
 
   ```text
-  Surge system extension -> utun8 / default route
+  Surge system extension -> dynamically identified packet tunnel / default route
   PowerVPNNative daemon  -> independent backend/utun / exact resource routes
   ```
 
@@ -185,27 +196,42 @@ Goal 只能在下列两个终态之一完全满足后结束。
 - 6.0.3+ 强制 plugin version matching，厂商 5.8.0 plugin 不可直接加载到
   6.0.7；最终目标本来也禁止依赖 vendor x86 object。
 
-### 3.5 Repository facts
+### 3.5 Repository and execution facts
 
 - 当前仓库：`/Users/larry_1/Opensource/powervpn-cli`；
 - 本地 `main` 无 remote/upstream，不得声称已同步远端；
 - 现有 SwiftPM product 为 `powervpn`，library 为 `PowerVPNCore`；
-- `reconnect` / `PowerVPNController` 已从当前未提交实现中移除；
-- 新增只读 oracle、TunnelSpec redacted gate 和 historical-log 修正；
-- vendor log 现由 FileHandle 分块逐行 allowlist，完整敏感日志不再被解码为
-  String；
-- TunnelSpec 已加入 VIP、NAT-T、session binding reference、map ID、
+- `reconnect` / `PowerVPNController` 已移除；旧 CLI 只保留为只读
+  diagnostic/oracle harness；
+- CP0–CP3 与 CP2 可复现构建已经拆分为三个本地提交，主树干净；
+- CP2 build wrapper forward-test 已覆盖 configure、增量 build、scratch
+  install、全部 `make check`、六个 arm64 artifact gate；产物 SHA-256 与原始
+  可复现构建一致；
+- vendor log reader 已改为 FileHandle 分块逐行 allowlist，不把完整敏感日志
+  解码为 String；混合 marker+secret 行只保留 canonical marker，plugin 行只
+  保留静态白名单中的 plugin 名；对应回归测试已加入；
+- TunnelSpec 已包含 VIP、NAT-T、session binding reference、map ID、
   tunnel/resource identifiers、routes、credential reference 和
   ADDRULE/DELRULE operations；
-- XAuth/Mode Config oracle evidence 已明确标为 static compiled capability，
+- XAuth/Mode Config oracle evidence 明确标为 static compiled capability，
   不是 negotiated behavior；
-- 当前 Swift 验证为 19 tests PASS、arm64 build PASS、live oracle/status PASS、
-  `git diff --check` PASS；
-- 当前 helper not running 时，旧 CLI 曾把历史 CHILD_SA 误报 healthy；新实现
-  已返回 stopped，running 时也只把旧日志称为 historical hint；
-- `/var/log/vsgvpn.log` 已知含敏感认证材料。已实现的流式 allowlist 是必须
-  保持的安全回归条件；
-- 当前 repo 改动尚未提交，Goal 启动时必须先审计并保留这些改动。
+- Goal 启动基线为 19 项 Swift tests PASS、arm64 build PASS、只读 on-host
+  oracle/status PASS、`git diff --check` PASS；测试数量不是不变量，后续只要求
+  所有命名 contract categories 持续 PASS；
+- helper 未运行时不得用历史 CHILD_SA 报 healthy；helper generation 不一致时，
+  历史日志只能称为 historical hint；
+- `/var/log/vsgvpn.log` 已知含敏感认证材料，流式 allowlist 是必须保持的安全
+  回归条件；
+- CP4 的静态证据已经收敛到可实现状态：
+  - client request 使用有方向的 payload type `18/19` family；
+  - 仅存在 server revoke 的 receive-only type `17` compatibility path；
+  - client envelope 与 server revoke 不是对称 body，而是带 direction、dialect、
+    family 的不同 profile；
+  - parser 与 canonical vendor profile 必须分层：parser 可接受已观察到的 inbound
+    variant，profile validator 才强制 `next=0`、single-delta 等 canonical bytes；
+- CP4 当前只允许在 official 6.0.7 独立 worktree 中实现离线 codec/tests；不得
+  提前接 IKE_SA、Quick Mode task、message factory 或网络路径。
+
 
 ## 4. Version and patch strategy
 
@@ -307,35 +333,58 @@ SM3/SM4、XAuth/Mode Config。后四项只有新 capture 证明服务端实际�
 
 ## 7. State and truth model
 
-不得使用原稿中的单线状态机。至少保持以下正交维度：
+不得使用单线状态机，也不得把 SSH 可达性写回 IKE tunnel truth。至少保持以下
+正交维度：
 
 ```text
-ControlSessionState
-  signedOut / authenticating / ready / reconnecting / expired / failed
+AuthSessionState
+  signedOut / authenticating / valid / expired / failed
 
-TunnelState
+ControlChannelState
+  disconnected / connecting / online / backoff / failed
+
+IKEState
   idle / negotiating / established / degraded / recovering / backoff / blocked
 
 PathGeneration
-  monotonic generation + satisfied/unsatisfied + stable interface identity
+  monotonic generation + satisfied/unsatisfied + dynamically resolved interface identity
 
 ResourceState per resource
   desired(inactive|active) + observed(inactive|activating|active|failed|unknown)
+
+ProbeState per resource
+  unknown / probing / healthy / unhealthy / timeout
 
 UserIntent
   connect / disconnect
 ```
 
+`OperationalReadiness` 是按同一 generation 动态推导的只读视图，不是另一个
+可独立写入的状态：
+
+```text
+auth valid
++ control channel state known
++ IKE established
++ desired resource observed active
++ exact route/policy present
++ end-to-end probe healthy
+```
+
 规则：
 
-- WebSocket 断开不等于 SA 失效；
-- SA 失效不等于 session 过期；
+- WebSocket 断开不等于 auth session 过期；
+- auth session 过期不等于 IKE_SA 已失效；
+- IKE_SA established 不等于某个 resource 已 active；
+- SSH probe unhealthy 不得把 `IKEState.established` 改成 false；
 - path change 只触发 generation bump/debounce，不直接宣称 tunnel dead；
 - IKEv1 无 MOBIKE 时，对旧 generation 做 single-flight teardown/re-initiate；
 - 旧 callback/timer 不得覆盖新 generation；
-- `Established/active` 只能由同一 generation 的 IKE_SA、base CHILD_SA、
-  resource ADDRULE、精确 route/policy 和 SSH banner 联合确认；
-- 缺少任一层时只能报告 degraded/unknown/failed。
+- manual disconnect 必须取消或压制所有 recovery；
+- runtime interface identity 不得依赖固定 `utunN`；
+- 缺少某一层时，只在该层报告 unknown/degraded/failed，不得用一个
+  `connected` 布尔量掩盖差异。
+
 
 ## 8. Required repository artifacts
 
@@ -402,114 +451,109 @@ secrets/
 
 ### Checkpoint 0 — boundary and rollback baseline — PASS
 
-已验证：
-
-- 仓库、分支、无 remote、初始 commit 和 dirty state；
-- vendor app/helper 未修改；
-- 旧 CLI 只是 diagnostic harness；
-- 新路线排除 gateway、服务端管理员、厂商更新、watchdog 和 GUI restart。
-
-Goal 启动时只需把证据摘要写入 `GOAL_STATUS.md`，不要重复全盘调查。
+已提交并验证：仓库边界、回滚基线、vendor 未修改、旧 CLI 仅为只读
+harness，以及 gateway/管理员/watchdog/GUI restart 均不属于本路线。
 
 ### Checkpoint 1 — vendor 5.8.0 + B/C classification — PASS
 
-已验证：
+已提交并验证：5.8.0 baseline、critical plugin、`CUSTOM:kernel-ipsec`、
+ADDRULE/DELRULE/expandrule/Quick Mode markers、proposal，以及 PowerVPN/Surge
+interface 归因纠错。commit-safe inventory 只保留 marker/hash，不保留 raw
+symbol/log line。
 
-- 5.8.0 debug/archive path；
-- loaded plugin allowlist；
-- custom `CUSTOM:kernel-ipsec`；
-- ADDRULE/DELRULE/expandrule/Quick Mode markers；
-- IKE/ESP proposal；
-- PowerVPN utun9 与 Surge utun8 纠错。
+归因要求：`vendor implementation = B+C` 已确认；只有 registration/call graph
+证据能够确认某项 C 能力属于 `leadsecbridge` 时，才把 module ownership 写成
+confirmed，不能只因符号位于同一 Mach-O 就推断所有权。
 
-仍需产出 commit-safe `vendor-inventory.json`，只含 marker 和 hash，不含 raw
-symbol/log lines。
+### Checkpoint 2 — upstream 6.0.7 arm64 baseline — PASS
 
-### Checkpoint 2 — upstream 6.0.7 arm64 baseline — PASS for build
+已提交并 forward-test：official tag/commit、configure、增量 build、scratch
+install、全部 `make check`、六个 arm64 artifact gate、PF_KEY/PF_ROUTE/
+kernel-libipsec/VICI load smoke，以及产物 SHA-256 可复现一致性。
 
-已完成：official tag/commit、configure、arm64 build、scratch install、
-`make check`、artifact `file`、PF_KEY/PF_ROUTE/kernel-libipsec/VICI load smoke。
-
-未完成且不得混淆：privileged backend startup、SA install、utun lifecycle、
+仍未证明且不得混淆：privileged backend startup、SA install、utun lifecycle、
 Surge coexistence、server interoperability。
 
-下一步只需把现有手工命令固化成可重放 build script 和 evidence manifest；
-不要重新下载或重新编译 6.0.7，除非 script forward-test 需要。
+### Checkpoint 3 — oracle safety and TunnelSpec — PASS
 
-### Checkpoint 3 — oracle safety and TunnelSpec — PARTIAL
+已提交并验证：
 
-已完成并验证：
+- 只读 `powervpn oracle inventory --json`；
+- canonical-marker/plugin-name allowlist，含 mixed-line secret regression；
+- historical evidence/generation safety；
+- strict TunnelSpec tri-state 与 redacted fixture validation；
+- secret-leak、partial-tail、strict-schema negative tests；
+- arm64 build、Swift tests、只读 on-host oracle/status 和 `git diff --check`。
 
-- 完成只读 `powervpn oracle inventory --json`；
-- 文件读取已改为先逐行 allowlist，不把完整敏感 vendor log 载入 String；
-- 将 XAuth/Mode Config 标为 static capability，而非 negotiated；
-- historical log 只能叫 hint；helper generation 不一致时不能报 healthy；
-- TunnelSpec 已表达：
-  - endpoint/gateway reference；
-  - IKE/ESP proposal；
-  - authentication category 与 credential reference；
-  - session binding reference；
-  - NAT-T observation；
-  - virtual IP；
-  - map ID/tunnel name/resource identifier；
-  - route/traffic selector；
-  - ADDRULE/DELRULE capability；
-  - tri-state unknown/observed/unsupported，而不是误用 Bool；
-- `spec validate-redacted` 拒绝真实 secret、endpoint、resource name 与 CIDR，
-  且错误报告不回显原值；
-- secret-leak、partial-tail、strict schema negative tests 已通过；
-- 当前共 19 tests PASS，arm64 build 和 live oracle/status PASS。
+以后不得重新把完整日志载入 String，也不得把测试数量 `19` 固定成产品
+contract。
 
-尚未完成：
+### Checkpoint 4A — expandrule wire syntax and strict codec — IN PROGRESS
 
-- 创建 `fixtures/redacted/tunnel-spec.example.json`；
-- 用 CLI 对该落盘 fixture 做一次 forward validation；
-- 将 commit-safe oracle inventory 和 test summary 写入 evidence；
-- 审计、拆分并提交当前 dirty worktree。
+目的：恢复并实现 **wire syntax**，不提前给 opaque field 绑定未经证实的业务
+语义。
 
-验收：
+已确认的实现边界：
 
-```bash
-swift test
-swift build --arch arm64
-swift run powervpn oracle inventory --json
-swift run powervpn spec validate-redacted fixtures/redacted/tunnel-spec.example.json
-```
-
-四条命令 PASS；源码无 reconnect/terminate/relaunch；oracle output 无 secret。
-
-### Checkpoint 4 — offline expandrule contract and codec — NEXT
+- official 6.0.7 独立 worktree；
+- 纯 codec 位于 `src/libcharon/encoding/payloads/`；
+- tests 接入 `src/libcharon/tests/suites/`；
+- client request 与 server revoke 必须显式区分 direction/dialect/family；
+- parser 接受已观察到的 inbound variant；canonical vendor profile validator
+  才强制 `next=0`、single-delta、canonical bytes；
+- 不依赖 IKE_SA、Quick Mode task 或网络；
+- 暂不接 message factory/task manager。
 
 任务：
 
-1. 从受保护 oracle/capture 恢复 ADDRULE/DELRULE body 的字段边界；
-2. 标记每个字段 confirmed/inferred/unknown；
-3. 确认 payload type、length、byte order、operation、resource/map binding；
+1. 用受保护 specimen 或完整 serializer/parser static evidence 确认 generic
+   payload header、body length、field offset、byte order、operation code、固定值、
+   count 和可变区域；
+2. 未证明的字段命名为 `opaqueFieldN`，并标记 confirmed/inferred/unknown；
+3. 实现 request/revoke profile，禁止假设 encode/decode 完全对称；
 4. 创建不含真实 endpoint/resource 的 synthetic golden fixtures；
-5. 在独立 6.0.7 patch worktree 实现纯 codec；
-6. 做 encode/decode byte-for-byte round trip；
-7. 拒绝 malformed length、unknown op、oversize、duplicate rule；
-8. 不启动网络、不连接服务端。
+5. 做 byte-for-byte encode/decode 和 canonicalization tests；
+6. 拒绝 malformed length、unknown op、oversize、invalid direction/dialect/family、
+   duplicate rule 和不合法 profile combination；
+7. 不启动网络、不连接服务端、不读取 secret。
 
-验收：offline tests 全部 PASS，且另一名工程师仅凭 schema/tests 能解释
-payload，不需要查看 raw secret capture。
+进入条件：至少满足以下一项：
 
-### Checkpoint 5 — control-plane and XPC oracle
+- 有 plaintext serialization boundary 的 ADDRULE/DELRULE specimen；或
+- static disassembly 足以完整恢复字段 offset、length、byte order 与 parser
+  constraints。
+
+若两项都不满足，先完成最小 oracle acquisition，不得从加密 pcap 或日志文本
+猜 body codec。
+
+验收：targeted codec suite、完整 strongSwan relevant tests、artifact diff 和
+secret scan PASS；schema/tests 足以解释 wire syntax，不依赖 raw secret capture。
+
+### Checkpoint 5 — control-plane and XPC semantic correlation
 
 经用户合法登录或复用合法现有 session，只记录：
 
 - HTTPS method/path/status、field name/type/length；
-- session check state transition；
+- auth session 与 control channel 的独立 state transition；
 - WebSocket message type/order/keepalive/resume；
 - resource list/activation/deactivation schema；
 - GUI↔helper XPC key/type/order；
-- portal session 如何关联 PSK、VIP、mapID、tunnel/resource metadata。
+- portal session 如何关联 PSK、VIP、map/tunnel/resource metadata。
 
 禁止保存 header value、cookie、PSK、session、identity、raw body、TLS key log。
 动态注入只能作为实验显微镜，不进入产品。
 
 验收：三边界文档分开，字段均标 confirmed/inferred/unknown；raw capture 在
 mode-700 scratch，Git 仅有脱敏 schema。
+
+### Checkpoint 4B — semantic promotion gate
+
+在 Checkpoint 5 完成后，将 `opaqueFieldN` 与 control-plane/XPC differential
+observations 做关联。只有至少两类独立证据一致时，才把字段提升命名为
+`mapID`、`resourceID`、`routeCount` 等正式语义；否则保留 opaque。
+
+验收：每次 rename 都有 evidence ID；fixture forward/backward tests PASS；不因
+值“看起来像”某个 ID 就永久命名。
 
 ### Checkpoint 6 — 6.0.7 patch skeleton + VICI dry run
 
@@ -555,7 +599,7 @@ docs/evidence/rollback.md
 经批准后，先不连接服务器：
 
 1. PF_KEY + PF_ROUTE 启动、创建和完整清理 smoke；
-2. 记录 Surge 前后 interface/default route/DNS；
+2. 记录 Surge 前后 interface/default route/DNS，并按动态 identity 归因；
 3. 若 PF_KEY 失败，再测 upstream kernel-libipsec + native utun；
 4. 每次停止后验证零残留；
 5. 不同时启用两个 kernel-ipsec provider。
@@ -582,25 +626,31 @@ docs/evidence/rollback.md
 
 - 发送一个已验证的 ADDRULE；
 - 只激活一个 resource；
-- 验证 resource response、精确 `/32` route/policy、fresh SSH banner；
+- 分别验证 IKE state、resource response、精确 `/32` route/policy 和 fresh SSH
+  banner，不把 banner 反写成 tunnel truth；
 - 发送 DELRULE/断开并验证完整清理；
 - 不测试多 resource 并发。
 
 此 checkpoint PASS 才能宣称“技术 GO”。
 
-### Checkpoint 10 — recovery and Surge coexistence
+### Checkpoint 10A — bounded recovery and Surge coexistence
 
 只在原生单 resource 已成功后并再次获批：
 
-- 睡眠唤醒、断网 30–120 秒、Wi-Fi→热点各 10 次；
-- 目标 10/10 正确恢复或明确 blocked；
-- p95 恢复时间目标不超过 30 秒；
+- 用 deterministic tests 覆盖 generation、single-flight、manual disconnect、
+  stale callback suppression、bounded backoff；
+- 执行一次受控 path change；
+- 执行一次 30–120 秒 outage；
+- 正确恢复，或明确进入 degraded/blocked；
 - 无重叠连接、重复 SA/route、旧 generation callback 或 secret log；
-- Surge 始终保持预期 default route/DNS/functionality；
-- manual disconnect 不自动重连。
+- Surge 始终保持预期 default route/DNS/functionality。
 
-真实 session expiry 不需人为等待；用 deterministic integration test 覆盖，
-自然发生时再采证。
+本 checkpoint 满足当前 Goal 的恢复可行性验收。
+
+### Checkpoint 10B — reliability stress — DEFERRED TO NEXT GOAL
+
+睡眠唤醒、断网、Wi-Fi→热点各 10 次、10/10 成功率与 p95 恢复时间属于
+下一轮 daily-driver reliability Goal，不阻塞本轮 protocol-core technical GO。
 
 ### Checkpoint 11 — final report
 
@@ -610,12 +660,108 @@ docs/evidence/rollback.md
 - 5.8.0 oracle 与 6.0.7 target 的最小差异；
 - ADDRULE/DELRULE contract 和 patch surface；
 - control-plane、XPC、IKE、backend、Surge 五层边界；
-- 状态机与测试覆盖；
+- 状态模型与测试覆盖；
 - secret handling audit；
 - 可复现命令和 rollback；
 - 一个下一轮最小 Goal，不输出松散 backlog。
 
-## 10. Validation commands
+
+## 10. Execution cadence, review budget and commit policy
+
+### 10.1 核心原则
+
+- review 发生在**语义边界**，不是每个 Git 边界；
+- checkpoint 内连续实现、连续测试，不因 WIP commit 暂停；
+- 默认只 review changed files、direct contract、adjacent tests 和 evidence，
+  不重读整个 repo；
+- 自动化 invariant/test 优先于反复人工复述；
+- 除非命中风险触发器，禁止“实现 → 全面 review → commit → 再全面 review”
+  的递归循环。
+
+### 10.2 三条执行车道
+
+```text
+Fast lane
+  docs / evidence manifest / build wrapper / test plumbing
+  -> 1 次 checkpoint-end self-review
+
+Guarded lane
+  secret handling / wire codec / parser-profile split / state concurrency
+  -> 1 次 implementation review + 1 次 independent targeted review
+
+Live lane
+  root / SA / route / utun / network switching / Surge impact
+  -> user approval + preflight review + post-run evidence/cleanup review
+```
+
+CP4 属于 Guarded lane，所以一次独立 targeted review 是合理的；CP2 的 build
+wrapper、普通文档和每一个局部 commit 不应套用同样强度。
+
+### 10.3 Review 触发器
+
+仅在以下情况下启动 review gate：
+
+1. checkpoint acceptance commands 首次全部 PASS；
+2. secret redaction、credential boundary 或 log parsing 发生变化；
+3. wire byte layout、direction/dialect/family、HASH/order 或 canonicalization
+   发生变化；
+4. generation、single-flight、manual-disconnect 等并发状态语义发生变化；
+5. 即将跨越 Live Approval Gate；
+6. 新证据与 verified baseline 冲突。
+
+普通 rename、注释、manifest、局部 build-script 调整和 WIP commit 不触发完整
+review。
+
+### 10.4 Review budget
+
+- Fast lane：每 checkpoint 最多 1 次 broad self-review；
+- Guarded lane：每 checkpoint 最多 1 次 implementation review + 1 次
+  independent targeted review；
+- 第二次 review 只检查第一次发现项及其直接影响面，不重新审计整个
+  checkpoint；
+- 没有 critical/high finding 时立即进入 checkpoint commit，不再“为了确认
+  review 本身”追加 review；
+- 同一 finding 修复两次仍不收敛时，记录 exact blocker，缩小实验，不扩大
+  review 面。
+
+### 10.5 Commit policy
+
+- checkpoint worktree 内允许任意数量的 local WIP/fixup commits；这些 commit
+  不逐个 review；
+- checkpoint acceptance 和 review gate 通过后，squash/fixup 为一个
+  canonical evidence-bearing commit；
+- 一个 checkpoint 对应一个可回滚 canonical commit，但不要求实现过程只有
+  一个 commit；
+- commit message 记录 contract、tests、evidence path 和 safety/cleanup；
+- review 发现仅文档或测试缺口时，优先 amend/fixup，不创建“review of review”
+  commit；
+- 只有跨 checkpoint 的独立修复才单独提交。
+
+### 10.6 验证节奏
+
+checkpoint 内按成本从低到高运行：
+
+```text
+1. targeted unit/fixture tests
+2. changed-component build
+3. relevant upstream suite
+4. full checkpoint acceptance script
+5. review gate
+6. canonical checkpoint commit
+```
+
+重复两次以上的命令应收敛为 `scripts/verify_checkpoint.sh <id>` 或等价入口，
+避免 Codex 每轮重新拼命令、重复解释和重复读取输出。
+
+### 10.7 Progress output budget
+
+- 不在每个 commit 后更新 `GOAL_STATUS.md`；
+- 只在 checkpoint PASS、BLOCKED、进入 approval gate，或出现会改变下一步的
+  material finding 时更新；
+- 中间执行只保留短 scratch notes，不向用户逐命令直播；
+- 每次状态更新必须给出唯一 `Next command`，避免生成新的松散 backlog。
+
+## 11. Validation commands
 
 当前已经存在或应立即适配：
 
@@ -651,9 +797,10 @@ pvnative probe --resource <approved-resource> --ssh-banner
 命令返回 0 不是唯一证据。Goal status 必须记录结构化输出、关键状态与证据
 位置，但不得复制 secret 或 raw capture。
 
-## 11. Progress protocol
+## 12. Progress protocol
 
-每个 checkpoint 完成后更新 `docs/progress/GOAL_STATUS.md`：
+只在 checkpoint PASS / BLOCKED、material finding 或 approval gate 时更新
+`docs/progress/GOAL_STATUS.md`；不要在每个 WIP commit 后更新：
 
 ```markdown
 ## <timestamp> — Checkpoint N
@@ -661,8 +808,10 @@ pvnative probe --resource <approved-resource> --ssh-banner
 State: PASS / IN PROGRESS / BLOCKED
 Verified:
 Evidence:
+Canonical commit:
 Changed files:
 Tests/commands:
+Review lane and result:
 Safety/cleanup:
 Remaining:
 Next command:
@@ -673,14 +822,16 @@ Approval required: yes/no
 
 - 简短、具体、可审计；
 - 先保留证据再清理；
-- 一个 checkpoint 一个局部、可回滚 commit；
+- checkpoint 内可用 WIP/fixup commits，PASS 前收敛为一个 canonical commit；
 - 不提交 raw capture/secrets/generated build；
 - 不重复已经 PASS 的工作，除非新证据冲突；
 - 失败后一次只改变一个变量；
 - 同一路线三次无进展时收束 blocker 并切换更小实验；
-- 状态模糊时收紧 checkpoint，不扩大 scope。
+- 状态模糊时收紧 checkpoint，不扩大 scope；
+- 不做 repository-wide double review，除非 Section 10 的风险触发器明确要求。
 
-## 12. Pause conditions
+
+## 13. Pause conditions
 
 出现以下情况时暂停：
 
@@ -697,7 +848,7 @@ Approval required: yes/no
 暂停前必须记录 exact blocker、已尝试方法、当前安全状态和下一步所需的
 唯一用户动作；需要用户注意时先发送 macOS alert。
 
-## 13. Decision rules
+## 14. Decision rules
 
 - 5.8.0 build 成功不等于项目成功；
 - 6.0.7 build/test 成功也不等于 server interop；
@@ -715,8 +866,13 @@ Approval required: yes/no
 - 如果 ADDRULE 和 `/32` route PASS、banner 失败，先查 data path/policy，不
   自动重建 session；
 - 如果 6.0.7 全部互通，不继续复刻 vendor 内部架构。
+- `utunN` 只作为时间戳快照，不作为 runtime identity；
+- SSH banner 是 ProbeState，不是 IKEState；
+- review 绑定 checkpoint/risk，不绑定每个 commit；
+- Guarded lane 的第二次 review 只做 targeted independent check，不重复全仓审计；
+- CP4A 先恢复 syntax，CP5/4B 再提升 field semantics。
 
-## 14. Future work explicitly deferred
+## 15. Future work explicitly deferred
 
 只有 Success Path A 达成后才考虑：
 
@@ -725,11 +881,12 @@ Approval required: yes/no
 - SwiftUI `MenuBarExtra`；
 - 多 resource；
 - NetworkExtension 可行性；
+- Checkpoint 10B 的 30-run reliability stress 与 p95 统计；
 - signing、entitlements、notarization 和分发。
 
 这些不是当前 Goal 的完成条件。
 
-## 15. Reference sources
+## 16. Reference sources
 
 - 本机 repo：`/Users/larry_1/Opensource/powervpn-cli`
 - 当前路线：`docs/2026-08-08-native-replacement-plan.md`
