@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-08-08T15:26:00+08:00",
+  "target": {
+    "version": "6.0.7",
+    "commit": "5973ff8e41deef4e015e1138a2de688acedf6f75",
+    "architecture": "arm64",
+    "platform": "macOS 27.0 build 26A5388g"
+  },
+  "locations": {
+    "source": "/Users/larry_1/scratch-data/powervpn-strongswan/strongswan-6.0.7",
+    "build": "/Users/larry_1/scratch-data/powervpn-strongswan/build-6.0.7-arm64",
+    "prefix": "/Users/larry_1/scratch-data/powervpn-strongswan/install-6.0.7-arm64"
+  },
+  "reproduction": {
+    "command": "scripts/build_strongswan.sh build",
+    "result": "pass",
+    "configure": "pass",
+    "make": "pass",
+    "scratchInstall": "pass",
+    "makeCheck": "pass",
+    "artifactGate": "pass"
+  },
+  "features": [
+    "ikev1",
+    "ikev2",
+    "charon",
+    "swanctl",
+    "vici",
+    "kernel-pfkey",
+    "kernel-pfroute",
+    "kernel-libipsec",
+    "socket-default",
+    "openssl"
+  ],
+  "artifacts": [
+    {
+      "path": "libexec/ipsec/charon",
+      "format": "Mach-O 64-bit executable arm64",
+      "sha256": "4cfca703f4e74b20d92f765b67703e1e39afeae3e6ee080f10a5c8761ebffaa7"
+    },
+    {
+      "path": "sbin/swanctl",
+      "format": "Mach-O 64-bit executable arm64",
+      "sha256": "4cffcbf50bba0e40fb235040db091eef47f49d07389c8d346075695e5c2c9586"
+    },
+    {
+      "path": "lib/ipsec/plugins/libstrongswan-vici.so",
+      "format": "Mach-O 64-bit bundle arm64",
+      "sha256": "bd5b334bb4edf0aa277d282b331c281c0570f0f606f2e3cdfbba8730dddbe777"
+    },
+    {
+      "path": "lib/ipsec/plugins/libstrongswan-kernel-pfkey.so",
+      "format": "Mach-O 64-bit bundle arm64",
+      "sha256": "fff8084bcd8ca692e9d3cd7eeab1cc7a6c443dd2904f043551886268593cccd7"
+    },
+    {
+      "path": "lib/ipsec/plugins/libstrongswan-kernel-pfroute.so",
+      "format": "Mach-O 64-bit bundle arm64",
+      "sha256": "42a0c057654d91be6b4c95a44f54e8e3aa603bd677ed9c09201c76006164e150"
+    },
+    {
+      "path": "lib/ipsec/plugins/libstrongswan-kernel-libipsec.so",
+      "format": "Mach-O 64-bit bundle arm64",
+      "sha256": "0d534c015b2e0c0a3260d9608857edd5e59c991d2ccc4829e560106c9f8e08e5"
+    }
+  ],
+  "safety": {
+    "scratchOnly": true,
+    "networkUsed": false,
+    "rootUsed": false,
+    "systemPrefixInstall": false,
+    "vpnStateChanged": false
+  }
+}
