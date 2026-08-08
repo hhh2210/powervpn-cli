@@ -1,31 +1,42 @@
-# powervpn-cli
+# PowerVPN Protocol Lab
 
-An unofficial, Apple Silicon-native control and diagnostic CLI for the LeadSec
-PowerVPN macOS client.
+An unofficial, Apple Silicon-native protocol feasibility lab for replacing the
+LeadSec PowerVPN macOS client without changing the server or bypassing
+authentication.
 
-This project does **not** replace the proprietary VPN tunnel yet. It replaces
-the fragile GUI control loop with explicit, inspectable commands while reusing
-the installed vendor helper and its authenticated session.
+This repository is **not a working VPN replacement yet**. Its current job is to
+turn the installed x86_64 client into a read-only protocol oracle, preserve
+redacted evidence, and measure the exact delta between LeadSec's fork and
+upstream strongSwan 6.0.7.
 
-The full interaction timeline, local evidence, corrected misdiagnoses, and
-remediation analysis are recorded in
-[the 2026-08-08 incident postmortem](docs/2026-08-08-power-vpn-incident-postmortem.md).
+## Current verdict
 
-## Why this exists
+- The vendor helper is based on strongSwan 5.8.0. This is proven by unstripped
+  Mach-O symbol paths, not inferred from release dates.
+- `leadsecbridge` is both a custom strongSwan kernel plugin and part of a
+  private IKEv1 resource-rule extension. Successful sessions send encrypted
+  QUICK_MODE messages containing `ADDRULE`; the binary also contains the
+  matching `DELRULE` and `expandrule` payload/task code.
+- The standard base is still recognizable: IKEv1 Main Mode, PSK, a conventional
+  IKE proposal, a conventional ESP proposal, and a base CHILD_SA.
+- Upstream strongSwan 6.0.7 builds successfully as arm64 on this Mac with VICI,
+  PF_ROUTE, PF_KEY, kernel-libipsec, IKEv1, and XAuth support. PF_KEY and
+  kernel-libipsec reach their expected root capability gate in an unprivileged
+  startup smoke test.
 
-PowerVPN 3.2.1 build 24572 on Apple Silicon can display `login21` and `login52`
-as enabled while both SSH endpoints stop producing an SSH banner. Local
-evidence shows two independent recovery defects:
+The target is therefore:
 
-- IKEv1 can enter a stale-authentication loop with `invalid HASH_V1`, long
-  retransmission backoff, and no session refresh.
-- the GUI WebSocket failure and close callbacks only log the error; they do not
-  reconnect or reauthenticate.
+```text
+upstream strongSwan 6.0.7
+    + minimal, maintained ADDRULE/DELRULE payload + IKEv1 task extension
+    + a verified macOS kernel/userland IPsec backend
+    + an independent HTTPS/WebSocket control plane
+    + an event-driven recovery coordinator
+```
 
-The x86_64 `com.leadsec.charon-xpc` helper has also crashed under Rosetta with
-`SIGILL` in its XPC dictionary conversion path. A full native tunnel requires
-replacing the vendor's strongSwan-derived helper and private `leadsecbridge`
-plugin; recompiling the GUI alone cannot accomplish that.
+The vendor 5.8.0 code is a behavioral reference only. Its x86_64 plugin is not
+reused, and strongSwan 6.0.3+ rejects plugins built for a different version in
+any case.
 
 ## Commands
 
@@ -33,11 +44,25 @@ plugin; recompiling the GUI alone cannot accomplish that.
 swift run powervpn status
 swift run powervpn probe --timeout 5
 swift run powervpn diagnose --json
-swift run powervpn reconnect --yes
+swift run powervpn oracle inventory --json
+swift run powervpn spec validate-redacted fixtures/redacted/tunnel-spec.example.json
 ```
 
-`reconnect` is never automatic. It terminates and relaunches the existing
-PowerVPN app, which remains responsible for authentication.
+All current commands are read-only. The old `reconnect` command was removed
+because terminating and relaunching the vendor GUI automates a workaround; it
+does not advance the native replacement.
+
+## Repository map
+
+- `Sources/PowerVPNCore`: reusable oracle inspection, redaction, TunnelSpec,
+  and end-to-end probe logic.
+- `Sources/PowerVPNCLI`: thin command routing and rendering.
+- `docs/protocol-*.md`: verified protocol facts, unknowns, and next experiments.
+- `fixtures/redacted`: synthetic, commit-safe structures only.
+- `captures`: policy and manifests only; raw packet captures never enter Git.
+
+Start with [the native replacement plan](docs/2026-08-08-native-replacement-plan.md)
+and [the 6.0.7 build evidence](docs/strongswan-6.0.7-arm64.md).
 
 ## Build and test
 
@@ -48,10 +73,24 @@ BIN="$(swift build --show-bin-path)/powervpn"
 file "$BIN"
 ```
 
-## Scope and safety
+The Swift package has one executable product, `powervpn`, and one reusable
+library target, `PowerVPNCore`.
 
-- No credentials, session IDs, or raw VPN logs are printed.
-- No LaunchAgent is installed.
-- `/Applications/PowerVPN.app` and its code signature are not modified.
-- This is an independent, unofficial project and is not affiliated with
-  LeadSec or Tsinghua University.
+## Safety and scope
+
+- No credential, session ID, PSK, cookie, raw log, or raw packet capture may be
+  committed or printed by the CLI.
+- Raw evidence belongs under a mode-700 directory in `~/scratch-data`, not in
+  this repository.
+- `/Applications/PowerVPN.app`, its helpers, code signature, and live network
+  state are never modified by the lab.
+- A live backend test requiring root or a VPN configuration change is a
+  separately approved isolation-window experiment because it may interact with
+  Surge.
+- No SwiftUI, LaunchDaemon, or recovery service is built until protocol gates
+  pass.
+
+This is an independent, unofficial project. It is not affiliated with LeadSec
+or Tsinghua University. The lab code is MIT-licensed; strongSwan and any future
+patch set retain their own upstream licensing and must be distributed
+separately and correctly.

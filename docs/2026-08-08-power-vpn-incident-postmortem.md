@@ -7,6 +7,11 @@
 状态：诊断完成；最终修复方案尚未确定  
 结论：**现有本地 CLI 仅保留为诊断原型，不应视为根治方案。**
 
+> 后续协议取证已推翻本文第 11–13 节的产品路线优先级。当前执行路线见
+> [PowerVPN Apple Silicon 原生替代路线](2026-08-08-native-replacement-plan.md)：
+> 不再依赖 gateway、服务端管理员或厂商更新，以 strongSwan 6.0.7 和
+> 最小 ADDRULE/DELRULE 扩展为目标。本文其余内容保留为事件时间线。
+
 ## 1. 摘要
 
 本次事件最初表现为：PowerVPN 图形界面中 `login21` 和 `login52` 均处于开启状态，macOS 也保留了对应路由，但 `thu21`、`thu52` 的 SSH 连接在 TCP 建立后始终收不到 SSH banner。退出并重新启动 PowerVPN 后，两台服务器立即恢复。
@@ -57,7 +62,7 @@
 
 > THU GPU 只能通过 PowerVPN；aTrust 与 THU 是两套完全独立的系统。
 
-这一纠正是必要的。此后所有结论只基于 PowerVPN、`utun8` 和 THU 目标地址，aTrust 被彻底排除。
+这一纠正是必要的。此后所有结论只基于 PowerVPN、历史成功连接中由它创建的 `utun9` 和 THU 目标地址，aTrust 被彻底排除。后续复核还确认 `utun8` 实际属于 Surge Enhanced Mode；早期记录把两者混淆，现已更正。
 
 ### 3.3 PowerVPN UI 与实际路由
 
@@ -67,11 +72,12 @@ PowerVPN 的实时界面显示：
 - `login52`：开启；
 - `login21`：开启。
 
-macOS 路由检查显示下列目标均走 `utun8`：
+macOS 路由与 PowerVPN 日志的复核显示，两个真实 GPU 目标在成功连接时均走 `utun9`：
 
 - `11.11.30.21`；
 - `11.11.37.52`；
-- PowerVPN 为 `thu51` 合成的 `198.18.96.193`。
+
+`thu51` 解析出的 `198.18.96.193` 属于 Surge Fake-IP 地址空间，不能作为 PowerVPN 路由证据。
 
 因此，故障不是“资源开关未开启”或“目标流量根本没有进入 PowerVPN”。
 
@@ -119,7 +125,7 @@ ssh -vv \
 用户提出 Surge 是否与 PowerVPN 冲突。我们进行了不修改配置的检查：
 
 - Surge 运行于 Rule 模式；
-- 三个目标的实际路由均指向 `utun8`；
+- 两个真实 GPU `/32` 目标的历史路由均指向 PowerVPN 的 `utun9`，而 Surge 使用独立的 `utun8`；
 - Surge recent connections 中没有对应的 SSH 目标；
 - SSH 配置没有 HTTP/SOCKS `ProxyCommand`；
 - 未关闭 Surge的情况下，重启 PowerVPN 后 SSH 恢复。
