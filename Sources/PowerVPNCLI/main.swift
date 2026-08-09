@@ -1,5 +1,6 @@
 import Foundation
 import PowerVPNCore
+import PowerVPNPortal
 
 @main
 struct PowerVPNCommand {
@@ -41,6 +42,12 @@ struct PowerVPNCommand {
       try runVICICommand(arguments, json: json)
     case "xpc":
       try await runVendorXPCCommand(arguments, json: json)
+    case "login":
+      let result = try await runPortalLoginCommand(arguments)
+      print(result.standardOutput)
+      if result.exitCode != 0 {
+        Foundation.exit(result.exitCode)
+      }
     case "help", "--help", "-h":
       printUsage()
     default:
@@ -242,6 +249,7 @@ struct PowerVPNCommand {
                                Run bounded synthetic load/list/unload over VICI
         xpc get-version [--timeout-ms N]
                                Read the installed charon helper version over exact XPC
+        login                  Run the sealed username/password portal transaction
 
       Options:
         --json                 Emit JSON

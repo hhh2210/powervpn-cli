@@ -659,3 +659,59 @@ Approval required: **yes** before sending the real username/password login
 request. R1's read-only authorization does not transfer to R2.
 
 Canonical commit: this cumulative Rescue R1 implementation and evidence commit.
+
+## 2026-08-09 — Rescue R2 offline portal-login candidate
+
+State: **IN PROGRESS — OFFLINE CANDIDATE.** No portal request has been sent.
+R2 is not PASS and the active Goal remains open.
+
+Verified: the new dependency-free `PowerVPNPortal` target implements the exact
+default password body, sealed installed origin, system-trust-only TLS,
+pre-follow redirect rejection, bounded structural XML, a separate strict
+LeadSec profile, fresh isolated Cookie handling, resource fetch, exact
+60-second first session delay, literal `key=hostid` check and one bounded
+logout. `powervpn login` rejects every option/extra argument before constructing
+the runtime and emits only a closed value-free JSON report.
+
+User input required: none for offline verification. A future approved live
+window may accept only username + a newly rotated password through the no-echo
+controlling TTY.
+
+Derived automatically: current origin/version/address-selection/language state,
+raw platform serial, Cookie/session state, operation timing and logout. The
+endpoint was confirmed by a narrow latest-address query on a mode-600 encrypted
+database copy using the exact SQLCipher 3.4.0 profile. No user-table row was
+queried and no database passphrase was retained.
+
+Evidence: `docs/evidence/checkpoint-r2-validation.md`; the corrected CP5
+password-field fixture; and
+`fixtures/redacted/r2-reviewed-candidate-manifest-v1.json`, currently marked
+`integrated_review_pending`. The live value-free fixture does not yet exist.
+
+Tests/commands: the cumulative candidate verifier passed with 103 Portal tests
+in 16 suites and 109 Core tests in 10 suites (212 total), the corrected CP5
+password-profile test, arm64 build, strict Swift formatting, shell syntax and
+ShellCheck, closed-schema/signal-cleanup harness tests, secret scan and diff
+check. Launchd runs remained exactly 19 and the helper stayed inactive. The
+same verifier will run once more after direct review fixes and manifest seal.
+
+Safety/cleanup: no real credential, portal connection, PowerVPN GUI, helper,
+XPC, VICI, native charon, IKE/UDP, SA, policy, route or utun action occurred.
+All tests use synthetic credentials. One password pasted into Codex task text
+is treated as compromised, was not used, and is forbidden from the live run.
+
+Review result: pending. Exactly one integrated R2 review will inspect the
+frozen cumulative checkpoint. There will be no per-commit or unrelated-history
+review.
+
+Remaining: integrated review and direct fixes; final reviewed manifest;
+password rotation outside PowerVPN plus a fresh macOS confirmation; then
+exactly one bounded manifest-bound TTY login/resource/session/logout window.
+
+Next command: run the one integrated R2 review. Do not run `powervpn login`.
+
+Approval required: **yes**, but only after review and credential rotation. The
+old password and all chat/task text are invalid credential sources.
+
+Canonical commit: pending successful live evidence and final checkpoint
+validation.

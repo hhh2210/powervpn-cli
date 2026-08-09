@@ -2,7 +2,7 @@
 
 Date: 2026-08-08
 
-State: static and legal runtime evidence complete; checkpoint review pending.
+State: static and legal runtime evidence complete; R2 correction applied.
 
 This report contains field names, static types, ordering, and code locations
 only. No log body, credential, session value, PSK, cookie, identity, endpoint
@@ -19,7 +19,7 @@ producer alone.
 
 | Operation | Method/path | Ordered request fields | Field type status | Evidence |
 | --- | --- | --- | --- | --- |
-| Password auth | `POST /vpn/user/auth/password` | `type`, `mac`, `verifycode`, `username`, `password` | objects; string-like is inferred, exact classes unknown | `-[VSGPassWorldAuth startPwdAuthAction:]`, `0x1000326c0..0x100033250` |
+| Password auth | `POST /vpn/user/auth/password` | `encode`, `hardware_hash`, `password`, `terminal_type`, `type`, `username`, optional `verifycode` | strings; exact encode1/body serialization recovered | `-[VSGPassWorldAuth startPwdAuthAction:]`, `0x1000326c0..0x100033250` |
 | Token auth | `POST /vpn/user/auth/token` | `token` | unknown | `-[VSGTockenAuth startAuthWithResourceType:params:]`, `0x1000156b0..0x1000158a0` |
 | Anonymous auth | `POST /vpn/user/auth/anonymity` | none proven | unknown | `0x100038e70..0x100038fa0` |
 | Resource catalog | `GET /vpn/user/portal/intergration.xml` | `version` | string | `-[VSGAuthManager requestReaource:]`, `0x1000a7e80..0x1000a8040` |
@@ -29,7 +29,25 @@ producer alone.
 Static code does not prove response status. The legal runtime observation below
 confirmed HTTP 200 for session check; other response statuses remain unknown.
 
+R2 found that the prior CP5 `mac` field was a static-correlation error. On the
+Mac resourceType-5 path the constants are `terminal_type=mac`, `type=app`, and
+literal `encode='1'` unless an otherwise-unreached version preflight has first
+selected encode2. `hardware_hash` is the raw `IOPlatformSerialNumber`. The
+query serializer sorts keys, emits raw `key=value` pairs without percent
+encoding, and joins them with `&`. Username and password use independent
+standard Base64 in the default path.
+
 ## Response and resource parser order
+
+Login traversal is confirmed as:
+
+```text
+RESPONSE -> RESULT -> code
+```
+
+Numeric hexadecimal zero is success. `0x66600011` is the only confirmed
+verification-code discriminator; the vendor callback shape for its `len`
+field is internally inconsistent, so no CAPTCHA length is promoted.
 
 Session-check traversal is confirmed as:
 
@@ -37,18 +55,24 @@ Session-check traversal is confirmed as:
 RESPONSE -> RESULT -> code -> hostid -> kCheckSessionNotice
 ```
 
-`code` receives `intValue`; its raw XML class is therefore only known to be
-number/string-convertible. Evidence: the session reply block at
+Only exact string `0x80000014` invalidates the session and stops the timer.
+Every request sends literal query `key=hostid`; response `hostid` is notice
+metadata only. Evidence: the session reply block at
 `0x1000ae650..0x1000aeba0`.
 
-Resource-response traversal is confirmed as:
+Resource-response traversal is confirmed as two wrapper-root sibling paths:
 
 ```text
-RESPONSE -> RESULT -> code -> TCPUDP_RESOURCE -> INTERGRATION_INFO
--> RESOURCE_LIST -> REMOTE_RESOURCE -> NC_RESOURCE -> WEB_RESOURCE
+RESPONSE -> RESULT -> code
+INTERGRATION_INFO -> RESOURCE_LIST -> REMOTE_RESOURCE -> NC_RESOURCE -> WEB_RESOURCE
 -> WEBVPN_RESOURCE -> IPSEC_RESOURCE -> VERSION -> SESSION -> USER
 -> DNS_INFO -> PRIVATE-IP -> HOST_LIST/HOST_ITEM
 ```
+
+`INTERGRATION_INFO` is not under `RESULT` or `RESPONSE`. The vendor accepts an
+empty/missing resource list and does not require result code zero; it stops for
+result code `0x80000020` or a `RESPONSE.ERROR` node. R2 keeps structural XML
+parsing separate from this minimal compatibility predicate.
 
 Nested names observed by the parser, in parser order, are:
 

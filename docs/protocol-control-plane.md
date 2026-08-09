@@ -10,16 +10,44 @@ Detailed evidence and code locations are in
 
 | Method/path | Ordered fields |
 | --- | --- |
-| `POST /vpn/user/auth/password` | `type`, `mac`, `verifycode`, `username`, `password` |
+| `POST /vpn/user/auth/password` | `encode`, `hardware_hash`, `password`, `terminal_type`, `type`, `username`, optional `verifycode` |
 | `POST /vpn/user/auth/token` | `token` |
 | `POST /vpn/user/auth/anonymity` | none proven |
 | `GET /vpn/user/portal/intergration.xml` | `version:string` |
 | `GET /vpn/user/check/session` | `key:string` |
 | `POST /vpn/user/logout` | none proven |
 
-The password-auth objects are only string-like by static inference; exact
-runtime classes and lengths remain unknown. A live session-check response was
-observed with HTTP 200, but other response statuses remain unknown.
+R2 corrected the earlier CP5 password row. There is no `mac` field on the Mac
+password path. `hardware_hash` is the unmodified `IOPlatformSerialNumber`, not
+a hash. The serializer sorts keys lexicographically, emits `key=value` joined
+by `&`, and does no percent escaping. The default proven path sends literal
+`encode='1'`; username and password are independently Base64 encoded. Optional
+`verifycode` is last because of the same sort order.
+
+The password body is UTF-8 with `Content-Type: text/xml`. All four operations
+share the vendor Host, `Accept: */*`, User-Agent and Cookie construction. A
+live session-check response was observed with HTTP 200, but other response
+statuses remain unknown.
+
+## Confirmed R2 response and timing profile
+
+- Login accepts only when `RESPONSE.RESULT.code`, parsed as hexadecimal, is
+  numeric zero. `0x66600011` requests a verification-code challenge; its `len`
+  propagation is not statically reliable and R2 fails closed instead of
+  inventing a prompt contract.
+- `VSG_SESSIONID` comes from `Set-Cookie`, not the login XML. The vendor keeps
+  the header text and appends an `ORIGINURL` fragment before later Cookie
+  requests. R2 preserves the observed fresh-process form and treats folded or
+  additional cookie framing as an evidence boundary.
+- Password success immediately triggers
+  `GET /vpn/user/portal/intergration.xml?version=2.0`. The resource parser does
+  not require a non-empty resource list or `RESULT.code == 0`; it stops for
+  `0x80000020` or a `RESPONSE.ERROR` node.
+- The first session check occurs after 60 seconds and always sends literal
+  `GET /vpn/user/check/session?key=hostid`. Only exact response code string
+  `0x80000014` means invalid; response `hostid` is not fed back into the query.
+- User logout is an empty-body POST to `/vpn/user/logout`; the vendor does not
+  add upload Content-Type/Content-Length for that zero-length request.
 
 ## Confirmed object lineage
 

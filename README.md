@@ -21,8 +21,16 @@ upstream strongSwan 6.0.7.
   Surge, route, DNS, interface, and utun evidence stayed stable. The probe did
   not log in, contact a server, send `start_connection`, or create an SA,
   route, or utun. Direct SAD/SPD comparison remained unavailable to the
-  unprivileged harness and is not claimed. The next active gate is a separate
-  authorization for the R2 username/password-only portal login test.
+  unprivileged harness and is not claimed.
+- Rescue R2 is an **offline candidate, not PASS**. The dependency-free
+  `PowerVPNPortal` target implements the evidence-locked password POST,
+  resource GET, 60-second session check and logout with a no-echo controlling
+  TTY, system TLS trust, a closed XML profile, bounded response storage and
+  app-owned buffer erasure. The current endpoint was confirmed by a narrow
+  latest-address query against a mode-600 encrypted database copy; no user row
+  was queried. The one integrated review, reviewed manifest and real server
+  window remain pending. A password exposed in the task text is compromised
+  and cannot be used; it must be rotated before the live gate.
 
 - The vendor helper is based on strongSwan 5.8.0. This is proven by unstripped
   Mach-O symbol paths, not inferred from release dates.
@@ -150,6 +158,7 @@ swift run powervpn spec vici-dry-run fixtures/redacted/tunnel-spec.vici-dry-run.
 swift run powervpn vici version --socket <scratch-charon.vici> --timeout-ms 2000 --json
 swift run powervpn vici cp7a-smoke --socket <scratch-charon.vici> --timeout-ms 2000 --json
 swift run powervpn xpc get-version --timeout-ms 2000 --json
+scripts/run_r2_portal_login.sh --preflight-only
 ```
 
 The VICI runtime commands connect only to an explicitly supplied local socket;
@@ -164,10 +173,19 @@ read-only gate and fails closed unless the GUI and helper are absent and the
 legacy DNS/log cold-start hazards are safe. Run the reviewed live harness, not
 the raw command, for checkpoint evidence.
 
+`powervpn login` accepts no options or positional material and emits only a
+closed value-free JSON report. Do not run it directly for checkpoint evidence.
+The R2 harness requires the reviewed manifest SHA, a separate rotated-
+credential confirmation and a direct TTY, then permits TCP only to the sealed
+portal while rejecting all helper, native-charon and UDP activity.
+
 ## Repository map
 
 - `Sources/PowerVPNCore`: reusable oracle inspection, redaction, TunnelSpec,
   and end-to-end probe logic.
+- `Sources/PowerVPNPortal`: isolated installed-config, secure TTY, HTTPS,
+  structural XML, LeadSec profile and portal-login workflow logic; it has no
+  dependency on `PowerVPNCore`.
 - `Sources/PowerVPNCLI`: thin command routing and rendering.
 - `docs/protocol-*.md`: verified protocol facts, unknowns, and next experiments.
 - `docs/evidence/checkpoint-7b-preflight.md`: reviewed scope and safety contract
@@ -192,15 +210,19 @@ scripts/verify_checkpoint.sh 5
 scripts/verify_checkpoint.sh 6
 scripts/verify_checkpoint.sh 7a
 scripts/verify_checkpoint.sh 7b-preflight
+scripts/verify_checkpoint.sh r1
+scripts/verify_checkpoint.sh r2
 ```
 
-The Swift package has one executable product, `powervpn`, and one reusable
-library target, `PowerVPNCore`.
+The Swift package has one executable product, `powervpn`, and two independent
+library targets, `PowerVPNCore` and `PowerVPNPortal`.
 
 ## Safety and scope
 
 - No credential, session ID, PSK, cookie, raw log, or raw packet capture may be
   committed or printed by the CLI.
+- A credential pasted into chat or task text is considered compromised. It is
+  never an approved runtime source and must be rotated before live use.
 - Raw evidence belongs under a mode-700 directory in `~/scratch-data`, not in
   this repository.
 - `/Applications/PowerVPN.app`, its helpers, and code signature are never

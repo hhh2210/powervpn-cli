@@ -42,6 +42,22 @@ private func sessionEvent(fields: [Correlation.Field]) -> Correlation.Event {
   )
 }
 
+private func loginEvent(fields: [Correlation.Field]) -> Correlation.Event {
+  Correlation.Event(
+    sequence: 1,
+    boundary: .controlPlane,
+    transport: .https,
+    direction: .clientToServer,
+    kind: .request,
+    operation: .login,
+    method: .post,
+    pathTemplate: "/vpn/user/auth/password",
+    evidenceClass: .synthetic,
+    confidence: .unknown,
+    fields: fields
+  )
+}
+
 private func toggleEvent(fields: [Correlation.Field]) -> Correlation.Event {
   Correlation.Event(
     sequence: 1,
@@ -72,6 +88,31 @@ private func toggleEvent(fields: [Correlation.Field]) -> Correlation.Event {
     let report = syntheticReport(sessionEvent(fields: fields))
     #expect(!report.valid)
     #expect(report.issues.contains { $0.code == "field_profile" || $0.code == "invalid_order" })
+  }
+}
+
+@Test func passwordProfileUsesTheRecoveredSortedFieldsAndOptionalChallengeTail() {
+  let required = [
+    profileField("encode", .string, order: 1),
+    profileField("hardware_hash", .string, order: 2),
+    profileField("password", .string, order: 3),
+    profileField("terminal_type", .string, order: 4),
+    profileField("type", .string, order: 5),
+    profileField("username", .string, order: 6),
+  ]
+  #expect(syntheticReport(loginEvent(fields: required)).valid)
+  #expect(
+    syntheticReport(
+      loginEvent(fields: required + [profileField("verifycode", .string, order: 7)])
+    ).valid
+  )
+
+  for invalid in [
+    Array(required.dropFirst()),
+    required + [profileField("mac", .string, order: 7)],
+    [required[1], required[0]] + Array(required.dropFirst(2)),
+  ] {
+    #expect(!syntheticReport(loginEvent(fields: invalid)).valid)
   }
 }
 

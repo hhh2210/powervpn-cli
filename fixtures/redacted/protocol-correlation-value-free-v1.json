@@ -20,38 +20,20 @@
       "confidence": "unknown",
       "fields": [
         {
-          "name": "type",
+          "name": "encode",
           "type": "string",
-          "length": 8,
+          "length": 3,
           "lengthUnit": "bytes",
           "order": 1,
           "evidenceClass": "synthetic",
           "confidence": "unknown"
         },
         {
-          "name": "mac",
-          "type": "string",
-          "length": 17,
-          "lengthUnit": "bytes",
-          "order": 2,
-          "evidenceClass": "synthetic",
-          "confidence": "unknown"
-        },
-        {
-          "name": "verifycode",
-          "type": "string",
-          "length": 6,
-          "lengthUnit": "bytes",
-          "order": 3,
-          "evidenceClass": "synthetic",
-          "confidence": "unknown"
-        },
-        {
-          "name": "username",
+          "name": "hardware_hash",
           "type": "string",
           "length": 12,
           "lengthUnit": "bytes",
-          "order": 4,
+          "order": 2,
           "evidenceClass": "synthetic",
           "confidence": "unknown"
         },
@@ -60,7 +42,34 @@
           "type": "string",
           "length": 16,
           "lengthUnit": "bytes",
+          "order": 3,
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        },
+        {
+          "name": "terminal_type",
+          "type": "string",
+          "length": 3,
+          "lengthUnit": "bytes",
+          "order": 4,
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "length": 3,
+          "lengthUnit": "bytes",
           "order": 5,
+          "evidenceClass": "synthetic",
+          "confidence": "unknown"
+        },
+        {
+          "name": "username",
+          "type": "string",
+          "length": 12,
+          "lengthUnit": "bytes",
+          "order": 6,
           "evidenceClass": "synthetic",
           "confidence": "unknown"
         }
@@ -91,65 +100,11 @@
       "confidence": "unknown",
       "fields": [
         {
-          "name": "sessionid",
+          "name": "code",
           "type": "string",
-          "length": 24,
+          "length": 1,
           "lengthUnit": "bytes",
           "order": 1,
-          "evidenceClass": "synthetic",
-          "confidence": "unknown"
-        },
-        {
-          "name": "psk",
-          "type": "string",
-          "length": 32,
-          "lengthUnit": "bytes",
-          "order": 2,
-          "evidenceClass": "synthetic",
-          "confidence": "unknown"
-        },
-        {
-          "name": "vip",
-          "type": "string",
-          "length": 10,
-          "lengthUnit": "bytes",
-          "order": 3,
-          "evidenceClass": "synthetic",
-          "confidence": "unknown"
-        },
-        {
-          "name": "routes",
-          "type": "array",
-          "length": 2,
-          "lengthUnit": "elements",
-          "order": 4,
-          "evidenceClass": "synthetic",
-          "confidence": "unknown"
-        },
-        {
-          "name": "mapid",
-          "type": "string",
-          "length": 8,
-          "lengthUnit": "bytes",
-          "order": 5,
-          "evidenceClass": "synthetic",
-          "confidence": "unknown"
-        },
-        {
-          "name": "tunnelname",
-          "type": "string",
-          "length": 10,
-          "lengthUnit": "bytes",
-          "order": 6,
-          "evidenceClass": "synthetic",
-          "confidence": "unknown"
-        },
-        {
-          "name": "resources",
-          "type": "array",
-          "length": 2,
-          "lengthUnit": "elements",
-          "order": 7,
           "evidenceClass": "synthetic",
           "confidence": "unknown"
         }

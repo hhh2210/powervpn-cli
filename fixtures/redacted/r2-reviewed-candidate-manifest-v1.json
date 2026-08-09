@@ -1,0 +1,17 @@
+{
+  "artifacts": {
+    "arm64CLISHA256": "f86f93fde1e7ed7d23aefdc92e06c72e62e1951b93bcd4fa3de1d236dec4156c",
+    "harnessTestsSHA256": "8017a19e32c14b9886c123f60d6b6447345a08f0b51631bb9596c3a71a00b1f3",
+    "installedAppSHA256": "069dee7b624ff2d8a3714bfed06aa6444ad45406d102b5933b987b88a39c7a46",
+    "installedDatabaseSHA256": "7fcf73eef83bb9b39eac6da8c15a381cc596b95f75c9c0714e0a32345f529804",
+    "installedInfoPlistSHA256": "17dcebf8c12a45e8a4647df070d5abe15f0cc94c89c144a89cc7d53a631146dd",
+    "installedPreferencesSHA256": "08e59cc23de9f196a5f7d2d8eb85000d09deca5b4d30c44a6c6c5232c9bd6d68",
+    "runnerSHA256": "890242b2c0e57de111610be876c0d9ebde9e784bdeaa886af3309e9008e830f3",
+    "runtimeLibrarySHA256": "84e22f7f80b2a8d893b273305d8d2fc117a09e949a8376f6c96f63489375fe90"
+  },
+  "baseCommit": "71fe9eee3d70ef45897002271b4f0a03851e3aff",
+  "evidenceClass": "r2_reviewed_portal_login_candidate",
+  "reviewState": "integrated_review_pending",
+  "runtimeSourceAggregateSHA256": "a36d31ef1c5d4df2b13885edebc3d0d8cd41df7a541b132c693b6d8ab6bb22d9",
+  "schemaVersion": 1
+}

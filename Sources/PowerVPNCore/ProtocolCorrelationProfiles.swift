@@ -42,9 +42,18 @@ enum ProtocolCorrelationFieldProfileValidator {
     let rules: [Rule]?
     switch event.pathTemplate {
     case "/vpn/user/auth/password":
-      rules = ["type", "mac", "verifycode", "username", "password"].map {
-        Rule($0, .string, .unknown)
-      }
+      validateOptionalTail(
+        event.fields,
+        required: [
+          Rule("encode", .string), Rule("hardware_hash", .string),
+          Rule("password", .string), Rule("terminal_type", .string),
+          Rule("type", .string), Rule("username", .string),
+        ],
+        optional: Rule("verifycode", .string),
+        at: path,
+        issues: &issues
+      )
+      return
     case "/vpn/user/auth/token": rules = [Rule("token", .string, .data, .unknown)]
     case "/vpn/user/auth/anonymity", "/vpn/user/logout": rules = []
     case "/vpn/user/portal/intergration.xml": rules = [Rule("version", .string)]

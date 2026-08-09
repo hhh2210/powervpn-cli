@@ -9,7 +9,7 @@ supersedes_for_active_execution: Native Goal V3
 native_v3_role: frozen fallback
 native_fallback_baseline_commit: 8d2e026c1f5db15f5b1e1e0ca81c72d2ae5f2073
 current_checkpoint: R2-username-password-portal-login
-immediate_next: request-r2-username-password-login-approval
+immediate_next: complete-r2-integrated-review-and-credential-rotation-gate
 user_input_contract: username-and-password-only
 review_policy: one integrated review per checkpoint
 ---
@@ -251,6 +251,14 @@ information-gaining experiments.
 
 Acceptance path must not require `--gateway`.
 
+The server-facing implementation is a compatibility port, not a redesigned
+portal protocol. Preserve the observed field order, lack of percent escaping,
+Base64 mode, Cookie spacing, operation order and 60-second first session-check
+delay. Keep bounded structural XML parsing separate from the strict LeadSec
+acceptance profile. Unknown header folding, challenge shape or response
+semantics fail closed; a generate/parse round trip is not server-compatibility
+evidence.
+
 #### R2B live approval
 
 Run only:
@@ -266,6 +274,13 @@ helper tunnel.
 
 PASS only if the user enters no other material and no secret is persisted or
 printed.
+
+One password was exposed in the Codex task text during R2 implementation. It
+is compromised and MUST NOT be used for the live run. Before R2B, the user must
+rotate it outside PowerVPN and confirm the rotation through a fresh macOS
+attention gate. The new password is entered only in the no-echo controlling
+TTY; neither the old nor new value may appear in chat, Goal text, argv,
+environment, files, fixtures, logs or retained evidence.
 
 ### R3 — Portal response to vendor XPC snapshot
 

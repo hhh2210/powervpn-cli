@@ -10,13 +10,18 @@ let package = Package(
   ],
   targets: [
     .target(name: "PowerVPNCore"),
+    .target(name: "PowerVPNPortal"),
     .executableTarget(
       name: "PowerVPNCLI",
-      dependencies: ["PowerVPNCore"]
+      dependencies: ["PowerVPNCore", "PowerVPNPortal"]
     ),
     .testTarget(
       name: "PowerVPNCoreTests",
       dependencies: ["PowerVPNCore"]
+    ),
+    .testTarget(
+      name: "PowerVPNPortalTests",
+      dependencies: ["PowerVPNPortal", "PowerVPNCLI"]
     ),
   ]
 )
