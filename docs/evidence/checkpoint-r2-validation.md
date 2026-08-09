@@ -1,11 +1,11 @@
 # Rescue R2 username/password portal-login gate
 
-Status: **HARD NO-GO; LIVE NOT AUTHORIZED.** The one permitted integrated R2
-review is complete and all five direct findings have been fixed, but the strict
-post-review path rejects the password POST locally before `session.open`.
-Foundation's projected `Set-Cookie` value cannot prove the raw response-header
-multiplicity/framing required by the compatibility profile. No live request or
-network connection occurred, and R2 remains active rather than PASS.
+Status: **OFFLINE PASS — MANIFEST RESEALED; FULL VERIFIER PASS; LIVE HARD
+NO-GO / NOT TESTED.** The integrated R2 offline-base review and independent
+raw-header review are complete and all direct findings have been applied. The
+reviewed candidate is manifest-bound and its full offline verifier passes. No
+live request, successful TLS transfer, server interaction or credential use
+occurred, so R2 remains active rather than live PASS.
 
 ## Scope
 
@@ -74,12 +74,13 @@ R2 does not infer the unobserved `encode=2` version-preflight path.
 Login accepts numeric hexadecimal `RESPONSE.RESULT.code == 0`; the known
 verification-code challenge fails closed. A `VSG_SESSIONID` comes from the
 password response's `Set-Cookie`, not the XML. The fresh isolated jar preserves
-the observed vendor spacing and `ORIGINURL` suffix, but Foundation exposes only
-a projected Set-Cookie value and cannot establish raw header multiplicity.
-Treating that projection as a proven single wire field would violate the
-compatibility invariant. The production path therefore rejects the request
-before `session.open`; server tolerance cannot substitute for vendor-exact
-framing evidence.
+the observed vendor spacing and `ORIGINURL` suffix. Foundation still exposes
+only a projected Set-Cookie value and cannot establish raw header multiplicity,
+so that transport remains fail closed before `session.open`. The reviewed
+system-libcurl seam observes bounded raw header fields and accepts only a
+factory-proven exact password request with one final `Set-Cookie` field. Its
+evidence is synthetic; server tolerance is not used as a substitute for
+vendor-exact framing.
 
 Resource acceptance mirrors the vendor's minimal gate: an empty or missing
 resource list is allowed, while `0x80000020` and `RESPONSE.ERROR` reject. The
@@ -108,18 +109,20 @@ length.
 
 ## Offline acceptance and live boundary
 
-The Swift package has a dependency-free `PowerVPNPortal` target. It cannot
-import `PowerVPNCore`, XPC, VICI or helper code. `powervpn login` accepts no
-option or positional material; invalid arguments are rejected before runtime
-construction. The live harness clears the child environment, leaves stdin at
-`/dev/null`, supplies prompts through the controlling TTY, reconstructs stdout
-through a FIFO and closed `jq` schema, and retains only mode-600 value-free
-evidence.
+The Swift package isolates `PowerVPNPortal`: it may depend only on the
+package-local `CPortalCurl` target and cannot import `PowerVPNCore`, XPC, VICI
+or helper code. `powervpn login` accepts no option or positional material;
+invalid arguments are rejected before runtime construction. The live harness
+clears the child environment, leaves stdin at `/dev/null`, supplies prompts
+through the controlling TTY, reconstructs stdout through a FIFO and closed
+`jq` schema, and retains only mode-600 value-free evidence.
 
 Any future live harness would require all of these before a request could leave
 the machine:
 
-- reviewed candidate manifest and exact authorized manifest SHA-256;
+- reviewed candidate manifest SHA-256
+  `00411979105d9023916af3eef5bda0f3886231a5ad74714c0e47d5197bf9e084`
+  and a fresh authorization bound to that exact hash;
 - exact manifest-bound network snapshot script;
 - PowerVPN GUI, all vendor helpers and native charon absent;
 - exact inactive launchd generation;
@@ -134,12 +137,12 @@ checkpoint.
 
 One password was pasted into the Codex task text during R2 development. It is
 treated as compromised, was not used by code or tests, and remains forbidden
-from every future live window. No rotation or credential input is required now:
-the next subcheckpoint is value-free and performs no password authentication.
-Rotation outside PowerVPN plus a fresh macOS confirmation remains mandatory
-before any later real login; a chat message is not accepted as that gate.
+from every future live window. The next action is for the user to rotate it
+outside PowerVPN. After rotation, a fresh explicit approval must bind the exact
+manifest hash above. The new username/password may be entered only through the
+no-echo controlling TTY; credentials must never be sent through chat.
 
-## Integrated review closure and current blocker
+## Integrated review closure and offline acceptance
 
 Exactly one cumulative R2 integrated review completed. Its five direct findings
 were fixed:
@@ -150,20 +153,32 @@ were fixed:
 4. the network snapshot dependency is included in manifest identity; and
 5. the report limits its erasure claim to observed app-owned secure buffers.
 
+The independent raw-header review returned exactly two direct findings, both
+fixed: a factory-only unforgeable operation proof now excludes forged body,
+Cookie and User-Agent near misses with zero transport-lane hits; TLS trust
+classification is limited to peer/issuer verification while handshake and
+cipher failures are `unavailable`. No second raw-header review ran.
+
 The fixed cumulative candidate is bound by reviewed manifest SHA-256
-`676e8062b3b29c83dc56e738c475452f029bc3e77f74261eea15878a618774eb`.
-Its final offline verifier passed 108 Portal tests in 17 suites, 109 Core tests
-in 10 suites, the arm64 build, strict formatting, the no-network signal harness,
-the secret scan and the exact manifest gate. This proves the fixed offline
-implementation and safety boundary only; it does not prove server compatibility.
+`00411979105d9023916af3eef5bda0f3886231a5ad74714c0e47d5197bf9e084`
+and runtime source aggregate SHA-256
+`83c590c8ebb3c15b8e32d125bfbdef6c4b39aabd94ca9235c35aef140b67eee2`.
+The same manifest binds runtime-library SHA-256
+`d6c3f1696e18beac31ffd425e177febce5ec523a0f6a05c2f8bf6c9e8cf56152`
+and raw-header-test aggregate SHA-256
+`a6d98b928a9c0a63ded37b7b60120e9483fabddf8dea6a895a160276a4acab05`.
+Its full offline verifier passed 120 Portal tests in 19 suites and 109 Core tests
+in 10 suites (229 tests in 29 suites), the arm64 build, strict formatting, the
+no-network signal harness, the secret scan and the exact manifest gate. The raw
+sub-gates passed 11 direct C parser cases, 5 direct C status cases, 16 Swift
+cases in 3 suites and the separate Foundation fail-closed regression.
 
-The third fix intentionally exposes the remaining protocol-evidence blocker:
-the current Foundation API surface cannot prove raw Set-Cookie field
-multiplicity/framing. A synthetic production-path test stopped locally before
-`session.open`; no real credential, portal TCP connection, helper, XPC, VICI,
-IKE, UDP, route, policy, SA or utun action occurred.
+This proves only the reviewed offline implementation and safety boundary. No
+real credential, successful TLS transfer, portal TCP connection, helper, XPC,
+VICI, IKE, UDP, route, policy, SA or utun action occurred. Server compatibility
+and the R2 live workflow remain **NOT TESTED**; R2 is **HARD NO-GO** for live
+login and the Goal remains active.
 
-Next checkpoint: an independent R2 raw-header-framing subcheckpoint that uses
-no username/password and does not infer wire structure from Foundation's
-projected value. Until that evidence exists, R2 is hard NO-GO, the runtime
-fixture does not exist, and the Goal remains active.
+Next: the user rotates the compromised password outside PowerVPN, then provides
+fresh approval bound to the exact manifest. Only the no-echo controlling TTY
+may receive the new credentials; they must never be sent through chat.

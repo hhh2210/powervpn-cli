@@ -22,8 +22,10 @@ changed_files=$(
 for file in $changed_files; do
 	case "$file" in
 	Package.swift | GOAL.md | README.md | \
+		docs/evidence/checkpoint-r2-validation.md | \
 		docs/evidence/checkpoint-r2-raw-header-framing.md | \
 		docs/progress/GOAL_STATUS.md | \
+		fixtures/redacted/r2-reviewed-candidate-manifest-v1.json | \
 		Sources/CPortalCurl/CPortalCurl.c | \
 		Sources/CPortalCurl/CPortalCurlHeaders.c | \
 		Sources/CPortalCurl/CPortalCurlInternal.h | \
@@ -40,6 +42,7 @@ for file in $changed_files; do
 		Tests/PowerVPNPortalTests/CurlPasswordPortalTransportTests.swift | \
 		Tests/PowerVPNPortalTests/LeadSecPortalTransportTests.swift | \
 		Tests/PowerVPNPortalTests/PortalRequestFactoryTests.swift | \
+		scripts/lib/r2_portal_runtime.sh | scripts/verify/checkpoint_r2.sh | \
 		scripts/verify/checkpoint_r2_raw_headers.sh | scripts/verify_checkpoint.sh)
 		;;
 	*)

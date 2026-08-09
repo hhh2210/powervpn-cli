@@ -22,15 +22,17 @@ r2_source_aggregate() {
 			sha=$(r2_hash_file "$R2_REPO_ROOT/$file") || exit 1
 			printf '%s  %s\n' "$sha" "$file"
 		done
-		portal_files=$(find "$R2_REPO_ROOT/Sources/PowerVPNPortal" \
-			-type f -name '*.swift' -print | LC_ALL=C sort) || exit 1
-		[ -n "$portal_files" ] || exit 1
+		source_files=$(find "$R2_REPO_ROOT/Sources/PowerVPNPortal" \
+			"$R2_REPO_ROOT/Sources/CPortalCurl" -type f \
+			\( -name '*.swift' -o -name '*.c' -o -name '*.h' \) \
+			-print | LC_ALL=C sort) || exit 1
+		[ -n "$source_files" ] || exit 1
 		old_ifs=$IFS
 		IFS='
 '
 		# Paths in this reviewed source tree contain no whitespace.
 		# shellcheck disable=SC2086
-		set -- $portal_files
+		set -- $source_files
 		IFS=$old_ifs
 		for file_path
 		do
@@ -44,6 +46,20 @@ r2_source_aggregate() {
 	[ -n "$source_lines" ] || return 1
 	printf '%s\n' "$source_lines" | shasum -a 256 | awk '{print $1}'
 }
+r2_raw_tests_aggregate() {
+	test_lines=$(
+		for file in Tests/CPortalCurlTests/CPortalCurlHeaderTests.c \
+			Tests/CPortalCurlTests/CPortalCurlStatusTests.c \
+			Tests/PowerVPNPortalTests/CurlPasswordPortalTransportTests.swift \
+			Tests/PowerVPNPortalTests/LeadSecPortalTransportTests.swift \
+			Tests/PowerVPNPortalTests/PortalRequestFactoryTests.swift \
+			Tests/PowerVPNPortalTests/FoundationPortalURLSessionReuseTests.swift; do
+			[ -f "$R2_REPO_ROOT/$file" ] && [ ! -L "$R2_REPO_ROOT/$file" ] || exit 1
+			printf '%s  %s\n' "$(r2_hash_file "$R2_REPO_ROOT/$file")" "$file" || exit 1
+		done
+	) || return 1
+	printf '%s\n' "$test_lines" | shasum -a 256 | awk '{print $1}'
+}
 r2_candidate_manifest_exact() {
 	[ -f "$R2_MANIFEST" ] && [ ! -L "$R2_MANIFEST" ] &&
 		[ "$(stat -f '%u:%Lp' "$R2_MANIFEST")" = "$(id -u):644" ] || return 1
@@ -52,6 +68,8 @@ r2_candidate_manifest_exact() {
 	runtime_sha=$(r2_hash_file "$R2_REPO_ROOT/scripts/lib/r2_portal_runtime.sh") || return 1
 	tests_sha=$(r2_hash_file "$R2_REPO_ROOT/scripts/verify/r2_live_harness_tests.sh") || return 1
 	snapshot_sha=$(r2_hash_file "$R2_SNAPSHOT") || return 1
+	raw_verifier_sha=$(r2_hash_file "$R2_REPO_ROOT/scripts/verify/checkpoint_r2_raw_headers.sh") || return 1
+	raw_tests_sha=$(r2_raw_tests_aggregate) || return 1
 	cli_sha=$(r2_hash_file "$R2_CLI") || return 1
 	app_sha=$(r2_hash_file /Applications/PowerVPN.app/Contents/MacOS/PowerVPN) || return 1
 	info_sha=$(r2_hash_file /Applications/PowerVPN.app/Contents/Info.plist) || return 1
@@ -64,7 +82,7 @@ r2_candidate_manifest_exact() {
 	esac
 	jq -e --arg source "$source_aggregate" --arg runner "$runner_sha" \
 		--arg runtime "$runtime_sha" --arg tests "$tests_sha" --arg snapshot "$snapshot_sha" \
-		--arg cli "$cli_sha" \
+		--arg raw "$raw_verifier_sha" --arg rawtests "$raw_tests_sha" --arg cli "$cli_sha" \
 		--arg app "$app_sha" --arg info "$info_sha" --arg db "$db_sha" \
 		--arg prefs "$prefs_sha" --arg review "$review_state" '
     keys == ["artifacts", "baseCommit", "evidenceClass", "reviewState",
@@ -77,7 +95,8 @@ r2_candidate_manifest_exact() {
     .artifacts == {arm64CLISHA256:$cli,harnessTestsSHA256:$tests,
       installedAppSHA256:$app,installedDatabaseSHA256:$db,
       installedInfoPlistSHA256:$info,installedPreferencesSHA256:$prefs,
-      networkSnapshotSHA256:$snapshot,runnerSHA256:$runner,
+      networkSnapshotSHA256:$snapshot,rawHeaderVerifierSHA256:$raw,
+      rawHeaderTestsAggregateSHA256:$rawtests,runnerSHA256:$runner,
       runtimeLibrarySHA256:$runtime}
   ' "$R2_MANIFEST" >/dev/null || return 1
 	R2_CANDIDATE_MANIFEST_SHA256=$(r2_hash_file "$R2_MANIFEST") || return 1

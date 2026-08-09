@@ -660,13 +660,14 @@ request. R1's read-only authorization does not transfer to R2.
 
 Canonical commit: this cumulative Rescue R1 implementation and evidence commit.
 
-## 2026-08-09 — Rescue R2 review closure and reviewed raw-header gate
+## 2026-08-10 — Rescue R2 offline acceptance and live gate
 
-State: **HARD NO-GO — RAW-HEADER OFFLINE GATE REVIEWED; R2 MANIFEST RESEAL
-PENDING.** R2 is not PASS and the active Goal remains open. The Foundation-only
-synthetic production-path test still rejects locally before `session.open`;
-the separate system-libcurl raw-header seam has passed only synthetic offline
-validation. No real credential, portal request or network connection was used.
+State: **OFFLINE PASS — MANIFEST RESEALED; FULL VERIFIER PASS; LIVE HARD NO-GO
+/ NOT TESTED.** R2 is not live PASS and the active Goal remains open. The
+Foundation-only synthetic path still rejects locally before `session.open`;
+the separate reviewed system-libcurl seam and the cumulative candidate have
+passed synthetic/full offline validation. No real credential, successful TLS
+transfer, portal request or network connection was used.
 
 Verified: the `PowerVPNPortal` target implements the exact
 default password body, sealed installed origin, system-trust-only TLS,
@@ -676,10 +677,10 @@ LeadSec profile, fresh isolated Cookie handling, resource fetch, exact
 logout. `powervpn login` rejects every option/extra argument before constructing
 the runtime and emits only a closed value-free JSON report.
 
-User input required: none. Manifest resealing and the full offline R2 verifier
-are value-free and require no password rotation or credential input. The
-exposed password remains forbidden; rotation is deferred until a future
-real-login gate is otherwise ready.
+User input required next: rotate the exposed password outside PowerVPN. After
+rotation, provide fresh approval bound to the exact reviewed manifest. Do not
+send either credential through chat; the new username/password may be entered
+only through the no-echo controlling TTY after approval.
 
 Derived automatically: current origin/version/address-selection/language state,
 raw platform serial, Cookie/session state, operation timing and logout. The
@@ -688,18 +689,23 @@ database copy using the exact SQLCipher 3.4.0 profile. No user-table row was
 queried and no database passphrase was retained.
 
 Evidence: `docs/evidence/checkpoint-r2-validation.md`; the corrected CP5
-password-field fixture; and the previous R2 offline-base reviewed manifest
-`676e8062b3b29c83dc56e738c475452f029bc3e77f74261eea15878a618774eb`. That
-manifest is stale after the reviewed raw-header changes and must be resealed.
-The live value-free fixture does not exist because dispatch stopped before
-`session.open`.
+password-field fixture; reviewed manifest SHA-256
+`00411979105d9023916af3eef5bda0f3886231a5ad74714c0e47d5197bf9e084`;
+and runtime source aggregate SHA-256
+`83c590c8ebb3c15b8e32d125bfbdef6c4b39aabd94ca9235c35aef140b67eee2`.
+The manifest also binds runtime-library SHA-256
+`d6c3f1696e18beac31ffd425e177febce5ec523a0f6a05c2f8bf6c9e8cf56152`
+and raw-header-test aggregate SHA-256
+`a6d98b928a9c0a63ded37b7b60120e9483fabddf8dea6a895a160276a4acab05`.
+The live value-free fixture does not exist because R2B has not run.
 
-Tests/commands: after the five direct review findings were fixed, the complete
-offline verifier passed with 108 Portal tests in 17 suites and 109 Core tests in
-10 suites (217 total), the corrected CP5 password-profile test, arm64 build,
-strict Swift formatting, shell syntax and ShellCheck, closed-schema bounded
-signal-cleanup harness tests, secret scan, exact manifest and diff check.
-This does not claim an R2 live/server acceptance run.
+Tests/commands: the full offline verifier passed with 120 Portal tests in 19
+suites and 109 Core tests in 10 suites (229 tests in 29 suites), the corrected
+CP5 password-profile test, arm64 build, strict Swift formatting, shell syntax
+and ShellCheck, closed-schema bounded signal-cleanup harness tests, secret scan,
+exact manifest and diff checks. Raw sub-gates passed 11 C parser cases, 5 C
+status cases, 16 Swift cases in 3 suites and the separate Foundation fail-closed
+regression. This does not claim an R2 live/server/TLS acceptance run.
 
 Safety/cleanup: the synthetic production path failed closed before
 `session.open`; no real credential, portal connection, PowerVPN GUI, helper,
@@ -715,12 +721,11 @@ Set-Cookie framing, manifest binding for the network snapshot dependency, and
 truthful secure-buffer erasure claims. No second offline-base review or
 unrelated-history review ran.
 
-Remaining: reseal the cumulative reviewed R2 manifest and run the full offline
-R2 verifier. Foundation's projected Set-Cookie value remains fail closed, and
-the reviewed raw-header seam is implementation evidence rather than server
-acceptance, so no password login may run yet. Password rotation and a fresh
-macOS confirmation remain deferred until a future live gate is otherwise
-ready.
+Offline remaining: none. The reviewed cumulative R2 manifest is resealed and
+the full offline verifier passes. Foundation's projected Set-Cookie value
+remains fail closed, and the reviewed raw-header seam remains implementation
+evidence rather than server acceptance. Live R2B remains hard NO-GO / not
+tested until external password rotation and fresh manifest-bound approval.
 
 Raw-header subcheckpoint status: **OFFLINE PASS — INTEGRATED REVIEW COMPLETE;
 FINDINGS APPLIED.** Its synthetic-only acceptance matrix and architecture
@@ -740,13 +745,14 @@ handshake and cipher failures are `unavailable`. No second review ran. No
 successful TLS transfer, portal/server interaction, credential read or
 server-compatibility claim occurred; R2 remains hard NO-GO.
 
-Next work unit: reseal the reviewed R2 manifest, then run
-`scripts/verify_checkpoint.sh r2` without username/password. Do not run
-`powervpn login`.
+Next action: the user rotates the exposed password outside PowerVPN. Then a
+fresh explicit approval must bind manifest SHA-256
+`00411979105d9023916af3eef5bda0f3886231a5ad74714c0e47d5197bf9e084`
+before one R2B window. Do not run `powervpn login` before that approval.
 
-Approval required: no credential/live-login approval now. Any future real
-password request still requires fresh approval and prior rotation; the old
-password and all chat/task text are invalid credential sources.
+Approval required: **yes, fresh and manifest-bound, after rotation**. The new
+username/password must be entered only through the no-echo controlling TTY;
+the old password and all chat/task text are invalid credential sources.
 
 Canonical commit: pending successful live evidence and final checkpoint
 validation.

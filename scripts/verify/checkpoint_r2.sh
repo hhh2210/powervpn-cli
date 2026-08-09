@@ -26,16 +26,20 @@ for file in $changed_files; do
 	Package.swift | GOAL.md | README.md | \
 		docs/protocol-control-plane.md | docs/evidence/checkpoint-5-static-correlation.md | \
 		docs/evidence/checkpoint-r2-validation.md | docs/progress/GOAL_STATUS.md | \
+		docs/evidence/checkpoint-r2-raw-header-framing.md | \
 		fixtures/redacted/protocol-correlation-value-free-v1.json | \
 		fixtures/redacted/r2-reviewed-candidate-manifest-v1.json | \
 		fixtures/redacted/r2-portal-login-runtime-v1.json | \
 		Sources/PowerVPNCore/ProtocolCorrelationFieldNames.swift | \
 		Sources/PowerVPNCore/ProtocolCorrelationProfiles.swift | \
 		Tests/PowerVPNCoreTests/ProtocolCorrelationProfileTests.swift | \
+		Sources/CPortalCurl/*.c | Sources/CPortalCurl/*.h | \
+		Tests/CPortalCurlTests/*.c | \
 		Sources/PowerVPNCLI/main.swift | Sources/PowerVPNCLI/PortalLoginCommand.swift | \
 		Sources/PowerVPNPortal/*.swift | Tests/PowerVPNPortalTests/*.swift | \
 		scripts/lib/r2_portal_runtime.sh | scripts/run_r2_portal_login.sh | \
 		scripts/verify/r2_live_harness_tests.sh | scripts/verify/checkpoint_r2.sh | \
+		scripts/verify/checkpoint_r2_raw_headers.sh | \
 		scripts/verify_checkpoint.sh)
 		;;
 	*)
@@ -58,8 +62,13 @@ portal_sources=$(rg --files Sources/PowerVPNPortal | sort)
 [ -n "$portal_sources" ]
 package_json=$(swift package describe --type json)
 printf '%s\n' "$package_json" | jq -e '
+  .platforms == [{"name":"macos","version":"14.0"}] and
+  ([.targets[] | select(.name == "CPortalCurl")] | length) == 1 and
+  ([.targets[] | select(.name == "CPortalCurl")][0].target_dependencies // []) == [] and
+  ([.targets[] | select(.name == "CPortalCurl")][0].product_dependencies // []) == [] and
   ([.targets[] | select(.name == "PowerVPNPortal")] | length) == 1 and
-  ([.targets[] | select(.name == "PowerVPNPortal")][0].target_dependencies // []) == [] and
+  ([.targets[] | select(.name == "PowerVPNPortal")][0].target_dependencies // []) ==
+    ["CPortalCurl"] and
   ([.targets[] | select(.name == "PowerVPNPortal")][0].product_dependencies // []) == [] and
   ([.targets[] | select(.name == "PowerVPNCLI")][0].target_dependencies | sort) ==
     ["PowerVPNCore", "PowerVPNPortal"]
@@ -84,12 +93,12 @@ rg -Fq 'encode='"'"'1'"'"'&hardware_hash=' \
 
 for script in scripts/lib/r2_portal_runtime.sh scripts/run_r2_portal_login.sh \
 	scripts/verify/r2_live_harness_tests.sh scripts/verify/checkpoint_r2.sh \
-	scripts/verify_checkpoint.sh; do
+	scripts/verify/checkpoint_r2_raw_headers.sh scripts/verify_checkpoint.sh; do
 	sh -n "$script"
 done
 shellcheck -x -e SC1091 scripts/lib/r2_portal_runtime.sh \
 	scripts/run_r2_portal_login.sh scripts/verify/r2_live_harness_tests.sh \
-	scripts/verify/checkpoint_r2.sh
+	scripts/verify/checkpoint_r2.sh scripts/verify/checkpoint_r2_raw_headers.sh
 
 helper_runs_before=$(
 	/bin/launchctl print system/com.leadsec.charon-xpc 2>/dev/null |
@@ -98,6 +107,7 @@ helper_runs_before=$(
 [ -n "$helper_runs_before" ]
 [ -z "$(pgrep -f '^/Library/PrivilegedHelperTools/com\.leadsec\.charon-xpc$' || true)" ]
 
+scripts/verify/checkpoint_r2_raw_headers.sh
 swift test --filter PowerVPNPortalTests
 swift test --filter passwordProfileUsesTheRecoveredSortedFieldsAndOptionalChallengeTail
 swift test
@@ -140,8 +150,9 @@ jq -e --arg review "$expected_review" '
   (.runtimeSourceAggregateSHA256 | test("^[0-9a-f]{64}$")) and
   (.artifacts | keys) == ["arm64CLISHA256", "harnessTestsSHA256",
     "installedAppSHA256", "installedDatabaseSHA256", "installedInfoPlistSHA256",
-    "installedPreferencesSHA256", "networkSnapshotSHA256", "runnerSHA256",
-    "runtimeLibrarySHA256"] and
+    "installedPreferencesSHA256", "networkSnapshotSHA256",
+    "rawHeaderTestsAggregateSHA256", "rawHeaderVerifierSHA256",
+    "runnerSHA256", "runtimeLibrarySHA256"] and
   all(.artifacts[]; test("^[0-9a-f]{64}$"))
 ' "$manifest" >/dev/null
 

@@ -4,8 +4,8 @@ Status: **OFFLINE PASS — INTEGRATED REVIEW COMPLETE; FINDINGS APPLIED; LIVE
 HARD NO-GO.** This independent subcheckpoint is synthetic-only. It uses no
 username, password, session value, installed portal endpoint, or VPN server
 traffic. Its offline verifier passes and its one integrated review is complete,
-but this does not authorize a password POST; the reviewed R2 manifest must be
-resealed, the full offline R2 verifier must pass, and the later R2B prerequisites
+and the reviewed R2 manifest has been resealed. The full offline R2 verifier
+passes, but this does not authorize a password POST; all R2B live prerequisites
 must still be satisfied.
 
 ## Question being closed
@@ -140,8 +140,24 @@ interaction or credential read occurred. Therefore:
 - R2 password login: **HARD NO-GO**;
 - live/server compatibility: **NOT TESTED**;
 - successful libcurl TLS and redirect/auth wire integration: **NOT TESTED**;
-- credential input or rotation required now: **no**.
+- credential use in the offline evidence: **none**.
 
-Next: reseal the cumulative R2 reviewed manifest and run the full offline R2
-verifier. Do not interpret the raw-header implementation pass or review closure
-as authorization for R2B.
+The raw-header implementation is incorporated into reviewed manifest SHA-256
+`00411979105d9023916af3eef5bda0f3886231a5ad74714c0e47d5197bf9e084`,
+which binds runtime source aggregate SHA-256
+`83c590c8ebb3c15b8e32d125bfbdef6c4b39aabd94ca9235c35aef140b67eee2`.
+The manifest independently binds the raw-header test-source aggregate as
+SHA-256
+`a6d98b928a9c0a63ded37b7b60120e9483fabddf8dea6a895a160276a4acab05`
+and the runtime library as SHA-256
+`d6c3f1696e18beac31ffd425e177febce5ec523a0f6a05c2f8bf6c9e8cf56152`.
+The full offline R2 verifier passes with 120 Portal tests in 19 suites and 109
+Core tests in 10 suites (229 tests in 29 suites), including 16 raw Swift cases
+across 3 suites and the separate Foundation fail-closed regression; the direct
+C gates pass 11 parser and 5 status cases.
+
+Next: the user rotates the exposed password outside PowerVPN, then provides
+fresh approval bound to the exact manifest before any R2B window. New
+credentials may be entered only through the no-echo controlling TTY, never
+chat. Do not interpret the raw-header or full offline PASS as live/server/TLS
+compatibility evidence.
