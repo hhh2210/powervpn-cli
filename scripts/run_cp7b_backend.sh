@@ -4,6 +4,7 @@ set -eu
 
 repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd -P)
 . "$repo_root/scripts/lib/native_charon_runtime.sh"
+. "$repo_root/scripts/lib/route_snapshot.sh"
 . "$repo_root/scripts/lib/network_snapshot.sh"
 . "$repo_root/scripts/lib/cp7b_runtime.sh"
 . "$repo_root/scripts/lib/cp7b_closure.sh"

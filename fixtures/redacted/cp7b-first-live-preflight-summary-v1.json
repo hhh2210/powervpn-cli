@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "cp7b_live_preflight_failure_summary",
+  "classification": "inconclusive_preflight_failure",
+  "manifest": {
+    "sha256": "c5464052f21af585a348a3fced8d1b5cf4fa336f8128fd9e64acc10465add877",
+    "labCommit": "552652a78e34b5e9a34b25cc1630c760814c755e",
+    "sourceCommit": "a81298234753f314dbf2c4f2867a9a144006bd8c",
+    "configSHA256": "64fbae7626306419a08018234bbb6bf5040f954e8ff6d2622b2f9969ca96fa20"
+  },
+  "invocation": {
+    "explicitManifestBoundAuthorizationObserved": true,
+    "beforeTimestamp": "2026-08-09T04:27:47Z",
+    "rootResultBytes": 0,
+    "rootStderrCategory": "root_preflight_snapshots_unstable_no_daemon_declared",
+    "afterTimestamp": "2026-08-09T04:36:03Z",
+    "afterDeltaSeconds": 496,
+    "afterRelationship": "post_hoc_diagnostic_outside_300_second_window",
+    "attempt": null,
+    "attemptStatus": "unknown_no_retained_ledger",
+    "lastBoundRootStage": null
+  },
+  "reachability": {
+    "outerPrecheck": "reached",
+    "authorizerInvocation": "reached",
+    "rootWorker": "interactive_process_observation_only",
+    "privilegedSnapshotPair": "declared_by_unbound_stderr_only",
+    "gatedLauncher": "not_observed",
+    "daemon": "not_observed",
+    "backendConstructor": "not_evidenced",
+    "vici": "not_evidenced",
+    "server": "not_evidenced"
+  },
+  "postHocBeforeAfter": {
+    "changedFields": [
+      "timestamp",
+      "ipv4RouteCount",
+      "ipv4RouteSHA256"
+    ],
+    "routeOnlyMismatch": true,
+    "ipv6RoutesEqual": true,
+    "interfaceInventoryEqual": true,
+    "utunNamesEqual": true,
+    "defaultRouteEqual": true,
+    "dnsEqual": true,
+    "espPortEqual": true,
+    "surgeProcessIdentityEqual": true,
+    "powerVPNProcessIdentityEqual": true,
+    "surgeEnvironmentEqual": true,
+    "nativeCharonAbsentAtBothSnapshots": true,
+    "sadSpdComparable": false
+  },
+  "routeVolatilityDiagnosis": {
+    "sampleCount": 3,
+    "intervalSeconds": 1,
+    "fullHashAllEqual": false,
+    "expireFreeStructuralHashAllEqual": true,
+    "nonExpiringNonWasClonedPersistentHashAllEqual": true,
+    "nonExpiringNonWasClonedPersistentCountAllEqual": true,
+    "excludedFlag": "W:RTF_WASCLONED",
+    "retainedFlags": [
+      "D:RTF_DYNAMIC",
+      "C:RTF_CLONING",
+      "c:RTF_PRCLONING"
+    ]
+  },
+  "currentCleanup": {
+    "reviewedStopResult": "already_stopped",
+    "runtimeOwnerRestored": true,
+    "runtimeMode": "0700",
+    "runtimeTopLevel": "closure_only",
+    "closureEntryCount": 165,
+    "wrongOwnerEntryCount": 0,
+    "groupWorldWritableEntryCount": 0,
+    "stateResidueCount": 0,
+    "pidResidueCount": 0,
+    "socketResidueCount": 0,
+    "ledgerResidueCount": 0,
+    "bootstrapResidueCount": 0,
+    "generationResidueCount": 0,
+    "nativeProcessResidueCount": 0,
+    "kernelTeardownProven": false,
+    "boundResultPresent": false
+  },
+  "outcome": {
+    "cp7bBackend": "unproven",
+    "evidenceLevel": "L1_L3_L4",
+    "l5": false,
+    "secondLaunchUnderOldManifestAllowedWithoutNewApproval": false
+  },
+  "missingEvidence": [
+    "nonempty_manifest_bound_root_result",
+    "retained_attempt_and_last_stage",
+    "privileged_sad_spd_snapshot_pair",
+    "gated_launcher_and_daemon_reachability",
+    "backend_plugin_udp_no_send_and_vici_results",
+    "within_window_root_after_and_cleanup_result"
+  ],
+  "containsSecrets": false,
+  "containsRawRoutes": false,
+  "containsRawSAState": false,
+  "containsServerEndpoint": false
+}

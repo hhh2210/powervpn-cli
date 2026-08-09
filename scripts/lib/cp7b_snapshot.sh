@@ -4,16 +4,18 @@ pvn_cp7b_preflight_snapshots_stable() {
 	first=$1
 	second=$2
 	jq -e --slurpfile first "$first" '
-      .setkeyState == "available" and .setkeyPolicyState == "available" and
-      .espPortState == "available" and
-      .setkeySHA256 == $first[0].setkeySHA256 and
-      .setkeyPolicySHA256 == $first[0].setkeyPolicySHA256 and
-      .espPortSHA256 == $first[0].espPortSHA256 and
-      .interfaceInventorySHA256 == $first[0].interfaceInventorySHA256 and
-      .ipv4RouteCount == $first[0].ipv4RouteCount and
-      .ipv4RouteSHA256 == $first[0].ipv4RouteSHA256 and
-      .ipv6RouteCount == $first[0].ipv6RouteCount and
-      .ipv6RouteSHA256 == $first[0].ipv6RouteSHA256 and
+	      .setkeyState == "available" and .setkeyPolicyState == "available" and
+	      .espPortState == "available" and
+	      .routeCanonicalizationVersion == 1 and
+	      .routeCanonicalizationVersion == $first[0].routeCanonicalizationVersion and
+	      .setkeySHA256 == $first[0].setkeySHA256 and
+	      .setkeyPolicySHA256 == $first[0].setkeyPolicySHA256 and
+	      .espPortSHA256 == $first[0].espPortSHA256 and
+	      .interfaceInventorySHA256 == $first[0].interfaceInventorySHA256 and
+	      .ipv4PersistentRouteCount == $first[0].ipv4PersistentRouteCount and
+	      .ipv4PersistentRouteSHA256 == $first[0].ipv4PersistentRouteSHA256 and
+	      .ipv6PersistentRouteCount == $first[0].ipv6PersistentRouteCount and
+	      .ipv6PersistentRouteSHA256 == $first[0].ipv6PersistentRouteSHA256 and
       .defaultRouteInterface == $first[0].defaultRouteInterface and
       .defaultRouteSHA256 == $first[0].defaultRouteSHA256 and
       .dnsSHA256 == $first[0].dnsSHA256 and
@@ -31,21 +33,38 @@ pvn_cp7b_preflight_snapshots_stable() {
       .nativeCharonPids == [] and .productionIKEPortsBoundByNative == false and
       .runtimeStatePresent == false and .ownedVICISocketPresent == false and
       .compiledPIDFilePresent == false and .generationDirectoryCount == 0
-    ' "$second" >/dev/null
+	    ' "$second" >/dev/null
+}
+
+pvn_cp7b_capture_stable_preflight() {
+	first=$1
+	second=$2
+	PVN_CP7B_PREFLIGHT_FAILURE=root_preflight_first_snapshot_failed
+	export PVN_CP7B_PREFLIGHT_FAILURE
+	pvn_snapshot_json >"$first" || return 1
+	sleep 1
+	PVN_CP7B_PREFLIGHT_FAILURE=root_preflight_second_snapshot_failed
+	pvn_snapshot_json >"$second" || return 1
+	chmod 600 "$first" "$second"
+	PVN_CP7B_PREFLIGHT_FAILURE=root_preflight_snapshot_unstable
+	pvn_cp7b_preflight_snapshots_stable "$first" "$second" || return 1
+	PVN_CP7B_PREFLIGHT_FAILURE=none
 }
 
 pvn_cp7b_during_snapshot_safe() {
 	before=$1
 	during=$2
 	jq -e --slurpfile before "$before" '
-      .setkeySHA256 == $before[0].setkeySHA256 and
+	      .routeCanonicalizationVersion == 1 and
+	      .routeCanonicalizationVersion == $before[0].routeCanonicalizationVersion and
+	      .setkeySHA256 == $before[0].setkeySHA256 and
       .setkeyPolicySHA256 == $before[0].setkeyPolicySHA256 and
       .espPortSHA256 == $before[0].espPortSHA256 and
       .interfaceInventorySHA256 == $before[0].interfaceInventorySHA256 and
-      .ipv4RouteCount == $before[0].ipv4RouteCount and
-      .ipv4RouteSHA256 == $before[0].ipv4RouteSHA256 and
-      .ipv6RouteCount == $before[0].ipv6RouteCount and
-      .ipv6RouteSHA256 == $before[0].ipv6RouteSHA256 and
+	      .ipv4PersistentRouteCount == $before[0].ipv4PersistentRouteCount and
+	      .ipv4PersistentRouteSHA256 == $before[0].ipv4PersistentRouteSHA256 and
+	      .ipv6PersistentRouteCount == $before[0].ipv6PersistentRouteCount and
+	      .ipv6PersistentRouteSHA256 == $before[0].ipv6PersistentRouteSHA256 and
       .defaultRouteInterface == $before[0].defaultRouteInterface and
       .defaultRouteSHA256 == $before[0].defaultRouteSHA256 and
       .dnsSHA256 == $before[0].dnsSHA256 and
@@ -72,14 +91,16 @@ pvn_cp7b_after_snapshot_safe() {
 	before=$1
 	after=$2
 	jq -e --slurpfile before "$before" '
-      .setkeySHA256 == $before[0].setkeySHA256 and
+	      .routeCanonicalizationVersion == 1 and
+	      .routeCanonicalizationVersion == $before[0].routeCanonicalizationVersion and
+	      .setkeySHA256 == $before[0].setkeySHA256 and
       .setkeyPolicySHA256 == $before[0].setkeyPolicySHA256 and
       .espPortSHA256 == $before[0].espPortSHA256 and
       .interfaceInventorySHA256 == $before[0].interfaceInventorySHA256 and
-      .ipv4RouteCount == $before[0].ipv4RouteCount and
-      .ipv4RouteSHA256 == $before[0].ipv4RouteSHA256 and
-      .ipv6RouteCount == $before[0].ipv6RouteCount and
-      .ipv6RouteSHA256 == $before[0].ipv6RouteSHA256 and
+	      .ipv4PersistentRouteCount == $before[0].ipv4PersistentRouteCount and
+	      .ipv4PersistentRouteSHA256 == $before[0].ipv4PersistentRouteSHA256 and
+	      .ipv6PersistentRouteCount == $before[0].ipv6PersistentRouteCount and
+	      .ipv6PersistentRouteSHA256 == $before[0].ipv6PersistentRouteSHA256 and
       .defaultRouteInterface == $before[0].defaultRouteInterface and
       .defaultRouteSHA256 == $before[0].defaultRouteSHA256 and
       .dnsSHA256 == $before[0].dnsSHA256 and
@@ -99,7 +120,16 @@ pvn_cp7b_after_snapshot_safe() {
       .generationDirectoryCount == 0 and
       .productionIKEPortsBoundByNative == false and
       .syntheticRouteObserved == $before[0].syntheticRouteObserved
-    ' "$after" >/dev/null
+	    ' "$after" >/dev/null
+}
+
+pvn_cp7b_remove_evidence_dir() {
+	evidence_root=$1
+	shift
+	for evidence_path in "$@"; do
+		[ ! -e "$evidence_path" ] || rm -f -- "$evidence_path"
+	done
+	[ ! -d "$evidence_root" ] || rmdir "$evidence_root"
 }
 
 pvn_cp7b_udp_fd_count() {
@@ -179,9 +209,10 @@ pvn_cp7b_report_json() {
 		    initiateCalled: false,
 		    installCalled: false,
 		    globalSADStable: $afterStateSafe,
-		    globalSPDStable: $afterStateSafe,
-		    espPortStable: $afterStateSafe,
-		    defaultRouteDNSAndUtunStable: $afterStateSafe,
+			    globalSPDStable: $afterStateSafe,
+			    espPortStable: $afterStateSafe,
+			    persistentRouteProjectionStable: $afterStateSafe,
+			    defaultRouteDNSAndUtunStable: $afterStateSafe,
 		    powerVPNAndSurgeProcessStable: $afterStateSafe,
 		    cleanupComplete: $cleanupComplete
 		  },
@@ -189,6 +220,38 @@ pvn_cp7b_report_json() {
 		  containsRawRoutes: false,
 		  containsRawSAState: false,
 		  containsServerEndpoint: false
+			}'
+}
+
+pvn_cp7b_preflight_failure_report_json() {
+	report_manifest_sha=$(pvn_sha256_file "$PVN_CP7B_MANIFEST") || return 1
+	report_source_commit=$(jq -er '.artifacts.sourceCommit |
+	  select(test("^[0-9a-f]{40}$"))' "$PVN_CP7B_MANIFEST") || return 1
+	report_config_sha=$(jq -er '.artifacts.configSHA256 |
+	  select(test("^[0-9a-f]{64}$"))' "$PVN_CP7B_MANIFEST") || return 1
+	jq -n --arg failureCategory "$1" --argjson attempt "$2" \
+		--argjson durationSeconds "$3" --arg approvalManifestSHA256 "$report_manifest_sha" \
+		--arg sourceCommit "$report_source_commit" --arg configSHA256 "$report_config_sha" '
+		{
+		  schemaVersion: 1,
+		  evidenceClass: "cp7b_privileged_preflight_failure",
+		  backend: "pfkey-pfroute", socketProvider: "socket-dynamic",
+		  approvalManifestSHA256: $approvalManifestSHA256,
+		  sourceCommit: $sourceCommit, configSHA256: $configSHA256,
+		  success: false, attempt: $attempt, durationSeconds: $durationSeconds,
+		  failureCategory: $failureCategory,
+		  reachability: {
+		    rootWorker: true,
+		    privilegedSnapshotPair: ($failureCategory == "root_preflight_snapshot_unstable"),
+		    gatedLauncher: false, daemon: false, backendConstructor: false,
+		    vici: false, server: false
+		  },
+		  safety: {
+		    serverTraffic: false, credentialRead: false, initiateCalled: false,
+		    installCalled: false, retryLedgerRetained: true, cleanupComplete: true
+		  },
+		  containsSecrets: false, containsRawRoutes: false,
+		  containsRawSAState: false, containsServerEndpoint: false
 		}'
 }
 

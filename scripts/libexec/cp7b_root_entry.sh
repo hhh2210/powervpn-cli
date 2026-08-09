@@ -79,6 +79,7 @@ cleanup_incomplete_bundle() {
 		"$bundle_root/lib/cp7b_snapshot.sh" \
 		"$bundle_root/lib/cp7b_bundle.sh" \
 		"$bundle_root/lib/native_charon_runtime.sh" \
+		"$bundle_root/lib/route_snapshot.sh" \
 		"$bundle_root/lib/network_snapshot.sh" \
 		"$bundle_root/python/vici/__init__.py" \
 		"$bundle_root/python/vici/command_wrappers.py" \
@@ -140,14 +141,15 @@ pvn_cp7b_take_closure_ownership
 /bin/chmod 700 "$bundle_root/lib" "$bundle_root/python" "$bundle_root/python/vici"
 /bin/mv "$closure_bootstrap" "$bundle_root/lib/cp7b_closure.sh"
 copy_reviewed "$manifest" "$bundle_root/approval-manifest.json" "$manifest_sha" 600
-copy_reviewed "$repo_root/scripts/lib/cp7b_runtime.sh" "$bundle_root/lib/cp7b_runtime.sh" 715db9d4c6ada0da81c571f69900a1aa501d65adbdead52318a47afe6340ee55 600
-copy_reviewed "$repo_root/scripts/lib/cp7b_state.sh" "$bundle_root/lib/cp7b_state.sh" 878dc8e7c6488449e3e09acb61e4f8cf4d55cf924864bd4758bed62b8ab03fa1 600
+copy_reviewed "$repo_root/scripts/lib/cp7b_runtime.sh" "$bundle_root/lib/cp7b_runtime.sh" 099835a94901a9396e396de400726fb5b26c4c23c159202544729881f968d374 600
+copy_reviewed "$repo_root/scripts/lib/cp7b_state.sh" "$bundle_root/lib/cp7b_state.sh" 73060c93d06eeaf86d84b0b6e707703411f79f7cc63ca925249355b398c88611 600
 copy_reviewed "$repo_root/scripts/lib/cp7b_attempts.sh" "$bundle_root/lib/cp7b_attempts.sh" 0516e9dca6af11e0b08ffdab553163c684104d21fc0f0d15dfc5ee4a39075bc5 600
-copy_reviewed "$repo_root/scripts/lib/cp7b_snapshot.sh" "$bundle_root/lib/cp7b_snapshot.sh" d57dccb9b97adb31388c1780004ac9a7e6ec7c37a6dc610440545d5581e4b192 600
-copy_reviewed "$repo_root/scripts/lib/cp7b_bundle.sh" "$bundle_root/lib/cp7b_bundle.sh" 9ecc5daacf47ce315b049871ca6dd528c3fb8d13fea8da2820c0018c18f6c371 600
+copy_reviewed "$repo_root/scripts/lib/cp7b_snapshot.sh" "$bundle_root/lib/cp7b_snapshot.sh" 44492477180cb2312b4b9baf69e40d24a520f6bf7c56831831967f63a8a9a38d 600
+copy_reviewed "$repo_root/scripts/lib/cp7b_bundle.sh" "$bundle_root/lib/cp7b_bundle.sh" 73d524ea3db5e98e5d8086633d06bf3d5b55aa33e845fe19486b6da68fbf1491 600
 copy_reviewed "$repo_root/scripts/lib/native_charon_runtime.sh" "$bundle_root/lib/native_charon_runtime.sh" cf7b3a367970db7ad355501f7ee3192208876f04b15e8b1a9588ce12ccf30aee 600
-copy_reviewed "$repo_root/scripts/lib/network_snapshot.sh" "$bundle_root/lib/network_snapshot.sh" f6012d94bd1eae418105daad9dae566a70cdfda0911fbe3ade9082b51a154bdd 600
-copy_reviewed "$repo_root/scripts/libexec/cp7b_backend_window.sh" "$bundle_root/cp7b_backend_window.sh" 43ef9d031b8a3ad7b3e0e4a41c7076c2024061a1a8cbcde840b9e617a57f6229 700
+copy_reviewed "$repo_root/scripts/lib/route_snapshot.sh" "$bundle_root/lib/route_snapshot.sh" 1e6ac95149de0856ba7373a10a4e8f7c379644f6ccc49a017703c2ba6ec6d431 600
+copy_reviewed "$repo_root/scripts/lib/network_snapshot.sh" "$bundle_root/lib/network_snapshot.sh" e745abdf5ff7a03a3a0ca34deaad2e7c8db2daed298026f9f1ab91f1e37dd234 600
+copy_reviewed "$repo_root/scripts/libexec/cp7b_backend_window.sh" "$bundle_root/cp7b_backend_window.sh" 4c8bf2efc8d8bddbf749279da5ebb0ccc56e5e0dcdf46943f421e10a12a32c89 700
 copy_reviewed "$repo_root/scripts/libexec/cp7b_emergency_stop.sh" "$bundle_root/cp7b_emergency_stop.sh" fb82025b81727851539d4ed6691ba627bb0ac239ed0dacc8445271fa2aa27df1 700
 copy_reviewed "$repo_root/scripts/verify/official_vici_runtime.py" "$bundle_root/official_vici_runtime.py" 73c0b98f6bd2abe687b4dd24762f467ad1ae15787cd27564f005b7a65175a62d 600
 copy_reviewed "$repo_root/scripts/libexec/cp7b_vici_readonly.py" "$bundle_root/cp7b_vici_readonly.py" 6bf42eec4c75c505ef2af6e6901d426591780a892a71b08a0caacb3c58d10154 600

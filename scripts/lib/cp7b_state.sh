@@ -228,7 +228,16 @@ pvn_cp7b_start_deadline_guard() {
 	remaining_seconds=$((PVN_CP7B_WINDOW_STARTED + 300 - $(date +%s)))
 	[ "$remaining_seconds" -gt 0 ] || pvn_fail "CP7B approval window expired" || return 1
 	worker_pid=$$
-	(sleep "$remaining_seconds"; kill -TERM "$worker_pid" 2>/dev/null || true) &
+	(
+		deadline_sleep_pid=
+		trap 'trap - HUP INT TERM; [ -z "$deadline_sleep_pid" ] ||
+			kill "$deadline_sleep_pid" 2>/dev/null || true; wait "$deadline_sleep_pid" 2>/dev/null || true; exit 0' HUP INT TERM
+		sleep "$remaining_seconds" &
+		deadline_sleep_pid=$!
+		if wait "$deadline_sleep_pid"; then
+			kill -TERM "$worker_pid" 2>/dev/null || true
+		fi
+	) &
 	PVN_CP7B_DEADLINE_GUARD_PID=$!
 	export PVN_CP7B_DEADLINE_GUARD_PID
 }

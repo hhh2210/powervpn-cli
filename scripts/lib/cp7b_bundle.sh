@@ -20,6 +20,7 @@ pvn_cp7b_bind_root_bundle() {
 	PVN_CP7B_SNAPSHOT_SCRIPT="$bundle_root/lib/cp7b_snapshot.sh"
 	PVN_CP7B_BUNDLE_SCRIPT="$bundle_root/lib/cp7b_bundle.sh"
 	PVN_CP7B_NATIVE_SCRIPT="$bundle_root/lib/native_charon_runtime.sh"
+	PVN_CP7B_ROUTE_SCRIPT="$bundle_root/lib/route_snapshot.sh"
 	PVN_CP7B_NETWORK_SCRIPT="$bundle_root/lib/network_snapshot.sh"
 	PVN_CP7B_WORKER="$bundle_root/cp7b_backend_window.sh"
 	PVN_CP7B_ROOT_ENTRY="$bundle_root/root-entry.sh"
@@ -39,6 +40,7 @@ pvn_cp7b_bind_root_bundle() {
 	export PVN_CP7B_RUNTIME_SCRIPT PVN_CP7B_CLOSURE_SCRIPT PVN_CP7B_STATE_SCRIPT
 	export PVN_CP7B_ATTEMPTS_SCRIPT
 	export PVN_CP7B_SNAPSHOT_SCRIPT PVN_CP7B_BUNDLE_SCRIPT PVN_CP7B_NATIVE_SCRIPT
+	export PVN_CP7B_ROUTE_SCRIPT
 	export PVN_CP7B_NETWORK_SCRIPT PVN_CP7B_WORKER PVN_CP7B_ROOT_ENTRY
 	export PVN_CP7B_EMERGENCY_SOURCE PVN_CP7B_ORACLE PVN_CP7B_READONLY_PROBE
 	export PVN_CP7B_MANIFEST
@@ -68,6 +70,7 @@ pvn_cp7b_cleanup_root_bundle() {
 		"$bundle_root/lib/cp7b_snapshot.sh" \
 		"$bundle_root/lib/cp7b_bundle.sh" \
 		"$bundle_root/lib/native_charon_runtime.sh" \
+		"$bundle_root/lib/route_snapshot.sh" \
 		"$bundle_root/lib/network_snapshot.sh" \
 		"$bundle_root/python/vici/__init__.py" \
 		"$bundle_root/python/vici/command_wrappers.py" \

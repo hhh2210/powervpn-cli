@@ -4,6 +4,7 @@ set -eu
 
 repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd -P)
 . "$repo_root/scripts/lib/native_charon_runtime.sh"
+. "$repo_root/scripts/lib/route_snapshot.sh"
 . "$repo_root/scripts/lib/network_snapshot.sh"
 . "$repo_root/scripts/lib/cp7b_runtime.sh"
 . "$repo_root/scripts/lib/cp7b_closure.sh"
@@ -31,6 +32,8 @@ cleanup() {
 	[ -z "${direct_pid:-}" ] || wait "$direct_pid" 2>/dev/null || true
 	[ -z "${test_pid:-}" ] || kill "$test_pid" 2>/dev/null || true
 	[ -z "${test_pid:-}" ] || wait "$test_pid" 2>/dev/null || true
+	[ -z "${deadline_guard_pid:-}" ] || kill -TERM "$deadline_guard_pid" 2>/dev/null || true
+	[ -z "${deadline_test_child_pid:-}" ] || kill -TERM "$deadline_test_child_pid" 2>/dev/null || true
 	for file in "$test_root/current.state" "$test_root/charon.pid" \
 		"$test_root/pfkey-attempt-ledger" "$test_root/emergency-stop" \
 		"$test_root/authorizer.scpt" "$test_root/vici-failure.json" \
@@ -76,6 +79,27 @@ passed_integrated_preflight_review)
 	;;
 *) pvn_fail "CP7B manifest review state is invalid" || exit 1 ;;
 esac
+PVN_CP7B_WINDOW_STARTED=$(date +%s)
+export PVN_CP7B_WINDOW_STARTED
+deadline_started=$PVN_CP7B_WINDOW_STARTED
+pvn_cp7b_start_deadline_guard
+deadline_guard_pid=$PVN_CP7B_DEADLINE_GUARD_PID
+deadline_test_child_pid=
+deadline_attempt=0
+while [ -z "$deadline_test_child_pid" ] && [ "$deadline_attempt" -lt 20 ]; do
+	deadline_test_child_pid=$(pgrep -P "$deadline_guard_pid" 2>/dev/null || true)
+	deadline_attempt=$((deadline_attempt + 1))
+	[ -n "$deadline_test_child_pid" ] || sleep 0.05
+done
+[ -n "$deadline_test_child_pid" ]
+pvn_cp7b_stop_deadline_guard
+[ $(($(date +%s) - deadline_started)) -le 2 ]
+if kill -0 "$deadline_guard_pid" 2>/dev/null ||
+	kill -0 "$deadline_test_child_pid" 2>/dev/null; then
+	pvn_fail "CP7B deadline guard cleanup left a process" || exit 1
+fi
+deadline_guard_pid=
+deadline_test_child_pid=
 expect_failure "$repo_root/scripts/libexec/cp7b_root_entry.sh" \
 	--run-reviewed 0000000000000000000000000000000000000000000000000000000000000000
 expect_failure "$repo_root/scripts/libexec/cp7b_backend_window.sh" \

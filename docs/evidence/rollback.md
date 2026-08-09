@@ -59,23 +59,27 @@ baseline artifact and is outside generation-owned cleanup.
 
 ## CP7B privileged window
 
-Only CP7B preflight implementation is currently authorized. The commands in
-this section describe the candidate rollback contract; they must not be run
-until the user separately approves the finalized manifest hash and exact live
-command.
+The offline CP7B preflight and one historical root window were separately
+authorized. The historical window, bound to manifest
+`c5464052f21af585a348a3fced8d1b5cf4fa336f8128fd9e64acc10465add877`,
+failed closed before daemon launch. That authorization is consumed. The
+commands in this section describe the remediated rollback contract and must not
+be run until the user freshly approves current manifest
+`7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`
+and the exact live command.
 
 The CP7B runner and stop entry points invoke a short-lived root worker through
 macOS native AppleScript authorization. They do not use `sudo`, ask for a
 password, create a LaunchDaemon, install a system extension/NetworkExtension,
 or write a system prefix.
 
-Normal stop after that second approval uses the same reviewed manifest hash as
-the launch:
+Normal stop after fresh approval uses the same reviewed manifest hash as the
+launch:
 
 ```bash
 scripts/stop_cp7b_backend.sh \
   --execute-reviewed \
-  --manifest-sha256 c5464052f21af585a348a3fced8d1b5cf4fa336f8128fd9e64acc10465add877
+  --manifest-sha256 7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187
 ```
 
 The root worker copies a reviewed emergency-stop script into the mode-700 CP7B
@@ -94,8 +98,9 @@ read-only probe. Root sources only the verified bootstrap copy. Normal cleanup
 removes the bootstrap directory and completed attempt ledger as well as the
 generation state. The dedicated runtime directory stays root-owned throughout
 the privileged window and is returned to the desktop user only when its top
-level is exactly the reviewed closure baseline. A failed first launch keeps the
-root-owned attempt ledger and closure for the one separately approved retry.
+level is exactly the reviewed closure baseline. A failed first launch never
+causes an automatic retry. Any retained attempt allowance is bound to the exact
+approved manifest and window and cannot be inherited after its bytes change.
 
 The signal sequence is bounded INT, TERM, then KILL. It targets only the
 recorded process whose executable, hash, start identity, and VICI socket inode
@@ -129,7 +134,8 @@ source commit, and config hash and to prove:
 - no credential read, VICI initiate, or install operation;
 - global SAD and SPD hashes unchanged;
 - `net.inet.ipsec.esp_port` unchanged;
-- default route, DNS, and utun inventory unchanged;
+- default route, persistent IPv4/IPv6 route projections, DNS, and utun
+  inventory unchanged; legacy complete-table route hashes are diagnostic only;
 - PowerVPN and Surge process counts and start/command identities unchanged;
 - read-only Surge environment and DNS probes passed before and after.
 
@@ -143,13 +149,55 @@ If Surge/default-route/DNS changes unexpectedly, stop the native generation
 first and preserve value-free snapshots. Do not reload or reconfigure Surge
 automatically. Any Surge recovery action is a new explicit user decision.
 
+The persistent route projection is intentionally narrower than the structural
+parser. The parser extracts only
+`family/destination/gateway/flags/netif`; the CP7B profile excludes rows with a
+nonempty `Expire` value or uppercase `W` (`RTF_WASCLONED`) while retaining
+`D`/`C`/`c`. Parse, project, sort, count, hash, route-command execution, and
+default-route command/parsing are separately checked and fail closed. A valid
+table with zero persistent rows fails the profile gate.
+
+An early root-preflight failure must still write a bounded, value-free result
+bound to manifest, source, and config. Prompt deadline cleanup must terminate
+and reap its guard child rather than waiting for the child's full sleep.
+
 If automatic stop cannot prove ownership, the experiment pauses with the
 state path, recorded PID, expected executable hash, and socket inode. Codex
 must alert the user before requesting any manual intervention.
 
 If the manifest, source commit, config bytes, closure tree, binary, plugin,
-launcher, runner, snapshot, stop, authorizer, or oracle hash differs from the
-reviewed manifest, launch and
+launcher, runner, route parser, snapshot, stop, authorizer, or oracle hash
+differs from the reviewed manifest, launch and
 stop wrappers fail closed before privilege use. Do not bypass this with broad
 `pkill`, `killall`, recursive deletion, `setkey -F`, `setkey -FP`, a Surge
 reload, or an unreviewed sysctl restore.
+
+## First CP7B root-window cleanup record
+
+The first root worker never launched `charon` or the gated launcher because its
+two preflight snapshots were unstable. The result is
+`INCONCLUSIVE_PREFLIGHT_FAILURE`; it proves neither a backend failure nor L5.
+The reviewed stop path subsequently returned `alreadyStopped=true`. Direct
+inspection found no native process, VICI socket, PID, state, emergency-stop
+copy, bootstrap bundle, attempt ledger, or generation directory. The runtime
+parent was restored to UID 502, mode 700, with exactly the reviewed `closure` at
+top level.
+
+The outer comparison was post-hoc at 496 seconds. Only the legacy full IPv4
+route-table count/hash differed; SAD/SPD were unavailable to that unprivileged
+snapshot. Cleanup is therefore proven for process and generation-owned
+filesystem residue, but that post-hoc comparison does not prove bounded kernel
+teardown. The corrected `/bin/sh` snapshot is the only post-hoc diagnostic used;
+an accidentally malformed zsh-sourced snapshot was discarded.
+
+Exactly one additional narrow review covered route layout, parser/profile
+separation, canonicalization, checked failure propagation/default-route
+handling, prompt deadline-child cleanup, and the first review's direct
+findings. It found two P1 fail-open paths and one P2 parser/profile conflation;
+the remediated contract above addresses them. No third or broad history review
+ran.
+
+The historical manifest authorization cannot trigger another launch or stop.
+The next root window is **WAITING FOR FRESH MANIFEST-BOUND APPROVAL** for
+`7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`
+and its exact commands.

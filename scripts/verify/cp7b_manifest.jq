@@ -40,6 +40,7 @@ keys == [
   keepSurgeRunning: true,
   surgeProbe: "read_only_environment_and_dns",
   globalSADSPDAndEspPortMustRemainStable: true,
+  persistentRouteProjectionMustRemainStable: true,
   rawKernelLogDeletedAfterValueFreeClassification: true,
   rootOwnedExecutionClosure: true,
   samePIDGatedExec: true,
@@ -57,7 +58,7 @@ keys == [
   "officialPyExceptionSHA256", "officialPyInitSHA256", "officialPySessionSHA256",
   "opensslLibcryptoSHA256", "opensslPluginSHA256", "oracleSHA256",
   "pfrouteSHA256", "readOnlyProbeSHA256",
-  "rootEntrySHA256", "runtimeScriptSHA256", "snapshotScriptSHA256",
+  "rootEntrySHA256", "routeScriptSHA256", "runtimeScriptSHA256", "snapshotScriptSHA256",
   "socketDynamicSHA256", "sourceCommit", "sourceParentCP6Commit",
   "stateScriptSHA256", "swanctlSHA256", "viciSHA256", "workerSHA256"
 ] and
@@ -75,9 +76,11 @@ keys == [
   "PF_KEY/PF_ROUTE config", "socket-dynamic no-send boundary",
   "full-window deadline", "SAD/SPD/sysctl and process-identity snapshots",
   "manifest-bound retained evidence",
-  "bounded rollback and secret/raw-log boundary"
+  "bounded rollback and secret/raw-log boundary",
+  "persistent route canonicalization and fail-closed stage propagation",
+  "bounded preflight-failure result and deadline cleanup"
 ] and
-.review.independentSecondReview == false and
+.review.independentSecondReview == true and
 .containsSecrets == false and
 .containsReplayableCapture == false and
 .containsRawRoutes == false

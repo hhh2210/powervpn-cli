@@ -14,6 +14,7 @@ esac
 	exit 1
 }
 . "$bundle_root/lib/native_charon_runtime.sh"
+. "$bundle_root/lib/route_snapshot.sh"
 . "$bundle_root/lib/network_snapshot.sh"
 . "$bundle_root/lib/cp7b_runtime.sh"
 . "$bundle_root/lib/cp7b_state.sh"
@@ -132,12 +133,9 @@ cleanup_unfinished_window() {
 			done
 			[ ! -d "$run_dir" ] || rmdir "$run_dir" 2>/dev/null || true
 		fi
-		for evidence_file in "$before_a" "$before_b" "$during" "$during_post" "$after" \
-			"$inventory_json" "$core_success" "$udp_count_file" "$stage_file"
-		do
-			[ ! -e "$evidence_file" ] || rm -f -- "$evidence_file"
-		done
-		[ ! -d "$evidence_dir" ] || rmdir "$evidence_dir" 2>/dev/null || true
+		pvn_cp7b_remove_evidence_dir "$evidence_dir" "$before_a" "$before_b" \
+			"$during" "$during_post" "$after" "$inventory_json" "$core_success" \
+			"$udp_count_file" "$stage_file" >/dev/null 2>&1 || true
 	fi
 	[ ! -d "$bundle_root" ] ||
 		pvn_cp7b_cleanup_root_bundle "$bundle_root" >/dev/null 2>&1 || true
@@ -149,12 +147,20 @@ trap cleanup_unfinished_window EXIT HUP INT TERM
 pvn_cp7b_begin_attempt "$started_epoch"
 pvn_cp7b_start_deadline_guard
 
-pvn_snapshot_json >"$before_a"
-sleep 1
-pvn_snapshot_json >"$before_b"
-chmod 600 "$before_a" "$before_b"
-pvn_cp7b_preflight_snapshots_stable "$before_a" "$before_b" ||
-	pvn_fail "root preflight snapshots are not stable; no daemon launched" || exit 1
+if ! pvn_cp7b_capture_stable_preflight "$before_a" "$before_b"; then
+	duration_seconds=$(($(date +%s) - PVN_CP7B_WINDOW_STARTED))
+	report=$(pvn_cp7b_preflight_failure_report_json \
+		"$PVN_CP7B_PREFLIGHT_FAILURE" "$PVN_CP7B_ATTEMPT" "$duration_seconds")
+	pvn_cp7b_remove_evidence_dir "$evidence_dir" "$before_a" "$before_b" \
+		"$during" "$during_post" "$after" "$inventory_json" "$core_success" \
+		"$udp_count_file" "$stage_file"
+	finalized=true
+	pvn_cp7b_stop_deadline_guard
+	pvn_cp7b_cleanup_root_bundle "$bundle_root"
+	trap - EXIT HUP INT TERM
+	printf '%s\n' "$report"
+	exit 0
+fi
 pvn_cp7b_verify_manifest
 printf '%s\n' preflight_stable >"$stage_file"
 
@@ -280,12 +286,9 @@ report=$(pvn_cp7b_report_json "$window_success" "$PVN_CP7B_ATTEMPT" \
 	"$(jq -r '.traces.version.requestPayloadSHA256 // ""' "$inventory_json" 2>/dev/null || true)" \
 	"$(jq -r '.traces.version.responsePayloadSHA256 // ""' "$inventory_json" 2>/dev/null || true)")
 
-for evidence_file in "$before_a" "$before_b" "$during" "$during_post" "$after" \
-	"$inventory_json" "$core_success" "$udp_count_file" "$stage_file"
-do
-	[ ! -e "$evidence_file" ] || rm -f -- "$evidence_file"
-done
-rmdir "$evidence_dir"
+pvn_cp7b_remove_evidence_dir "$evidence_dir" "$before_a" "$before_b" \
+	"$during" "$during_post" "$after" "$inventory_json" "$core_success" \
+	"$udp_count_file" "$stage_file"
 finalized=true
 pvn_cp7b_stop_deadline_guard
 pvn_cp7b_cleanup_root_bundle "$bundle_root"

@@ -1,9 +1,5 @@
 #!/bin/sh
 
-pvn_hash_stdin() {
-	shasum -a 256 | awk '{print $1}'
-}
-
 pvn_json_string_array() {
 	jq -Rsc 'split("\n") | map(select(length > 0))'
 }
@@ -68,26 +64,39 @@ pvn_native_charon_pids() {
 
 pvn_snapshot_json() {
 	timestamp=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-	interfaces=$(ifconfig -l)
+	interfaces=$(/sbin/ifconfig -l) || return 1
 	# shellcheck disable=SC2086
 	utun_names=$(printf '%s\n' $interfaces | awk '/^utun/' | pvn_json_string_array)
-	interface_hash=$(ifconfig -a 2>/dev/null | pvn_hash_stdin)
-	inet_routes=$(netstat -rn -f inet 2>/dev/null)
-	inet6_routes=$(netstat -rn -f inet6 2>/dev/null)
-	inet_route_hash=$(printf '%s\n' "$inet_routes" | pvn_hash_stdin)
-	inet6_route_hash=$(printf '%s\n' "$inet6_routes" | pvn_hash_stdin)
-	inet_route_count=$(printf '%s\n' "$inet_routes" | awk '$1 ~ /^[0-9]/ { count++ } END { print count + 0 }')
-	inet6_route_count=$(printf '%s\n' "$inet6_routes" | awk '$1 ~ /^[0-9a-fA-F]/ { count++ } END { print count + 0 }')
-	default_route=$(route -n get default 2>/dev/null || true)
-	default_interface=$(printf '%s\n' "$default_route" | awk '/interface:/{print $2; exit}')
-	default_route_hash=$(printf '%s\n' "$default_route" | pvn_hash_stdin)
-	dns_hash=$(scutil --dns 2>/dev/null | pvn_hash_stdin)
+	interface_hash=$(pvn_checked_hash_command /sbin/ifconfig -a) || return 1
+	inet_fingerprint=$(pvn_capture_route_fingerprint inet) || return 1
+	inet6_fingerprint=$(pvn_capture_route_fingerprint inet6) || return 1
+	old_ifs=$IFS
+	route_tab=$(printf '\t')
+	IFS=$route_tab
+	# Both fingerprints contain only count/hash/boolean tokens, never raw routes.
+	# shellcheck disable=SC2086
+	set -- $inet_fingerprint
+	IFS=$old_ifs
+	[ "$#" -eq 5 ] || return 1
+	inet_route_count=$1; inet_route_hash=$2; inet_persistent_count=$3
+	inet_persistent_hash=$4; inet_synthetic=$5
+	IFS=$route_tab
+	# shellcheck disable=SC2086
+	set -- $inet6_fingerprint
+	IFS=$old_ifs
+	[ "$#" -eq 5 ] || return 1
+	inet6_route_count=$1; inet6_route_hash=$2; inet6_persistent_count=$3
+	inet6_persistent_hash=$4; inet6_synthetic=$5
+	default_fingerprint=$(pvn_capture_default_route /sbin/route) || return 1
+	IFS=$route_tab
+	# shellcheck disable=SC2086
+	set -- $default_fingerprint
+	IFS=$old_ifs
+	[ "$#" -eq 2 ] || return 1
+	default_interface=$1; default_route_hash=$2
+	dns_hash=$(pvn_checked_hash_command /usr/sbin/scutil --dns) || return 1
 	synthetic_route=false
-	if printf '%s\n%s\n' "$inet_routes" "$inet6_routes" |
-		grep -Eq '(^|[[:space:]])(198\.51\.100|203\.0\.113)'
-	then
-		synthetic_route=true
-	fi
+	[ "$inet_synthetic" = false ] && [ "$inet6_synthetic" = false ] || synthetic_route=true
 	native_pids=$(pvn_native_charon_pids | pvn_json_string_array)
 	runtime_state=false
 	owned_socket=false
@@ -132,32 +141,28 @@ pvn_snapshot_json() {
 	setkey_policy_state=unavailable_unprivileged
 	setkey_policy_hash=""
 	if [ -x /usr/sbin/setkey ]; then
-		if /usr/sbin/setkey -D >/dev/null 2>&1; then
+		if setkey_hash=$(pvn_checked_hash_command /usr/sbin/setkey -D 2>/dev/null); then
 			setkey_state=available
-			setkey_hash=$(/usr/sbin/setkey -D 2>/dev/null | pvn_hash_stdin)
 		fi
-		if /usr/sbin/setkey -DP >/dev/null 2>&1; then
+		if setkey_policy_hash=$(pvn_checked_hash_command /usr/sbin/setkey -DP 2>/dev/null); then
 			setkey_policy_state=available
-			setkey_policy_hash=$(/usr/sbin/setkey -DP 2>/dev/null | pvn_hash_stdin)
 		fi
 	fi
 	esp_port_state=unavailable
 	esp_port_hash=""
-	if /usr/sbin/sysctl -n net.inet.ipsec.esp_port >/dev/null 2>&1; then
+	if esp_port_hash=$(pvn_checked_hash_command /usr/sbin/sysctl -n \
+		net.inet.ipsec.esp_port 2>/dev/null); then
 		esp_port_state=available
-		esp_port_hash=$(
-			/usr/sbin/sysctl -n net.inet.ipsec.esp_port 2>/dev/null | pvn_hash_stdin
-		)
 	fi
 
 	jq -n \
 		--arg timestamp "$timestamp" \
 		--argjson utunNames "$utun_names" \
 		--arg interfaceInventorySHA256 "$interface_hash" \
-		--argjson ipv4RouteCount "$inet_route_count" \
-		--arg ipv4RouteSHA256 "$inet_route_hash" \
-		--argjson ipv6RouteCount "$inet6_route_count" \
-		--arg ipv6RouteSHA256 "$inet6_route_hash" \
+		--argjson ipv4RouteCount "$inet_route_count" --arg ipv4RouteSHA256 "$inet_route_hash" \
+		--argjson ipv4PersistentRouteCount "$inet_persistent_count" --arg ipv4PersistentRouteSHA256 "$inet_persistent_hash" \
+		--argjson ipv6RouteCount "$inet6_route_count" --arg ipv6RouteSHA256 "$inet6_route_hash" \
+		--argjson ipv6PersistentRouteCount "$inet6_persistent_count" --arg ipv6PersistentRouteSHA256 "$inet6_persistent_hash" \
 		--arg defaultRouteInterface "$default_interface" \
 		--arg defaultRouteSHA256 "$default_route_hash" \
 		--arg dnsSHA256 "$dns_hash" \
@@ -189,12 +194,13 @@ pvn_snapshot_json() {
 		  schemaVersion: 1,
 		  evidenceClass: "value_free_local_network_snapshot",
 		  timestamp: $timestamp,
+		  routeCanonicalizationVersion: 1,
 		  utunNames: $utunNames,
 		  interfaceInventorySHA256: $interfaceInventorySHA256,
-		  ipv4RouteCount: $ipv4RouteCount,
-		  ipv4RouteSHA256: $ipv4RouteSHA256,
-		  ipv6RouteCount: $ipv6RouteCount,
-		  ipv6RouteSHA256: $ipv6RouteSHA256,
+		  ipv4RouteCount: $ipv4RouteCount, ipv4RouteSHA256: $ipv4RouteSHA256,
+		  ipv4PersistentRouteCount: $ipv4PersistentRouteCount, ipv4PersistentRouteSHA256: $ipv4PersistentRouteSHA256,
+		  ipv6RouteCount: $ipv6RouteCount, ipv6RouteSHA256: $ipv6RouteSHA256,
+		  ipv6PersistentRouteCount: $ipv6PersistentRouteCount, ipv6PersistentRouteSHA256: $ipv6PersistentRouteSHA256,
 		  defaultRouteInterface: $defaultRouteInterface,
 		  defaultRouteSHA256: $defaultRouteSHA256,
 		  dnsSHA256: $dnsSHA256,

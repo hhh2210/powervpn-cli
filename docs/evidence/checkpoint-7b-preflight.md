@@ -1,10 +1,15 @@
 # Checkpoint 7B privileged-backend preflight
 
 Checkpoint 7B is a serverless macOS backend experiment. It is not an IKE or
-server-interoperability test. The user has authorized implementation, scratch
-build, dry validation, and integrated preflight review only. Starting a root
-daemon still requires a second explicit approval tied to the finalized
-manifest hash and exact command.
+server-interoperability test. The offline implementation, scratch build, dry
+validation, and integrated preflight review remain PASS. The user separately
+authorized one root window bound to historical manifest
+`c5464052f21af585a348a3fced8d1b5cf4fa336f8128fd9e64acc10465add877`;
+that window ended before daemon launch as `INCONCLUSIVE_PREFLIGHT_FAILURE`.
+The old authorization is consumed and cannot authorize a retry. Starting a
+root daemon now requires a fresh explicit approval tied to current manifest
+`7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`
+and the exact command.
 
 ## Material finding: `socket-default` is unsafe for this window
 
@@ -86,9 +91,11 @@ in `fixtures/redacted/cp7b-approval-manifest-v1.json`. The root-executed
 dependency chain is pinned separately: `libcharon`, `libstrongswan`, the
 OpenSSL and nonce plugins, a copied `libcrypto`, and the gated launcher. The
 OpenSSL plugin resolves that copied library inside the closure rather than a
-user-replaceable Homebrew symlink. Manifest SHA-256
+user-replaceable Homebrew symlink. Historical manifest SHA-256
 `c5464052f21af585a348a3fced8d1b5cf4fa336f8128fd9e64acc10465add877`
-binds the finalized bytes.
+bound the bytes used by the first root window. The remediated candidate is
+bound by current manifest SHA-256
+`7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`.
 
 The AppleScript boundary copies the hash-bound root entry to a mode-700,
 root-owned bootstrap directory after transferring the dedicated runtime parent
@@ -165,22 +172,93 @@ before approval; no root entry, daemon, state, PID, socket, ledger, or ownership
 change occurred. The wrappers now use a readonly `operation_mode`, and both
 manifest-bound dry runs exit before `osascript`.
 
-No second independent review ran. The finalized offline verifier and negative
-tests are the direct-finding validation, not evidence that a privileged backend
-has initialized.
+The finalized offline verifier and negative tests closed this integrated
+preflight review. They are not evidence that a privileged backend initialized.
+
+## First manifest-bound root window
+
+The user explicitly authorized the exact root window bound to historical
+manifest
+`c5464052f21af585a348a3fced8d1b5cf4fa336f8128fd9e64acc10465add877`.
+The reviewed runner passed its immediate unprivileged checks and the native
+macOS authorization dialog completed. The root worker then attempted its two
+preflight snapshots. They did not satisfy the stability gate, so the worker
+failed closed before daemon launch.
+
+This result is classified as `INCONCLUSIVE_PREFLIGHT_FAILURE`, not backend
+failure or backend PASS. No `charon` process, gated launcher, VICI socket or
+response, PF_KEY/PF_ROUTE constructor, UDP descriptor, SA, SPD, route install,
+utun, credential, or server packet was observed. Consequently the invocation
+does not prove L5.
+
+The retained outer `before` snapshot was taken at window start. The corrected
+unprivileged `after` snapshot was necessarily post-hoc, 496 seconds later and
+outside the 300-second experiment bound. It differed only in the legacy full
+IPv4 route-table count/hash; IPv6, default route, interface and utun inventory,
+DNS, global ESP-port hash, PowerVPN/Surge identities, and read-only Surge
+environment hash matched. SAD/SPD were unavailable to the unprivileged outer
+snapshot. Thus current cleanup is proven for process and owned filesystem
+residue, but the post-hoc comparison is not a bounded kernel-teardown proof.
+An accidentally malformed zsh-sourced diagnostic snapshot was discarded; it
+is not experiment evidence.
+
+The separately reviewed stop command returned `alreadyStopped=true`. Direct
+inspection found no native `charon` or gated-launcher process and no state, PID,
+VICI socket, attempt ledger, emergency-stop copy, bootstrap bundle, or
+generation directory. The runtime parent was UID 502, mode 700, and its top
+level contained exactly the reviewed `closure` baseline. This is the current
+clean state, subject to the post-hoc kernel-state limitation above.
+
+## Route-gate remediation
+
+Three value-free one-second route samples isolated the instability to transient
+macOS routing rows. Nonempty `Expire` values churn, and uppercase `W` denotes
+`RTF_WASCLONED`; hashing the complete rendered table therefore made unrelated
+cache activity a hard gate. The old full-table count/hash remains diagnostic
+only.
+
+The remediated route snapshot has two explicit layers:
+
+1. a strict structural parser accepts well-formed route rows and extracts only
+   `family`, `destination`, `gateway`, `flags`, and `netif`;
+2. the CP7B persistent compatibility profile rejects an empty persistent set
+   and excludes every row with a nonempty `Expire` field or uppercase `W` flag,
+   while retaining dynamic/cloning flags `D`, `C`, and `c` when they are not
+   transient by those two observed criteria.
+
+Parse, project, sort, count, and hash are separate checked stages backed by
+protected temporary files. A command error or malformed/duplicate/missing
+default-route interface fails closed instead of being masked by a downstream
+pipeline stage. Structural parseability is not acceptance: a structurally valid
+table with zero persistent rows is rejected by the CP7B profile/fingerprint
+gate.
+
+Daemon-before failures now emit a bounded, value-free result tied to manifest,
+source, and config instead of leaving an empty result file. The 300-second
+deadline guard terminates and reaps its child sleep when the foreground root
+worker returns, avoiding the observed prompt-cleanup delay.
+
+Exactly one additional narrow review followed the first root window. Its scope
+was limited to route layout, parser/profile separation, canonicalization,
+failure propagation/default-route handling, deadline cleanup, and the first
+review's directly affected boundary. It found two P1 fail-open command/stage
+paths and one P2 parser/profile conflation; the remediation above closes those
+direct findings. No third review or unrelated repository-history review ran.
 
 ## Preflight and live boundaries
 
-Authorized now:
+Completed under historical authorization:
 
 - create and edit the bounded runner, stop, snapshot, assertion, and test
   artifacts;
 - build and verify the dedicated scratch prefix;
 - run unprivileged shell negative tests and dry runs;
 - perform one integrated preflight review;
-- finalize a value-free approval manifest.
+- finalize the historical value-free approval manifest;
+- execute one root preflight window under the historical manifest; it failed
+  closed before daemon launch.
 
-Not authorized now:
+Not authorized now without a fresh manifest-bound approval:
 
 - AppleScript privilege elevation or Touch ID prompt;
 - root `charon` or raw PF_KEY/PF_ROUTE runtime access;
@@ -188,27 +266,33 @@ Not authorized now:
 - VICI `load-*`, `initiate`, terminate, install, or credential operations;
 - SA, SPD, route, address, utun, DNS, default-route, PowerVPN, or Surge changes.
 
-The preflight is now PASS. The second approval request must name the exact
-command and finalized manifest SHA-256. The manifest authorizes at most two launches
-and 300 seconds total, with no automatic second launch. It does not authorize a
-kernel-libipsec fallback or any CP8/CP9 server traffic.
+The offline preflight remains PASS, but the first live invocation is
+inconclusive. The fresh approval request must name the exact command and current
+manifest SHA-256
+`7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`.
+No launch, automatic retry,
+or unused-attempt allowance carries over from the historical manifest. A fresh
+manifest still does not authorize an automatic second launch, a
+kernel-libipsec fallback, or any CP8/CP9 server traffic.
 
 ## Required live observations
 
-If the second approval is granted, one generation may PASS only when all of the
+If fresh approval is granted, one generation may PASS only when all of the
 following are true:
 
 - two stable preflight snapshots agree on SAD, SPD, global ESP port, default
-  route, DNS, utun inventory, PowerVPN, and Surge;
+  route, persistent IPv4/IPv6 route projection, DNS, utun inventory, PowerVPN,
+  and Surge;
 - the loaded plugin set is exactly `openssl nonce kernel-pfkey kernel-pfroute
   socket-dynamic vici`;
 - the official VICI client receives `version` and read-only `stats` succeeds;
 - `list-conns`, `list-sas`, and `list-policies` are empty;
 - the native process owns the recorded PID file and VICI socket;
 - its UDP descriptor count is zero;
-- SAD, SPD, `net.inet.ipsec.esp_port`, complete IPv4/IPv6 route hashes,
+- SAD, SPD, `net.inet.ipsec.esp_port`, persistent IPv4/IPv6 route projections,
   default route, DNS, utun inventory, PowerVPN, and Surge remain unchanged
-  before the VICI probes, after all five probes, and after teardown;
+  before the VICI probes, after all five probes, and after teardown; legacy
+  complete-table hashes are diagnostic only;
 - bounded stop removes the process, socket, PID, config, log, emergency-stop
   copy, state, and generation directory;
 - only value-free result JSON survives outside the root runtime directory.
@@ -224,13 +308,17 @@ exactly the reviewed `closure` baseline; the closure is recursively returned to
 UID 502 before the parent. Incomplete cleanup retains root ownership and fails
 closed.
 
-An existing PowerVPN rekey or unrelated system churn may make a global hash
-unstable. That is a fail-closed inconclusive window, not proof that the native
-daemon caused the change and not permission to weaken the gate.
+An existing PowerVPN rekey or unrelated system churn may still make a protected
+state unstable. That is a fail-closed inconclusive window, not proof that the
+native daemon caused the change and not permission to weaken the persistent
+profile without new evidence.
 
 ## Current evidence level
 
-This document records a PASS for L1/L3/L4 source, build, review, and
-dry-preflight evidence. No privileged backend constructor has run, so CP7B has
-not reached L5 and is **WAITING FOR LIVE APPROVAL**. Server acceptance remains
-entirely untested.
+This document records a PASS for L1/L3/L4 source, build, review, and offline
+dry-preflight evidence. A privileged root worker ran only far enough to reject
+unstable preflight snapshots; no privileged backend constructor or VICI daemon
+ran. CP7B therefore has not reached L5 and is **WAITING FOR FRESH
+MANIFEST-BOUND APPROVAL** for
+`7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`.
+Server acceptance remains entirely untested.

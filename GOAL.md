@@ -13,8 +13,9 @@ canonical_lab_commit: 3231a3bfe992fcc5f84793543ce9c8687afcd7fa
 strongswan_cp6_commit: 67c9810900e2d8486cb3b11495a8362433494ca0
 strongswan_patch_sha256: 6e4c609240ae2a1996a3a547cede72ac1be7121922aa6f576687632609f34213
 current_checkpoint: 7b-privileged-backend-preflight
-immediate_next: request-cp7b-root-live-execution-approval-for-final-manifest
-next_approval_gate: 7b-root-live-execution-after-preflight-review
+immediate_next: request-fresh-cp7b-root-live-execution-approval-for-current-manifest
+next_approval_gate: 7b-fresh-manifest-bound-root-live-execution
+cp7b_current_manifest_sha256: 7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187
 review_policy: checkpoint-gated-risk-weighted-single-integrated-review
 commit_policy: canonical-checkpoint-commits-with-local-fixups
 primary_platform: Apple Silicon macOS 27 beta
@@ -33,11 +34,14 @@ three evidence anchors in the front matter as a locked verified baseline.
 Do not repeat their broad analysis or full acceptance runs unless the current
 work changes shared code or new evidence directly conflicts with them.
 
-Resume from the current checkpoint and its approval gate. CP7A and the CP7B
-preflight are complete; do not launch the privileged backend until the user
-explicitly approves the finalized manifest hash and exact command. That approval
-does not authorize server traffic, credentials, routes, SA/utun creation,
-PowerVPN shutdown, Surge mutation, or later recovery tests.
+Resume from the current checkpoint and its approval gate. CP7A and the offline
+CP7B preflight are complete. The first manifest-bound root window ended as
+INCONCLUSIVE_PREFLIGHT_FAILURE before daemon launch; do not retry or launch the
+privileged backend until the user explicitly approves the fresh manifest hash
+and exact command. The earlier authorization is historical and cannot be
+inherited. A fresh approval does not authorize server traffic, credentials,
+routes, SA/utun creation, PowerVPN shutdown, Surge mutation, or later recovery
+tests.
 
 Review the cumulative checkpoint candidate, not every commit. Use local
 WIP/fixup commits, targeted tests and one integrated checkpoint review. Do not
@@ -60,12 +64,17 @@ codex features enable goals
    全量验收来制造“进度”。
 2. **CP6 是离线 compatibility-port PASS，不是服务器互通 PASS。** 当前仍没有
    原生服务器 IKE_SA、CHILD_SA、resource route、SA/policy/utun 证据。
-3. **CP7A 已 PASS；CP7B preflight 已 PASS 并等待 live approval。** 未获得绑定
-   finalized manifest 的第二次明确授权前，不得进入 root/backend；server
-   interop、credential acquisition、网络切换和恢复测试仍在更后的独立 gate。
-4. **CP7B preflight PASS 不是 backend PASS。** arm64 build、root-closure 设计、
-   gated lifecycle 和 dry validation 不证明 PF_KEY/PF_ROUTE constructor 已在本机
-   成功，也不证明任何 SA、policy、route、utun 或 server compatibility。
+3. **CP7A 已 PASS；CP7B offline preflight 仍为 PASS，首次 root window 为
+   INCONCLUSIVE_PREFLIGHT_FAILURE。** 旧 manifest
+   `c5464052f21af585a348a3fced8d1b5cf4fa336f8128fd9e64acc10465add877`
+   的授权只覆盖已结束的首次尝试；不得自动重试或继承。再次进入 root/backend
+   前，必须获得绑定当前 manifest
+   `7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`
+   与精确命令的新授权。
+4. **CP7B preflight PASS 不是 backend PASS。** 首次 root worker 在两份 preflight
+   snapshot 不稳定后、daemon launch 之前 fail closed；`charon`、gated launcher、
+   VICI、PF_KEY/PF_ROUTE constructor 和 L5 均未证明，也不证明任何 SA、policy、
+   route、utun 或 server compatibility。
 5. **一次只改变一个变量。** 对同一个失败假设最多做三次有信息增益的尝试；
    仍不收敛时记录 last-good-state / first-bad-event，并缩小实验。
 6. **review 绑定 checkpoint 和风险，不绑定 commit。** 除 Live lane 的
@@ -446,8 +455,14 @@ CP7A PASS 后，CP7B 分为两个独立授权阶段：
    - stop/rollback 命令；
    - zero-residue 验证命令。
 
-截至 2026-08-09，用户只批准了第一阶段。该批准不得解释为 root/live execution。
-用户对任一 CP7B 阶段的批准也**不自动授权** CP8/CP9 server traffic。
+截至 2026-08-09，用户已明确批准旧 manifest
+`c5464052f21af585a348a3fced8d1b5cf4fa336f8128fd9e64acc10465add877`
+绑定的首次 root/live window。该窗口因 root preflight snapshot 不稳定而在 daemon
+launch 前 fail closed，分类为 `INCONCLUSIVE_PREFLIGHT_FAILURE`。这次授权已经
+消费完毕，既不允许自动重试，也不能迁移到当前 manifest
+`7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`；
+当前候选必须重新取得精确 hash 与命令绑定的明确授权。任一 CP7B 阶段的批准也
+**不自动授权** CP8/CP9 server traffic。
 
 ### 7.4 Live Approval Gate 2 — server interop
 
@@ -703,15 +718,25 @@ macOS 启动、接受 VICI 控制并完整清理，同时不破坏 Surge。
   的预期 UDP descriptor 数必须为零；
 - 不联系任何 VPN gateway；
 - 每个 backend 最多两次 launch；
+- 不自动使用第二次 launch；首次授权窗口或旧 manifest 的未用额度不能继承到
+  新 manifest；
 - PF_KEY/PF_ROUTE 严格 timebox，失败证据充分后切 kernel-libipsec/utun；
 - 两个 kernel-ipsec provider 不得同时加载。
+- route snapshot 使用严格 structural parser 与独立 compatibility profile：
+  canonical row 只含 family/destination/gateway/flags/netif；persistent projection
+  排除 `Expire` 非空或 flags 含大写 `W` 的行，同时保留 `D`/`C`/`c`；parse、
+  project、sort、count、hash 和 default-route command/parse 每一步均 fail closed。
+- 旧 complete-table count/hash 只作诊断，不作为稳定性 gate；prompt deadline 必须
+  终止并回收 guard child，daemon 前失败也必须生成 manifest-bound、value-free 的
+  bounded result。
 
 #### Tasks
 
 1. 完成 dedicated CP7B arm64 build、manifest、runner/rollback 和 negative tests；
 2. integrated preflight review PASS 后再次请求 live execution approval；
-3. 获批后采集两个稳定 before snapshot：process、interfaces、routes、default
-   route、DNS、Surge/PowerVPN、SAD、SPD 和 global ESP port；
+3. 获得当前 manifest 的新授权后采集两个稳定 before snapshot：process、
+   interfaces、persistent route projection、default route、DNS、Surge/PowerVPN、
+   SAD、SPD 和 global ESP port；
 4. PF_KEY/PF_ROUTE + `socket-dynamic` 最小启动与 stop smoke；
 5. 要求 UDP descriptor 数为零；任何 send 或 ESP-port 变化 fail closed；
 6. 若失败，记录 exact errno/plugin boundary，不长期纠缠；
@@ -719,8 +744,9 @@ macOS 启动、接受 VICI 控制并完整清理，同时不破坏 Surge。
 8. VICI `version` 与只读 status PASS，connection/SA/policy listing 为空；
 9. 不 load connection/credential，不 initiate，不发送 server packet；
 10. stop 后执行 zero-residue assertion；
-11. 比较 before/during/after，SAD/SPD/ESP port、Surge default route/DNS/
-    functionality、PowerVPN 和 utun inventory 不变。
+11. 比较 before/during/after，SAD/SPD/ESP port、persistent route projection、
+    Surge default route/DNS/functionality、PowerVPN 和 utun inventory 不变；旧
+    full-table hash 只作诊断。
 
 #### Acceptance
 
@@ -730,7 +756,10 @@ macOS 启动、接受 VICI 控制并完整清理，同时不破坏 Surge。
 - native UDP descriptor 始终为零，`net.inet.ipsec.esp_port` 始终不变；
 - Surge before/after 无非预期变化；
 - `scripts/verify_checkpoint.sh 7b` 在获批窗口中 PASS；
-- 一次 preflight review + 一次 post-run cleanup review；不做额外 broad review；
+- 一次 integrated preflight review 与首次 inconclusive run 后的一次 additional
+  narrow review 已完成；后者只覆盖 route layout、structural parser/profile
+  separation、逐阶段 failure propagation、default-route gate 和 deadline cleanup。
+  不做第三次或额外 broad review；
 - canonical CP7B commit 和 evidence report 完成。
 
 ### Checkpoint 8A — secure runtime material handoff — NO SERVER TRAFFIC
@@ -941,7 +970,9 @@ implement a coherent slice
 
 - CP7A：一次 integrated review，范围仅限 VICI transport、daemon lifecycle、
   script safety、secret boundary、cleanup；
-- CP7B/8B/9/10A：一次 preflight review + 一次 post-run cleanup/evidence review；
+- CP7B/8B/9/10A：一次 preflight review + 最多一次 post-run cleanup/evidence
+  narrow review；CP7B 的 additional narrow review 已在首次 inconclusive window
+  后用完；
 - 第二个 reviewer 只有在 first review 发现 critical/high finding，或 wire/secret/
   root boundary 改变时才启用，并且只看直接影响面；
 - 禁止默认串联 `repo audit → mechanism review → protocol review → commit review`；

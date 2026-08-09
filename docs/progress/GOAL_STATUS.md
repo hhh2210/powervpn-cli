@@ -399,81 +399,117 @@ The later CP7B material finding supersedes the random-high-port proposal; see
 the following entry.
 
 Approval required at this historical gate: yes. Preflight implementation was
-subsequently authorized, but privileged launch still requires separate approval.
+subsequently authorized; the later manifest-bound root window is recorded in
+the following entry.
 
-## 2026-08-09 — Checkpoint 7B preflight
+## 2026-08-09 — Checkpoint 7B first root window and route-gate remediation
 
-State: **WAITING FOR APPROVAL.** The cumulative preflight is PASS; root/live
-execution has not run and requires a second explicit approval.
+State: **WAITING FOR FRESH MANIFEST-BOUND APPROVAL.** The offline CP7B preflight
+remains PASS. The first root window is `INCONCLUSIVE_PREFLIGHT_FAILURE`, not a
+backend failure or backend PASS.
 
-Evidence level: L1/L3/L4 source, build, review, and dry-preflight evidence only.
-No privileged backend constructor has run, so L5 is not proven.
+Evidence level: L1/L3/L4 source, build, review, and offline-preflight evidence
+remain PASS. A privileged root worker ran only through its preflight snapshots;
+it did not launch `charon` or the gated launcher. VICI, PF_KEY/PF_ROUTE backend
+constructors, and L5 are unproven.
 
-Verified: `socket-default` is excluded because its macOS PF_KEY NAT-T path writes
-global `net.inet.ipsec.esp_port` without teardown restore. The candidate uses
-`socket-dynamic` with a zero-UDP/no-send contract. A dedicated arm64 closure is
-protected by a root-owned parent and fully revalidated before `exec`/`dlopen`.
-The launcher writes a handshake, commits atomic `starting` state, then releases
-the gate and `execv()`s `charon` with the same PID. The 300-second guard begins
-before the first privileged snapshot. UDP inspection, loaded-plugin equality,
-PowerVPN/Surge process identity, and retained manifest/source/config bindings
-all fail closed.
+Historical authorization: the user explicitly authorized one root window bound
+to manifest
+`c5464052f21af585a348a3fced8d1b5cf4fa336f8128fd9e64acc10465add877`.
+Immediate commit/source/closure/arm64/piddir/dry-run checks passed and the native
+macOS authorization dialog completed. The two root preflight snapshots were not
+stable, so the worker failed closed before daemon launch. The old authorization
+is consumed; neither an automatic retry nor unused attempt allowance transfers
+to changed bytes.
+
+Current approval manifest SHA-256:
+`7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`.
+Fresh approval must bind that exact hash and command.
+
+Verified design: `socket-default` remains excluded because its macOS PF_KEY
+NAT-T path writes global `net.inet.ipsec.esp_port` without teardown restore. The
+candidate uses `socket-dynamic` with a zero-UDP/no-send contract, a root-owned
+sealed closure, and same-PID gated launcher. The route snapshot now separates a
+strict structural parser from the CP7B persistent profile. Canonical rows contain
+only `family/destination/gateway/flags/netif`; the profile excludes rows with a
+nonempty `Expire` value or uppercase `W` (`RTF_WASCLONED`) while retaining
+`D`/`C`/`c`. Parse, project, sort, count, hash, command execution, and
+default-route parsing fail closed independently. A structurally valid table with
+zero persistent rows fails at the profile/fingerprint gate.
+
+Failure-result/lifecycle remediation: daemon-before failures retain a bounded,
+value-free result tied to manifest, source, and config. The 300-second prompt
+deadline terminates and reaps its child guard promptly instead of waiting for
+the full sleep. Legacy full-table route count/hash is diagnostic only;
+persistent IPv4/IPv6 projections are the hard route gate.
 
 Evidence: [`../evidence/checkpoint-7b-preflight.md`](../evidence/checkpoint-7b-preflight.md),
 [`../evidence/live-test-plan.md`](../evidence/live-test-plan.md),
-[`../evidence/rollback.md`](../evidence/rollback.md), and the finalized value-free
-approval manifest. Manifest SHA-256 is
-`c5464052f21af585a348a3fced8d1b5cf4fa336f8128fd9e64acc10465add877`.
+[`../evidence/rollback.md`](../evidence/rollback.md), the historical manifest,
+and the current value-free approval manifest.
 
-Canonical commit: this cumulative CP7B preflight checkpoint commit.
+Canonical commit: this cumulative CP7B first-window remediation checkpoint
+commit.
 
 StrongSwan commit/patch SHA-256: locked CP6 parent
 `67c9810900e2d8486cb3b11495a8362433494ca0`; CP7B build-only commit
 `a81298234753f314dbf2c4f2867a9a144006bd8c`; patch 0003 SHA-256
 `3c7615e5bf2ec284f04177e903b88fb3b452f1ce9d1f39968fd89c40ea6771c4`.
-It changes macOS RFC 3542 compile declarations only, not IKE/expandrule/wire
-behavior.
+The StrongSwan source/closure remains unchanged by the route-gate remediation.
 
-Changed files: dedicated build/patch manifest, sealed closure and copied
-`libcrypto`, manifest-bound runner/authorizer/root worker, same-PID gated
-launcher, state/attempt/snapshot/emergency-stop/assert helpers, official-Python
-value-free VICI inventory, negative tests, and evidence/gate/rollback docs.
+Changed scope: route parsing/fingerprinting and checked snapshot plumbing;
+preflight stability/profile gates; bounded early-failure result; prompt
+deadline-child cleanup; route/live-evidence negative tests; manifest hash chain;
+and CP7B evidence, live-plan, rollback, README, Goal, and status documentation.
 
-Tests/commands: `scripts/verify_checkpoint.sh 7b-preflight` PASS; dedicated build
-and arm64/scratch-piddir checks PASS; exact patch replay PASS; same-PID and
-spawn-before-state TERM injection PASS; scratch replacement of charon, plugin,
-and libcrypto is rejected; CP7A lifecycle regression, ShellCheck, AppleScript
-compile, Gitleaks, and cumulative diff checks PASS. Manifest-bound run/stop dry
-runs exit before `osascript`.
+Tests/commands: the historical and remediated
+`scripts/verify_checkpoint.sh 7b-preflight` runs are PASS. The remediated
+candidate adds targeted route-stage/default-route/profile, first-live
+classification, early-result, and deadline-child tests. Closure, arm64 scratch
+runtime, AppleScript compile, ShellCheck, Gitleaks, and cumulative diff gates
+also pass without a second root, Surge, or server action.
 
 Review result: exactly one integrated preflight review initially returned NO-GO
-with two P1 findings (user-replaceable root execution closure and spawn/state
-gap) plus five P2 findings (deadline coverage, no-send observation, exact plugin
-set, process identity, and retained evidence binding). All direct findings were
-fixed and their scoped validations pass. No second independent review ran; no
-live/post-run evidence review has occurred.
+with two P1 ownership/lifecycle findings and five P2 direct findings; those were
+fixed before the historical manifest was sealed. After the inconclusive root
+window, exactly one additional narrow review covered only route layout,
+parser/profile separation, canonicalization, stage/default-route failure
+propagation, deadline cleanup, and the first review's direct boundary. It found
+two P1 fail-open paths and one P2 parser/profile conflation; the current
+remediation addresses those findings. No third review and no unrelated
+repository-history review ran.
 
-Safety/cleanup: No root authorization completed, daemon started, PF_KEY/PF_ROUTE
-constructor ran, UDP socket opened, server traffic occurred, credential was read,
-or SA/SPD/route/utun/PowerVPN/Surge state changed. Final dry validation exposed a
-generic shell `mode` collision that reached an AppleScript authorization wait;
-it was terminated before approval with no root entry or residue. The wrappers
-now use readonly `operation_mode`, and both dry runs exit before authorization.
+Safety/cleanup: no `charon`, gated launcher, VICI response, PF_KEY/PF_ROUTE
+constructor, UDP descriptor, server traffic, credential read, SA/SPD install,
+route install, utun, or PowerVPN/Surge mutation was observed. The reviewed stop
+returned `alreadyStopped=true`. Current direct inspection found no native
+process, state, PID, VICI socket, ledger, emergency-stop copy, bootstrap, or
+generation residue. The runtime parent is UID 502, mode 700, and its top level
+contains exactly the reviewed `closure`.
 
-Last good state: finalized UID-502 closure and manifest hash above; runtime top
-level contains only the reviewed closure, with no state, PID, VICI socket,
-ledger, generation, bootstrap, native charon, or gated-launcher process.
+Cleanup limitation: the outer `after` snapshot was post-hoc at 496 seconds,
+outside the 300-second window. Only the legacy full IPv4 route count/hash
+changed; IPv6, default route, interfaces/utun, DNS, ESP-port hash,
+PowerVPN/Surge identities, and read-only Surge environment hash matched.
+SAD/SPD were unavailable to the unprivileged outer snapshot. Process and owned
+filesystem cleanup is proven, but the post-hoc comparison is not bounded
+kernel-teardown proof. An accidentally malformed zsh-sourced diagnostic was
+discarded; only the corrected `/bin/sh` snapshot is referenced.
 
-First bad event: static inspection found the unavoidable `socket-default`
-global-ESP-port write. The first implementation review then found the two P1
-ownership/lifecycle gaps; no unsafe live backend attempt was made.
+Last good state: current clean UID-502 runtime baseline above, with no active
+CP7B process or generation-owned residue.
 
-Remaining: obtain the separate manifest-bound live authorization, run one
-serverless PF_KEY/PF_ROUTE window, assert cleanup, then perform the single scoped
-post-run evidence review. Server, credential, IKE, resource, and recovery work
+First bad event: the root worker rejected unstable preflight snapshots. Three
+value-free one-second samples then showed that complete-table churn came from
+nonempty `Expire` and `RTF_WASCLONED` rows while the new persistent projection
+was stable.
+
+Remaining: obtain fresh manifest-bound approval before one new serverless
+PF_KEY/PF_ROUTE window. Server, credential, IKE, resource, and recovery work
 remain separately gated and unproven.
 
-Next command after explicit approval:
-`scripts/run_cp7b_backend.sh --execute-reviewed --manifest-sha256 c5464052f21af585a348a3fced8d1b5cf4fa336f8128fd9e64acc10465add877`.
+Next command only after fresh explicit approval:
+`scripts/run_cp7b_backend.sh --execute-reviewed --manifest-sha256 7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`.
 
-Approval required: **yes**, separately, before any CP7B root/live execution.
+Approval required: **yes, fresh and manifest-bound**. The historical
+authorization cannot be retried or inherited.

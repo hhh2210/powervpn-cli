@@ -4,6 +4,7 @@ set -eu
 
 repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd -P)
 . "$repo_root/scripts/lib/native_charon_runtime.sh"
+. "$repo_root/scripts/lib/route_snapshot.sh"
 . "$repo_root/scripts/lib/network_snapshot.sh"
 . "$repo_root/scripts/lib/cp7b_runtime.sh"
 . "$repo_root/scripts/lib/cp7b_closure.sh"
@@ -70,6 +71,7 @@ jq -e --arg manifest "$expected_manifest_sha" \
   .safety.initiateCalled == false and .safety.installCalled == false and
   .safety.globalSADStable == true and .safety.globalSPDStable == true and
   .safety.espPortStable == true and
+  .safety.persistentRouteProjectionStable == true and
   .safety.defaultRouteDNSAndUtunStable == true and
   .safety.powerVPNAndSurgeProcessStable == true and
   .safety.cleanupComplete == true and

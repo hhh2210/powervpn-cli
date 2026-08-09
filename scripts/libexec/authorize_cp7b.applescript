@@ -9,7 +9,7 @@ on run argv
 
   set rootEntry to "/Users/larry_1/Opensource/powervpn-cli/scripts/libexec/cp7b_root_entry.sh"
   set runtimeRoot to "/Users/larry_1/scratch-data/powervpn-strongswan/runtime-6.0.7-cp7b"
-  set expectedEntrySHA to "316866b915ec901df5648fb74b60e99d76d83aca9d2b7dcd7a9941a4e5c09733"
+  set expectedEntrySHA to "565b0aba9a5f47b1a910698db1461a8c2c1e8498b90d6de7a03d1568c3976f6c"
   set expectedEmergencySHA to "fb82025b81727851539d4ed6691ba627bb0ac239ed0dacc8445271fa2aa27df1"
   set runtimeGuard to "set -eu; umask 077; runtime=" & quoted form of runtimeRoot & "; " & ¬
     "[ -d \"$runtime\" ] && [ ! -L \"$runtime\" ] && [ \"$(/usr/bin/stat -f '%Lp' \"$runtime\")\" = 700 ] || { echo 'error: CP7B runtime root identity changed' >&2; exit 70; }; " & ¬

@@ -5,6 +5,7 @@ set -eu
 repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd -P)
 cd "$repo_root"
 . "$repo_root/scripts/lib/native_charon_runtime.sh"
+. "$repo_root/scripts/lib/route_snapshot.sh"
 . "$repo_root/scripts/lib/network_snapshot.sh"
 . "$repo_root/scripts/lib/cp7b_runtime.sh"
 . "$repo_root/scripts/lib/cp7b_closure.sh"
@@ -62,12 +63,14 @@ for file in $changed_files; do
 	case "$file" in
 	GOAL.md | README.md | \
 		docs/evidence/checkpoint-7b-preflight.md | docs/evidence/live-test-plan.md | \
-		docs/evidence/rollback.md | docs/progress/GOAL_STATUS.md | \
-		fixtures/redacted/cp7b-approval-manifest-v1.json | \
+			docs/evidence/rollback.md | docs/progress/GOAL_STATUS.md | \
+			fixtures/redacted/cp7b-first-live-preflight-summary-v1.json | \
+			fixtures/redacted/cp7b-approval-manifest-v1.json | \
 		patches/strongswan-6.0.7/0003-build-enable-RFC-3542-for-socket-dynamic-on-macOS.patch | \
 		patches/strongswan-6.0.7/cp7b-series.json | \
 		scripts/assert_clean_teardown.sh | scripts/assert_cp7b_teardown.sh | \
-		scripts/build_strongswan.sh | scripts/lib/network_snapshot.sh | \
+			scripts/build_strongswan.sh | scripts/lib/network_snapshot.sh | \
+			scripts/lib/route_snapshot.sh | \
 		scripts/lib/cp7b_attempts.sh | scripts/lib/cp7b_bundle.sh | \
 		scripts/lib/cp7b_closure.sh | \
 		scripts/lib/cp7b_runtime.sh | \
@@ -76,9 +79,10 @@ for file in $changed_files; do
 		scripts/libexec/cp7b_backend_window.sh | scripts/libexec/cp7b_emergency_stop.sh | \
 		scripts/libexec/cp7b_gated_launcher.c | \
 		scripts/libexec/cp7b_root_entry.sh | scripts/libexec/cp7b_vici_readonly.py | \
-		scripts/run_cp7b_backend.sh | \
-		scripts/stop_cp7b_backend.sh | scripts/verify/checkpoint_7b_preflight.sh | \
-		scripts/verify/cp7b_closure_tests.sh | scripts/verify/cp7b_manifest.jq | \
+		scripts/run_cp7b_backend.sh | scripts/snapshot_network_state.sh | \
+			scripts/stop_cp7b_backend.sh | scripts/verify/checkpoint_7b_preflight.sh | \
+			scripts/verify/cp7b_closure_tests.sh | scripts/verify/cp7b_live_evidence_tests.sh | \
+			scripts/verify/cp7b_manifest.jq | scripts/verify/cp7b_route_snapshot_tests.sh | \
 		scripts/verify/cp7b_preflight_tests.sh | \
 		scripts/verify_checkpoint.sh)
 		;;
@@ -206,7 +210,8 @@ if [ "$review_state" = pending_integrated_preflight_review ]; then
 	      .artifacts.stateScriptSHA256,
       .artifacts.attemptsScriptSHA256, .artifacts.snapshotScriptSHA256,
       .artifacts.bundleScriptSHA256,
-      .artifacts.nativeScriptSHA256, .artifacts.networkScriptSHA256,
+	      .artifacts.nativeScriptSHA256, .artifacts.routeScriptSHA256,
+	      .artifacts.networkScriptSHA256,
       .artifacts.workerSHA256, .artifacts.rootEntrySHA256,
       .artifacts.emergencySHA256, .artifacts.authorizerSHA256,
 	      .artifacts.readOnlyProbeSHA256, .artifacts.gatedLauncherSHA256
@@ -231,7 +236,7 @@ else
 	pvn_cp7b_verify_manifest
 fi
 
-shell_files='scripts/assert_clean_teardown.sh scripts/assert_cp7b_teardown.sh scripts/build_strongswan.sh scripts/lib/network_snapshot.sh scripts/lib/cp7b_attempts.sh scripts/lib/cp7b_bundle.sh scripts/lib/cp7b_closure.sh scripts/lib/cp7b_runtime.sh scripts/lib/cp7b_snapshot.sh scripts/lib/cp7b_state.sh scripts/libexec/cp7b_backend_window.sh scripts/libexec/cp7b_emergency_stop.sh scripts/libexec/cp7b_root_entry.sh scripts/run_cp7b_backend.sh scripts/stop_cp7b_backend.sh scripts/verify/checkpoint_7b_preflight.sh scripts/verify/cp7b_closure_tests.sh scripts/verify/cp7b_preflight_tests.sh'
+shell_files='scripts/assert_clean_teardown.sh scripts/assert_cp7b_teardown.sh scripts/build_strongswan.sh scripts/lib/route_snapshot.sh scripts/lib/network_snapshot.sh scripts/lib/cp7b_attempts.sh scripts/lib/cp7b_bundle.sh scripts/lib/cp7b_closure.sh scripts/lib/cp7b_runtime.sh scripts/lib/cp7b_snapshot.sh scripts/lib/cp7b_state.sh scripts/libexec/cp7b_backend_window.sh scripts/libexec/cp7b_emergency_stop.sh scripts/libexec/cp7b_root_entry.sh scripts/run_cp7b_backend.sh scripts/stop_cp7b_backend.sh scripts/verify/checkpoint_7b_preflight.sh scripts/verify/cp7b_closure_tests.sh scripts/verify/cp7b_live_evidence_tests.sh scripts/verify/cp7b_preflight_tests.sh scripts/verify/cp7b_route_snapshot_tests.sh'
 for script in $shell_files scripts/verify_checkpoint.sh; do
 	sh -n "$script"
 done
@@ -272,6 +277,8 @@ fi
 
 scripts/verify/cp7b_preflight_tests.sh
 scripts/verify/cp7b_closure_tests.sh
+scripts/verify/cp7b_route_snapshot_tests.sh
+scripts/verify/cp7b_live_evidence_tests.sh
 scripts/verify/native_charon_runtime_tests.sh
 scripts/verify_no_secrets.sh
 git diff --check "$lab_base"

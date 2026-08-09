@@ -28,6 +28,7 @@ pvn_cp7b_init_paths() {
 	PVN_CP7B_SNAPSHOT_SCRIPT="$repo_root/scripts/lib/cp7b_snapshot.sh"
 	PVN_CP7B_BUNDLE_SCRIPT="$repo_root/scripts/lib/cp7b_bundle.sh"
 	PVN_CP7B_NATIVE_SCRIPT="$repo_root/scripts/lib/native_charon_runtime.sh"
+	PVN_CP7B_ROUTE_SCRIPT="$repo_root/scripts/lib/route_snapshot.sh"
 	PVN_CP7B_NETWORK_SCRIPT="$repo_root/scripts/lib/network_snapshot.sh"
 	PVN_CP7B_WORKER="$repo_root/scripts/libexec/cp7b_backend_window.sh"
 	PVN_CP7B_ROOT_ENTRY="$repo_root/scripts/libexec/cp7b_root_entry.sh"
@@ -64,7 +65,7 @@ pvn_cp7b_init_paths() {
 	export PVN_CP7B_PYTHON_ROOT PVN_CP7B_RUNTIME_SCRIPT PVN_CP7B_CLOSURE_SCRIPT
 	export PVN_CP7B_STATE_SCRIPT
 	export PVN_CP7B_ATTEMPTS_SCRIPT PVN_CP7B_SNAPSHOT_SCRIPT PVN_CP7B_BUNDLE_SCRIPT
-	export PVN_CP7B_NATIVE_SCRIPT
+	export PVN_CP7B_NATIVE_SCRIPT PVN_CP7B_ROUTE_SCRIPT
 	export PVN_CP7B_NETWORK_SCRIPT PVN_CP7B_WORKER PVN_CP7B_ROOT_ENTRY
 	export PVN_CP7B_EMERGENCY_SOURCE PVN_CP7B_AUTHORIZER PVN_CP7B_ORACLE
 	export PVN_CP7B_READONLY_PROBE
@@ -145,6 +146,7 @@ pvn_cp7b_verify_manifest_policy() {
 	      .safety.keepSurgeRunning == true and .safety.nativeTouchID == true and
 	      .safety.rootOwnedExecutionClosure == true and
 	      .safety.samePIDGatedExec == true and .safety.fullWindowDeadline == true and
+	      .safety.persistentRouteProjectionMustRemainStable == true and
 	      .safety.failClosedObservation == true and .safety.resultBoundToManifest == true and
 	      .containsSecrets == false and .containsReplayableCapture == false and
       .containsRawRoutes == false
@@ -199,6 +201,7 @@ pvn_cp7b_verify_manifest_reviewed_inputs() {
 		"$PVN_CP7B_SNAPSHOT_SCRIPT:snapshotScriptSHA256:$PVN_CP7B_REVIEWED_INPUT_OWNER" \
 		"$PVN_CP7B_BUNDLE_SCRIPT:bundleScriptSHA256:$PVN_CP7B_REVIEWED_INPUT_OWNER" \
 		"$PVN_CP7B_NATIVE_SCRIPT:nativeScriptSHA256:$PVN_CP7B_REVIEWED_INPUT_OWNER" \
+		"$PVN_CP7B_ROUTE_SCRIPT:routeScriptSHA256:$PVN_CP7B_REVIEWED_INPUT_OWNER" \
 		"$PVN_CP7B_NETWORK_SCRIPT:networkScriptSHA256:$PVN_CP7B_REVIEWED_INPUT_OWNER" \
 		"$PVN_CP7B_WORKER:workerSHA256" \
 		"$PVN_CP7B_ROOT_ENTRY:rootEntrySHA256" \
