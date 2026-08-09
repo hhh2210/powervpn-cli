@@ -22,20 +22,30 @@ upstream strongSwan 6.0.7.
   not log in, contact a server, send `start_connection`, or create an SA,
   route, or utun. Direct SAD/SPD comparison remained unavailable to the
   unprivileged harness and is not claimed.
-- Rescue R2 is a **hard NO-GO, not PASS**. The dependency-free
-  `PowerVPNPortal` target implements the evidence-locked password POST,
+- Rescue R2 is a **hard NO-GO, not PASS**. The `PowerVPNPortal` target
+  implements the evidence-locked password POST,
   resource GET, 60-second session check and logout with a no-echo controlling
   TTY, system TLS trust, a closed XML profile, bounded response storage and
   app-owned buffer erasure. The current endpoint was confirmed by a narrow
   latest-address query against a mode-600 encrypted database copy; no user row
   was queried. The one permitted integrated review completed with five direct
-  findings, and all five were fixed. The corrected path now rejects the
-  password POST locally before `session.open`, because Foundation's projected
-  `Set-Cookie` value cannot prove raw header multiplicity/framing. No live or
-  network request occurred. The next checkpoint is an independent, value-free
-  R2 raw-header-framing gate; review closure and self-consistency are not server
-  compatibility. A password exposed in the task text remains compromised and
-  forbidden, but no rotation is required until a future live-login gate exists.
+  findings, and all five were fixed. Foundation's projected `Set-Cookie` value
+  remains locally fail closed because it cannot prove raw header
+  multiplicity/framing. The independent, value-free raw-header subcheckpoint
+  now passes its synthetic offline verifier and its one integrated review is
+  complete. That review returned exactly two direct findings, both applied: a
+  factory-only unforgeable operation proof now keeps forged body, Cookie and
+  User-Agent near misses out of both transport lanes, and TLS trust
+  classification is limited to peer/issuer verification while handshake and
+  cipher failures are `unavailable`. No second raw-header review ran. No live
+  request, successful TLS transfer, server interaction or credential use
+  occurred, so this is implementation evidence, not server compatibility or
+  authorization to contact the portal. The next work unit is to reseal the
+  reviewed R2 manifest and run the full offline R2 verifier. A password exposed
+  in the task text remains compromised and forbidden, but no rotation is
+  required until a future live-login gate exists. The frozen raw-header
+  contract is documented in
+  `docs/evidence/checkpoint-r2-raw-header-framing.md`.
 
 - The vendor helper is based on strongSwan 5.8.0. This is proven by unstripped
   Mach-O symbol paths, not inferred from release dates.

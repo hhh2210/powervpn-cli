@@ -9,7 +9,7 @@ supersedes_for_active_execution: Native Goal V3
 native_v3_role: frozen fallback
 native_fallback_baseline_commit: 8d2e026c1f5db15f5b1e1e0ca81c72d2ae5f2073
 current_checkpoint: R2-username-password-portal-login
-immediate_next: complete-independent-r2-raw-header-framing-subcheckpoint
+immediate_next: reseal-r2-reviewed-manifest-and-run-full-offline-verifier
 user_input_contract: username-and-password-only
 review_policy: one integrated review per checkpoint
 ---
@@ -261,17 +261,43 @@ evidence.
 
 #### R2A.1 — independent raw-header-framing gate
 
-The one permitted integrated R2 review is complete and its five direct findings
-have been fixed. The resulting strict Cookie boundary is a hard NO-GO for live
-login: Foundation's projected `Set-Cookie` value does not independently prove
-the raw response-header multiplicity or framing required by the compatibility
-profile. The password request must be rejected locally before `session.open`
-until an independent, value-free raw-header-framing subcheckpoint supplies that
-missing evidence.
+The one permitted integrated R2 offline-base review is complete and its five
+direct findings have been fixed. That review established the strict Cookie
+boundary: Foundation's projected `Set-Cookie` value does not independently
+prove the raw response-header multiplicity or framing required by the
+compatibility profile and therefore remains fail closed. This independent,
+value-free subcheckpoint now supplies a bounded raw-header observation seam for
+offline progression; it does not establish server compatibility or authorize a
+live request.
 
 This subcheckpoint uses no username or password and does not authorize password
-authentication. R2B remains blocked even though the review findings are fixed;
-review closure is not server-compatibility evidence.
+authentication. R2B remains blocked even though the direct findings from both
+the offline-base and raw-header reviews are fixed; review closure is not
+server-compatibility evidence.
+
+The synthetic offline verifier passes and the raw-header gate's one integrated
+review is complete. It returned exactly two direct findings, both applied:
+
+1. entry to the raw password lane now requires a factory-only unforgeable
+   operation proof; directly forged body, Cookie and User-Agent near misses
+   produce zero raw-driver or Foundation-lane hits;
+2. TLS trust classification now contains only peer/issuer verification;
+   handshake and cipher failures are classified as `unavailable`.
+
+No second raw-header review ran. No live request, successful TLS transfer,
+server interaction or credential use occurred. The reviewed synthetic result
+is implementation evidence only and does not authorize R2B.
+
+Its acceptance surface is frozen in
+`docs/evidence/checkpoint-r2-raw-header-framing.md`: an in-process arm64
+macOS-14 system-libcurl seam, exact raw single-field preservation, and bounded
+synthetic rejection cases. Subprocess curl, proxy/insecure/custom-CA inputs,
+credentials, portal traffic, and any weakening of the existing Foundation
+fail-closed path are outside the subcheckpoint.
+
+The next work unit is to reseal the cumulative R2 reviewed manifest and run the
+full offline R2 verifier. R2 password login remains a hard NO-GO until that
+closure and all later live prerequisites are satisfied.
 
 #### R2B live approval
 

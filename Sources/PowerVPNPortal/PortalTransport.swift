@@ -108,6 +108,7 @@ final class PortalHTTPRequest: @unchecked Sendable {
   let requestBody: SecureBytes?
   let cookieHeader: SecureBytes?
 
+  private let operationProof: PortalRequestOperationProof?
   private let lock = NSLock()
   private var consumed = false
 
@@ -116,13 +117,19 @@ final class PortalHTTPRequest: @unchecked Sendable {
     url: URL,
     headers: PortalHTTPHeaders,
     body: SecureBytes? = nil,
-    cookieHeader: SecureBytes? = nil
+    cookieHeader: SecureBytes? = nil,
+    operationProof: PortalRequestOperationProof? = nil
   ) {
     self.method = method
     self.url = url
     self.headers = headers
     requestBody = body
     self.cookieHeader = cookieHeader
+    self.operationProof = operationProof
+  }
+
+  func hasOperationProof(_ operation: PortalRequestOperation) -> Bool {
+    operationProof?.matches(operation) == true
   }
 
   func begin() -> Bool {

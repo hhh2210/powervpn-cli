@@ -9,8 +9,12 @@ let package = Package(
     .executable(name: "powervpn", targets: ["PowerVPNCLI"])
   ],
   targets: [
+    .target(
+      name: "CPortalCurl",
+      linkerSettings: [.linkedLibrary("curl")]
+    ),
     .target(name: "PowerVPNCore"),
-    .target(name: "PowerVPNPortal"),
+    .target(name: "PowerVPNPortal", dependencies: ["CPortalCurl"]),
     .executableTarget(
       name: "PowerVPNCLI",
       dependencies: ["PowerVPNCore", "PowerVPNPortal"]
@@ -21,7 +25,7 @@ let package = Package(
     ),
     .testTarget(
       name: "PowerVPNPortalTests",
-      dependencies: ["PowerVPNPortal", "PowerVPNCLI"]
+      dependencies: ["CPortalCurl", "PowerVPNPortal", "PowerVPNCLI"]
     ),
   ]
 )

@@ -6,6 +6,27 @@ enum PortalRequestFactoryError: Error, Equatable, Sendable {
   case invalidURL
 }
 
+enum PortalRequestOperation: Sendable {
+  case password
+  case resource
+  case session
+  case logout
+}
+
+/// A non-exportable capability proving that the sealed serializer minted the
+/// request. Structural similarity alone must never select a compatibility lane.
+struct PortalRequestOperationProof: Sendable {
+  private let operation: PortalRequestOperation
+
+  fileprivate init(_ operation: PortalRequestOperation) {
+    self.operation = operation
+  }
+
+  func matches(_ expected: PortalRequestOperation) -> Bool {
+    operation == expected
+  }
+}
+
 /// Produces only the four requests proven for the sealed R2 portal profile.
 /// There is no initializer accepting a host, port, path, query, or body.
 struct PortalRequestFactory: Sendable {
@@ -52,7 +73,8 @@ struct PortalRequestFactory: Sendable {
         url: url,
         headers: passwordHeaders,
         body: body,
-        cookieHeader: cookie
+        cookieHeader: cookie,
+        operationProof: PortalRequestOperationProof(.password)
       )
     } catch {
       cookie.erase()
@@ -62,6 +84,7 @@ struct PortalRequestFactory: Sendable {
 
   func makeResourceRequest() throws -> PortalHTTPRequest {
     try makeRequest(
+      operation: .resource,
       method: .get,
       path: PortalWireContract.resourcePath,
       query: "version=\(profile.portalVersion)"
@@ -70,6 +93,7 @@ struct PortalRequestFactory: Sendable {
 
   func makeSessionCheckRequest() throws -> PortalHTTPRequest {
     try makeRequest(
+      operation: .session,
       method: .get,
       path: PortalWireContract.sessionCheckPath,
       query: "key=hostid"
@@ -77,7 +101,12 @@ struct PortalRequestFactory: Sendable {
   }
 
   func makeLogoutRequest() throws -> PortalHTTPRequest {
-    try makeRequest(method: .post, path: PortalWireContract.logoutPath, query: nil)
+    try makeRequest(
+      operation: .logout,
+      method: .post,
+      path: PortalWireContract.logoutPath,
+      query: nil
+    )
   }
 
   func acceptPasswordSession(
@@ -115,6 +144,7 @@ struct PortalRequestFactory: Sendable {
   }
 
   private func makeRequest(
+    operation: PortalRequestOperation,
     method: PortalHTTPMethod,
     path: String,
     query: String?
@@ -123,7 +153,8 @@ struct PortalRequestFactory: Sendable {
       method: method,
       url: try makeURL(path: path, query: query),
       headers: headers,
-      cookieHeader: try cookieJar.makeOutgoingCookieHeader()
+      cookieHeader: try cookieJar.makeOutgoingCookieHeader(),
+      operationProof: PortalRequestOperationProof(operation)
     )
   }
 

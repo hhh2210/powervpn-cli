@@ -29,6 +29,8 @@ import Testing
     )
     #expect(password.headers.accept == "*/*")
     #expect(password.headers.contentType == "text/xml")
+    #expect(password.hasOperationProof(.password))
+    #expect(!password.hasOperationProof(.resource))
     #expect(
       password.headers.userAgent
         == "VSG-libCurl/0.9.9 PowerVPN/3.2.1 (Mac OS X Version 14.6 (Build SYNTHETIC))"
@@ -70,11 +72,17 @@ import Testing
     )
     #expect(logout.method == .post)
     #expect(logout.url.absoluteString == "https://166.111.143.19:4443/vpn/user/logout")
-    for request in [resource, session, logout] {
+    for (request, operation) in [
+      (resource, PortalRequestOperation.resource),
+      (session, .session),
+      (logout, .logout),
+    ] {
       #expect(request.headers.accept == "*/*")
       #expect(request.headers.contentType == nil)
       #expect(try decode(request.cookieHeader) == expectedAuthenticatedCookie)
       #expect(request.requestBody == nil)
+      #expect(request.hasOperationProof(operation))
+      #expect(!request.hasOperationProof(.password))
     }
   }
 

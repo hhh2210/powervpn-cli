@@ -24,6 +24,9 @@ case "$checkpoint" in
 	r2)
 		exec "$repo_root/scripts/verify/checkpoint_r2.sh"
 		;;
+	r2-raw-headers)
+		exec "$repo_root/scripts/verify/checkpoint_r2_raw_headers.sh"
+		;;
 	4b)
 		cd "$repo_root"
 		checkpoint_base=${POWERVPN_CHECKPOINT_BASE:-82731013bb97f3dbfcc6f45df099e79e45dc3b64}
@@ -213,7 +216,7 @@ case "$checkpoint" in
 		exit 0
 		;;
 	*)
-		echo "usage: $0 4a|4b|5|6|7a|7b-preflight|r1|r2" >&2
+		echo "usage: $0 4a|4b|5|6|7a|7b-preflight|r1|r2|r2-raw-headers" >&2
 		exit 64
 		;;
 esac

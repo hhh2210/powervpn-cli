@@ -660,14 +660,15 @@ request. R1's read-only authorization does not transfer to R2.
 
 Canonical commit: this cumulative Rescue R1 implementation and evidence commit.
 
-## 2026-08-09 — Rescue R2 review closure and raw-header-framing blocker
+## 2026-08-09 — Rescue R2 review closure and reviewed raw-header gate
 
-State: **HARD NO-GO — RAW SET-COOKIE FRAMING UNPROVEN.** R2 is not PASS and
-the active Goal remains open. A synthetic production-path test rejected locally
-before `session.open`; no real credential, portal request or network connection
-was used.
+State: **HARD NO-GO — RAW-HEADER OFFLINE GATE REVIEWED; R2 MANIFEST RESEAL
+PENDING.** R2 is not PASS and the active Goal remains open. The Foundation-only
+synthetic production-path test still rejects locally before `session.open`;
+the separate system-libcurl raw-header seam has passed only synthetic offline
+validation. No real credential, portal request or network connection was used.
 
-Verified: the new dependency-free `PowerVPNPortal` target implements the exact
+Verified: the `PowerVPNPortal` target implements the exact
 default password body, sealed installed origin, system-trust-only TLS,
 pre-follow redirect rejection, bounded structural XML, a separate strict
 LeadSec profile, fresh isolated Cookie handling, resource fetch, exact
@@ -675,10 +676,10 @@ LeadSec profile, fresh isolated Cookie handling, resource fetch, exact
 logout. `powervpn login` rejects every option/extra argument before constructing
 the runtime and emits only a closed value-free JSON report.
 
-User input required: none. The next raw-header-framing subcheckpoint is
-value-free and requires no password rotation or credential input. The exposed
-password remains forbidden; rotation is deferred until a future real-login
-gate is otherwise ready.
+User input required: none. Manifest resealing and the full offline R2 verifier
+are value-free and require no password rotation or credential input. The
+exposed password remains forbidden; rotation is deferred until a future
+real-login gate is otherwise ready.
 
 Derived automatically: current origin/version/address-selection/language state,
 raw platform serial, Cookie/session state, operation timing and logout. The
@@ -687,8 +688,9 @@ database copy using the exact SQLCipher 3.4.0 profile. No user-table row was
 queried and no database passphrase was retained.
 
 Evidence: `docs/evidence/checkpoint-r2-validation.md`; the corrected CP5
-password-field fixture; and reviewed-candidate manifest
-`676e8062b3b29c83dc56e738c475452f029bc3e77f74261eea15878a618774eb`.
+password-field fixture; and the previous R2 offline-base reviewed manifest
+`676e8062b3b29c83dc56e738c475452f029bc3e77f74261eea15878a618774eb`. That
+manifest is stale after the reviewed raw-header changes and must be resealed.
 The live value-free fixture does not exist because dispatch stopped before
 `session.open`.
 
@@ -705,21 +707,42 @@ XPC, VICI, native charon, IKE/UDP, SA, policy, route or utun action occurred.
 One password pasted into Codex task text is compromised, was not used, and is
 forbidden from every future live run.
 
-Review result: complete. Exactly one integrated R2 review inspected the frozen
-cumulative checkpoint and returned five direct findings. All five were fixed:
+R2 offline-base review result: complete. Exactly one integrated review
+inspected the frozen cumulative base and returned five direct findings. All
+five were fixed:
 signal-to-task cancellation, cancellation-safe logout transport, fail-closed
 Set-Cookie framing, manifest binding for the network snapshot dependency, and
-truthful secure-buffer erasure claims. No second or unrelated-history review
-ran.
+truthful secure-buffer erasure claims. No second offline-base review or
+unrelated-history review ran.
 
-Remaining: complete an independent, value-free R2 raw-header-framing
-subcheckpoint. Foundation's projected Set-Cookie value is not raw multiplicity
-evidence, so no password login may run yet. Password rotation and a fresh macOS
-confirmation are deferred until this blocker is independently closed and a
-future live gate is otherwise ready.
+Remaining: reseal the cumulative reviewed R2 manifest and run the full offline
+R2 verifier. Foundation's projected Set-Cookie value remains fail closed, and
+the reviewed raw-header seam is implementation evidence rather than server
+acceptance, so no password login may run yet. Password rotation and a fresh
+macOS confirmation remain deferred until a future live gate is otherwise
+ready.
 
-Next command: execute only the independent R2 raw-header-framing subcheckpoint
-without username/password. Do not run `powervpn login`.
+Raw-header subcheckpoint status: **OFFLINE PASS — INTEGRATED REVIEW COMPLETE;
+FINDINGS APPLIED.** Its synthetic-only acceptance matrix and architecture
+boundary are frozen in
+`docs/evidence/checkpoint-r2-raw-header-framing.md`. The independent verifier
+passed 11 C parser cases, 5 C status/finalization cases, 16 Swift
+raw/composite/factory cases, the Foundation local fail-closed regression,
+strict compile/format checks, arm64 system-libcurl linkage, secret scan and
+diff checks.
+
+Raw-header review result: exactly one integrated review returned two direct
+findings, both fixed. First, the compatibility predicate now requires a
+factory-only unforgeable operation proof; directly forged body, Cookie and
+User-Agent near misses produce zero raw-driver or Foundation-lane hits. Second,
+TLS trust classification is restricted to peer/issuer verification, while
+handshake and cipher failures are `unavailable`. No second review ran. No
+successful TLS transfer, portal/server interaction, credential read or
+server-compatibility claim occurred; R2 remains hard NO-GO.
+
+Next work unit: reseal the reviewed R2 manifest, then run
+`scripts/verify_checkpoint.sh r2` without username/password. Do not run
+`powervpn login`.
 
 Approval required: no credential/live-login approval now. Any future real
 password request still requires fresh approval and prior rotation; the old

@@ -23,10 +23,16 @@ struct PortalLoginRuntimeDependencies: Sendable {
         throw PortalTransportError.invalidOrigin
       }
       let origin = try PortalHTTPOrigin(host: host, port: profile.origin.port ?? 443)
+      let passwordTransport = try CurlPasswordPortalTransport(allowedOrigin: origin)
       let delegate = try PortalURLSessionDelegate.currentMachine()
-      return try URLSessionPortalTransport(
+      let sessionTransport = try URLSessionPortalTransport(
         allowedOrigin: origin,
         delegate: delegate
+      )
+      return LeadSecPortalTransport(
+        allowedOrigin: origin,
+        passwordTransport: passwordTransport,
+        sessionTransport: sessionTransport
       )
     },
     credentialReader: DarwinSecureTerminalCredentialReader(),
