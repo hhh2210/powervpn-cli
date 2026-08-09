@@ -513,3 +513,53 @@ Next command only after fresh explicit approval:
 
 Approval required: **yes, fresh and manifest-bound**. The historical
 authorization cannot be retried or inherited.
+
+## 2026-08-09 — Checkpoint 7B privileged backend live acceptance
+
+State: **PASS (serverless L5 backend only).** This is not IKE or server-protocol
+PASS.
+
+Evidence level: L5 privileged local runtime. The explicitly authorized command
+was bound to manifest
+`7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`
+and StrongSwan source `a81298234753f314dbf2c4f2867a9a144006bd8c`.
+Manifest attempt 1 completed in 21 seconds with backend `pfkey-pfroute`, socket
+provider `socket-dynamic`, `failureCategory=none`, and `success=true`.
+
+Verified: PF_KEY/PF_ROUTE reached ready; the official 6.0.7 VICI client
+completed `version`, read-only `stats`, and empty connection/SA/policy listing
+checks under the reviewed runner contract. Native UDP descriptor count stayed
+zero. No server endpoint, packet, credential read, `load-*`, `initiate`, or
+install operation occurred. Global SAD/SPD, ESP port, persistent IPv4/IPv6
+route projections, default route, DNS, interface/utun inventory, PowerVPN, and
+Surge remained stable.
+
+Safety/cleanup: `scripts/assert_cp7b_teardown.sh` PASS. No native process, VICI
+socket, PID, config/log, state, bootstrap, emergency-stop copy, attempt ledger,
+or generation directory remains. Runtime ownership is UID 502:GID 20, mode
+700, and its top level contains exactly the reviewed `closure`.
+
+Review result: the existing integrated preflight review and the one permitted
+post-first-window narrow review are the complete CP7B review history. No third
+review and no unrelated repository-history review ran.
+
+Not proven: IKEv1 Main Mode, Quick Mode/ADDRULE, server acceptance, credential
+handoff, SA/policy/route installation, resource data path, and recovery.
+
+Evidence: [`../evidence/checkpoint-7b-preflight.md`](../evidence/checkpoint-7b-preflight.md),
+[`../evidence/live-test-plan.md`](../evidence/live-test-plan.md),
+[`../evidence/rollback.md`](../evidence/rollback.md), and the retained
+manifest-bound value-free result.
+
+Canonical implementation/evidence base: `d1173bb6579a5d2b35fb0b9242282367e39b4bfe`;
+this cumulative PASS record belongs to the canonical CP7B acceptance commit.
+
+Remaining: CP8A secure runtime material handoff, with **NO SERVER TRAFFIC**.
+Real material requires an exact user-authorized secure provider/path; secret
+values must never enter argv, environment, files, fixtures, or logs.
+
+Next command: begin CP8A provider-boundary implementation and synthetic failure/
+zeroization tests without reading real runtime material or contacting a server.
+
+Approval required: **yes before any real runtime-material read**; the completed
+CP7B authorization does not transfer to CP8A material access or CP8B traffic.

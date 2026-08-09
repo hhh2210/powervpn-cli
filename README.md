@@ -61,36 +61,29 @@ upstream strongSwan 6.0.7.
   Its one integrated review was closed by rejecting streamed command failures,
   preserving ownership state on unexpected cleanup residue, and detecting
   orphan fixed sockets and generation directories.
-- CP7B offline preflight remains **PASS**. The first explicitly authorized root
-  window, bound to historical manifest
-  `c5464052f21af585a348a3fced8d1b5cf4fa336f8128fd9e64acc10465add877`, ended as
-  **INCONCLUSIVE_PREFLIGHT_FAILURE**: two root preflight snapshots were unstable,
-  so the worker failed closed before launching `charon` or the gated launcher.
-  No VICI response, PF_KEY/PF_ROUTE backend constructor, L5 runtime evidence,
-  SA, policy, route, utun, credential, or server traffic was proven. Source
-  inspection had found that macOS PF_KEY plus `socket-default` writes the global
-  `net.inet.ipsec.esp_port` when opening its NAT-T socket and has no teardown
-  restore path. The candidate therefore uses an independent scratch CP7B build
-  with `socket-dynamic`; its root-executed closure is hash-pinned and sealed
-  before launch, and its same-PID gated launcher closes the spawn/state gap.
-  The `0/0` port config must produce exactly zero UDP descriptors in this
-  no-send smoke.
-- The unstable legacy gate hashed the complete IPv4/IPv6 route table, including
-  transient rows whose nonempty `Expire` values or `RTF_WASCLONED` (`W`) flag
-  churn independently. The current candidate uses a strict structural parser
-  plus a persistent projection over
-  `family/destination/gateway/flags/netif`: it excludes nonempty `Expire` and
-  uppercase `W` rows while preserving `D`/`C`/`c`, and fails closed at every
-  parse/project/sort/count/hash/default-route stage. Early preflight failures
-  now retain a manifest-bound value-free result, and prompt-deadline cleanup
-  terminates its guard child promptly.
-- The old authorization cannot be retried or inherited. Root/live execution is
-  **WAITING FOR FRESH MANIFEST-BOUND APPROVAL** for SHA-256
-  `7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187` and
-  its exact command. One additional narrow
-  review has already covered only route layout, parser/profile separation,
-  failure propagation, canonicalization, and deadline cleanup; no unrelated
-  history was re-reviewed.
+- CP7B is **PASS (serverless L5 backend only)**. The authorized window bound to
+  manifest
+  `7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`
+  ran source `a81298234753f314dbf2c4f2867a9a144006bd8c` for 21 seconds as attempt 1.
+  `pfkey-pfroute` and `socket-dynamic` reached ready; the official VICI client
+  completed `version` and read-only status/list probes, with empty
+  connection/SA/policy inventories under the runner contract. Native UDP
+  descriptors stayed at zero, with no endpoint, server packet, credential
+  read, `initiate`, or install operation.
+- The same CP7B result proves SAD, SPD, global ESP port, persistent IPv4/IPv6
+  route projections, default route, DNS, utun inventory, PowerVPN, and Surge
+  remained stable. Cleanup assertion passed; the runtime returned to
+  UID 502:GID 20, mode 700, with only the reviewed `closure` at top level. The
+  earlier manifest's preflight-only inconclusive result remains historical and
+  does not weaken this later PASS.
+- CP7B does **not** prove IKE or server compatibility: no connection was loaded,
+  no credential was handed off, and no SA/policy/route was installed. Main
+  Mode, Quick Mode, ADDRULE, resource data path, and server acceptance remain
+  untested. The next checkpoint is CP8A secure runtime-material handoff with
+  **NO SERVER TRAFFIC**. Real material may be read only through a user-authorized
+  secure provider/path, and no secret may enter argv, environment, files,
+  fixtures, or logs. CP7B's one integrated review and one additional narrow
+  review are complete; no third or unrelated-history review is planned.
 
 The target is therefore:
 
@@ -197,12 +190,11 @@ library target, `PowerVPNCore`.
 - A live backend test requiring root or a VPN configuration change is a
   separately approved isolation-window experiment because it may interact with
   Surge.
-- CP7B's historical implementation/build/dry-review authorization and the
-  separately authorized first root window do not authorize a retry. The first
-  window stopped before daemon launch; the current manifest and exact command
-  require a fresh explicit approval. PowerVPN and Surge remain running;
-  `socket-default` is excluded and any native UDP descriptor, global ESP-port,
-  or persistent-route projection change fails closed.
+- CP7B's completed manifest-bound serverless window does not authorize a replay,
+  CP8/CP9 server traffic, or access to real runtime material. CP8A may test only
+  synthetic/reference-based provider paths until the user authorizes the exact
+  secure handoff path; secrets remain forbidden in argv, environment, files,
+  fixtures, and logs.
 - No SwiftUI, LaunchDaemon, or recovery service is built until protocol gates
   pass.
 

@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "cp7b_privileged_serverless_backend_runtime",
+  "backend": "pfkey-pfroute",
+  "socketProvider": "socket-dynamic",
+  "approvalManifestSHA256": "7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187",
+  "sourceCommit": "a81298234753f314dbf2c4f2867a9a144006bd8c",
+  "configSHA256": "64fbae7626306419a08018234bbb6bf5040f954e8ff6d2622b2f9969ca96fa20",
+  "success": true,
+  "attempt": 1,
+  "durationSeconds": 21,
+  "failureCategory": "none",
+  "viciVersion": {
+    "requestPayloadSHA256": "6f16c46a69a0dec36d5dbc94ee213c083ee0e2b2082a8ba4e1ba0885054e58bf",
+    "responsePayloadSHA256": "17c180686f2bf41c5b6de883424758f647a134eb977f1fdb96799464c4bc7ec9"
+  },
+  "safety": {
+    "udpSocketCount": 0,
+    "serverTraffic": false,
+    "credentialRead": false,
+    "initiateCalled": false,
+    "installCalled": false,
+    "globalSADStable": true,
+    "globalSPDStable": true,
+    "espPortStable": true,
+    "persistentRouteProjectionStable": true,
+    "defaultRouteDNSAndUtunStable": true,
+    "powerVPNAndSurgeProcessStable": true,
+    "cleanupComplete": true
+  },
+  "containsSecrets": false,
+  "containsRawRoutes": false,
+  "containsRawSAState": false,
+  "containsServerEndpoint": false,
+  "unprivilegedSurgeEnvironmentStable": true,
+  "unprivilegedSurgeDNSBeforeAndAfter": true
+}

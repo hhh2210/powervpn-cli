@@ -65,6 +65,7 @@ for file in $changed_files; do
 		docs/evidence/checkpoint-7b-preflight.md | docs/evidence/live-test-plan.md | \
 			docs/evidence/rollback.md | docs/progress/GOAL_STATUS.md | \
 			fixtures/redacted/cp7b-first-live-preflight-summary-v1.json | \
+			fixtures/redacted/cp7b-serverless-backend-runtime-v1.json | \
 			fixtures/redacted/cp7b-approval-manifest-v1.json | \
 		patches/strongswan-6.0.7/0003-build-enable-RFC-3542-for-socket-dynamic-on-macOS.patch | \
 		patches/strongswan-6.0.7/cp7b-series.json | \

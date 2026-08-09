@@ -59,22 +59,21 @@ baseline artifact and is outside generation-owned cleanup.
 
 ## CP7B privileged window
 
-The offline CP7B preflight and one historical root window were separately
-authorized. The historical window, bound to manifest
+The offline CP7B preflight and two root windows were separately authorized.
+The historical window, bound to manifest
 `c5464052f21af585a348a3fced8d1b5cf4fa336f8128fd9e64acc10465add877`,
-failed closed before daemon launch. That authorization is consumed. The
-commands in this section describe the remediated rollback contract and must not
-be run until the user freshly approves current manifest
-`7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`
-and the exact live command.
+failed closed before daemon launch. The second window, bound to manifest
+`7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`,
+completed serverless backend ready and teardown. Both authorizations are
+consumed; the commands below document the accepted rollback contract and do
+not authorize a replay.
 
 The CP7B runner and stop entry points invoke a short-lived root worker through
 macOS native AppleScript authorization. They do not use `sudo`, ask for a
 password, create a LaunchDaemon, install a system extension/NetworkExtension,
 or write a system prefix.
 
-Normal stop after fresh approval uses the same reviewed manifest hash as the
-launch:
+The accepted normal-stop path used the same reviewed manifest hash as launch:
 
 ```bash
 scripts/stop_cp7b_backend.sh \
@@ -197,7 +196,18 @@ findings. It found two P1 fail-open paths and one P2 parser/profile conflation;
 the remediated contract above addresses them. No third or broad history review
 ran.
 
-The historical manifest authorization cannot trigger another launch or stop.
-The next root window is **WAITING FOR FRESH MANIFEST-BOUND APPROVAL** for
-`7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`
-and its exact commands.
+The accepted second window used source
+`a81298234753f314dbf2c4f2867a9a144006bd8c`, attempt 1, and duration 21
+seconds. PF_KEY/PF_ROUTE + `socket-dynamic` reached ready; VICI read-only probes
+succeeded with empty connection/SA/policy inventories under the runner
+contract. UDP count was zero and there was no endpoint, server traffic,
+credential read, `initiate`, or install. SAD/SPD/ESP port, persistent routes,
+default route, DNS, utun, PowerVPN, and Surge remained stable.
+
+The teardown assertion passed. No process, socket, PID, state, bootstrap,
+ledger, emergency-stop copy, or generation directory remained; the runtime was
+UID 502:GID 20, mode 700, with only `closure` at top level. This is serverless
+L5 backend PASS, not IKE/server protocol PASS. Both manifest authorizations are
+consumed and cannot trigger another launch or stop. CP8A remains no-server and
+requires a user-authorized secure material path with no secret in argv,
+environment, files, fixtures, or logs.

@@ -1,15 +1,18 @@
 # Checkpoint 7B privileged-backend preflight
 
-Checkpoint 7B is a serverless macOS backend experiment. It is not an IKE or
-server-interoperability test. The offline implementation, scratch build, dry
-validation, and integrated preflight review remain PASS. The user separately
-authorized one root window bound to historical manifest
+Checkpoint 7B is a serverless macOS backend experiment, not an IKE or
+server-interoperability test. It is now **PASS at L5 for the local privileged
+backend**. The offline implementation, scratch build, dry validation, and
+integrated preflight review passed. The user first authorized a root window
+bound to historical manifest
 `c5464052f21af585a348a3fced8d1b5cf4fa336f8128fd9e64acc10465add877`;
 that window ended before daemon launch as `INCONCLUSIVE_PREFLIGHT_FAILURE`.
-The old authorization is consumed and cannot authorize a retry. Starting a
-root daemon now requires a fresh explicit approval tied to current manifest
+After route-gate remediation, the user separately authorized the exact window
+bound to manifest
 `7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`
-and the exact command.
+and its exact command. Attempt 1 reached PF_KEY/PF_ROUTE ready, completed the
+bounded read-only VICI probes in 21 seconds, and cleaned up with zero residue.
+Both authorizations are consumed and cannot authorize a replay.
 
 ## Material finding: `socket-default` is unsafe for this window
 
@@ -93,8 +96,8 @@ OpenSSL and nonce plugins, a copied `libcrypto`, and the gated launcher. The
 OpenSSL plugin resolves that copied library inside the closure rather than a
 user-replaceable Homebrew symlink. Historical manifest SHA-256
 `c5464052f21af585a348a3fced8d1b5cf4fa336f8128fd9e64acc10465add877`
-bound the bytes used by the first root window. The remediated candidate is
-bound by current manifest SHA-256
+bound the bytes used by the first root window. The remediated candidate became
+the accepted CP7B build under manifest SHA-256
 `7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`.
 
 The AppleScript boundary copies the hash-bound root entry to a mode-700,
@@ -245,40 +248,88 @@ review's directly affected boundary. It found two P1 fail-open command/stage
 paths and one P2 parser/profile conflation; the remediation above closes those
 direct findings. No third review or unrelated repository-history review ran.
 
+## Accepted manifest-bound root window
+
+The user explicitly authorized the exact command bound to manifest
+`7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`.
+One authorization prompt was canceled before the root entry ran; it is an
+operational non-attempt and produced no runtime result. Re-running the same
+already-authorized command then completed manifest attempt 1 with these
+value-free facts:
+
+```text
+source commit          a81298234753f314dbf2c4f2867a9a144006bd8c
+attempt                 1
+duration                21 seconds
+backend                 pfkey-pfroute
+socket provider         socket-dynamic
+failure category        none
+result                   success
+```
+
+The exact six-plugin profile loaded and the PF_KEY/PF_ROUTE constructors
+reached ready. The root-owned official strongSwan 6.0.7 VICI client completed
+`version`, read-only `stats`, `list-conns`, `list-sas`, and `list-policies`.
+Under the reviewed runner contract, the last three inventories were empty; the
+retained result deliberately stores only the version request/response hashes
+and overall value-free success/safety fields, not inventory values.
+
+The run had no endpoint or server configuration. Native UDP descriptor count
+remained exactly zero; there was no packet send, server traffic, credential
+read, `load-*`, `initiate`, terminate, or install operation. Global SAD and SPD,
+`net.inet.ipsec.esp_port`, persistent IPv4/IPv6 route projections, default
+route, DNS, interface/utun inventory, PowerVPN identity, Surge process identity,
+and read-only Surge environment/DNS evidence remained stable across the bounded
+window and final comparison. Churn in the legacy complete IPv4 route-table
+hash remained diagnostic and did not affect the persistent compatibility gate.
+
+The generation-owned stop removed `charon`, VICI socket, PID, config, protected
+log, state, bootstrap, emergency stop, attempt ledger, and generation
+directory. `scripts/assert_cp7b_teardown.sh` passed against the retained result.
+The runtime parent ended as UID 502:GID 20, mode 700, with exactly the reviewed
+`closure` at top level.
+
+This is a **serverless L5 backend PASS**. It proves privileged PF_KEY/PF_ROUTE
+initialization, VICI control, no-send behavior, state preservation, and clean
+teardown. It is not IKE/server protocol evidence: Main Mode, Quick Mode,
+ADDRULE, server acceptance, SA/policy installation, resource routes, and data
+path remain untested.
+
 ## Preflight and live boundaries
 
-Completed under historical authorization:
+Completed across the two manifest-bound authorization windows:
 
 - create and edit the bounded runner, stop, snapshot, assertion, and test
   artifacts;
 - build and verify the dedicated scratch prefix;
 - run unprivileged shell negative tests and dry runs;
 - perform one integrated preflight review;
-- finalize the historical value-free approval manifest;
+- finalize both value-free approval manifests;
 - execute one root preflight window under the historical manifest; it failed
-  closed before daemon launch.
+  closed before daemon launch;
+- remediate only the observed route/deadline boundary and complete the one
+  permitted additional narrow review;
+- execute manifest
+  `7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`
+  attempt 1 through serverless backend ready, VICI probes, bounded stop, and
+  zero-residue assertion.
 
-Not authorized now without a fresh manifest-bound approval:
+Neither consumed CP7B authorization permits any of the following:
 
-- AppleScript privilege elevation or Touch ID prompt;
-- root `charon` or raw PF_KEY/PF_ROUTE runtime access;
-- UDP socket creation or server traffic;
+- replaying the CP7B root command or reusing its attempt allowance;
+- server traffic or an endpoint-bearing configuration;
 - VICI `load-*`, `initiate`, terminate, install, or credential operations;
 - SA, SPD, route, address, utun, DNS, default-route, PowerVPN, or Surge changes.
 
-The offline preflight remains PASS, but the first live invocation is
-inconclusive. The fresh approval request must name the exact command and current
-manifest SHA-256
-`7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`.
-No launch, automatic retry,
-or unused-attempt allowance carries over from the historical manifest. A fresh
-manifest still does not authorize an automatic second launch, a
-kernel-libipsec fallback, or any CP8/CP9 server traffic.
+CP7B is complete. The next checkpoint, CP8A, is still serverless: it may build
+and test a secure in-memory material-provider boundary, but real material may
+be read only through an exact path/provider explicitly authorized by the user.
+No secret may enter argv, environment, files, fixtures, or logs. CP8B/CP9
+server traffic remains a later, separate approval gate.
 
-## Required live observations
+## Accepted live observations
 
-If fresh approval is granted, one generation may PASS only when all of the
-following are true:
+The accepted attempt satisfied all of the following:
 
 - two stable preflight snapshots agree on SAD, SPD, global ESP port, default
   route, persistent IPv4/IPv6 route projection, DNS, utun inventory, PowerVPN,
@@ -308,17 +359,14 @@ exactly the reviewed `closure` baseline; the closure is recursively returned to
 UID 502 before the parent. Incomplete cleanup retains root ownership and fails
 closed.
 
-An existing PowerVPN rekey or unrelated system churn may still make a protected
-state unstable. That is a fail-closed inconclusive window, not proof that the
-native daemon caused the change and not permission to weaken the persistent
-profile without new evidence.
+The earlier preflight-only window remains a useful record that unrelated system
+churn can make a protected snapshot unstable. It did not authorize weakening
+the persistent profile; the remediated attempt passed the strict gate.
 
 ## Current evidence level
 
-This document records a PASS for L1/L3/L4 source, build, review, and offline
-dry-preflight evidence. A privileged root worker ran only far enough to reject
-unstable preflight snapshots; no privileged backend constructor or VICI daemon
-ran. CP7B therefore has not reached L5 and is **WAITING FOR FRESH
-MANIFEST-BOUND APPROVAL** for
-`7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`.
-Server acceptance remains entirely untested.
+This document records L1/L3/L4 source, build, review, and offline-preflight PASS
+plus L5 privileged local-runtime PASS for PF_KEY/PF_ROUTE + `socket-dynamic`.
+It proves no server-facing protocol behavior. Server acceptance, IKEv1 Main
+Mode, Quick Mode/ADDRULE, SA/policy installation, routes, and resource data
+path remain entirely untested and must not be inferred from CP7B.

@@ -12,10 +12,10 @@ vendor_compatibility_baseline: strongSwan 5.8.0
 canonical_lab_commit: 3231a3bfe992fcc5f84793543ce9c8687afcd7fa
 strongswan_cp6_commit: 67c9810900e2d8486cb3b11495a8362433494ca0
 strongswan_patch_sha256: 6e4c609240ae2a1996a3a547cede72ac1be7121922aa6f576687632609f34213
-current_checkpoint: 7b-privileged-backend-preflight
-immediate_next: request-fresh-cp7b-root-live-execution-approval-for-current-manifest
-next_approval_gate: 7b-fresh-manifest-bound-root-live-execution
-cp7b_current_manifest_sha256: 7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187
+current_checkpoint: 8a-secure-runtime-material-handoff
+immediate_next: implement-and-test-cp8a-secure-in-memory-material-provider-without-server-traffic
+next_approval_gate: 8a-user-authorized-secure-runtime-material-path
+cp7b_pass_manifest_sha256: 7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187
 review_policy: checkpoint-gated-risk-weighted-single-integrated-review
 commit_policy: canonical-checkpoint-commits-with-local-fixups
 primary_platform: Apple Silicon macOS 27 beta
@@ -34,14 +34,13 @@ three evidence anchors in the front matter as a locked verified baseline.
 Do not repeat their broad analysis or full acceptance runs unless the current
 work changes shared code or new evidence directly conflicts with them.
 
-Resume from the current checkpoint and its approval gate. CP7A and the offline
-CP7B preflight are complete. The first manifest-bound root window ended as
-INCONCLUSIVE_PREFLIGHT_FAILURE before daemon launch; do not retry or launch the
-privileged backend until the user explicitly approves the fresh manifest hash
-and exact command. The earlier authorization is historical and cannot be
-inherited. A fresh approval does not authorize server traffic, credentials,
-routes, SA/utun creation, PowerVPN shutdown, Surge mutation, or later recovery
-tests.
+Resume from CP8A. CP7A and CP7B are complete: manifest
+7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187
+proved one serverless PF_KEY/PF_ROUTE + socket-dynamic backend window at L5 and
+clean teardown. This is not IKE or server-protocol acceptance. CP8A may build
+and test the secure material-provider boundary without server traffic, but it
+must not read real runtime material until the user authorizes the exact secure
+handoff path. No secret may enter argv, environment, files, fixtures, or logs.
 
 Review the cumulative checkpoint candidate, not every commit. Use local
 WIP/fixup commits, targeted tests and one integrated checkpoint review. Do not
@@ -64,17 +63,17 @@ codex features enable goals
    全量验收来制造“进度”。
 2. **CP6 是离线 compatibility-port PASS，不是服务器互通 PASS。** 当前仍没有
    原生服务器 IKE_SA、CHILD_SA、resource route、SA/policy/utun 证据。
-3. **CP7A 已 PASS；CP7B offline preflight 仍为 PASS，首次 root window 为
-   INCONCLUSIVE_PREFLIGHT_FAILURE。** 旧 manifest
-   `c5464052f21af585a348a3fced8d1b5cf4fa336f8128fd9e64acc10465add877`
-   的授权只覆盖已结束的首次尝试；不得自动重试或继承。再次进入 root/backend
-   前，必须获得绑定当前 manifest
-   `7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`
-   与精确命令的新授权。
-4. **CP7B preflight PASS 不是 backend PASS。** 首次 root worker 在两份 preflight
-   snapshot 不稳定后、daemon launch 之前 fail closed；`charon`、gated launcher、
-   VICI、PF_KEY/PF_ROUTE constructor 和 L5 均未证明，也不证明任何 SA、policy、
-   route、utun 或 server compatibility。
+3. **CP7A 与 CP7B 均已 PASS。** CP7B 的第二个、经明确授权的 root window 绑定
+   manifest
+   `7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`，以
+   `pfkey-pfroute` + `socket-dynamic` 在 21 秒内完成 attempt 1：backend ready、
+   官方 VICI 只读操作成功、connection/SA/policy 列表为空、UDP descriptor 为 0，
+   随后完整 teardown。首次旧 manifest 的 preflight failure 仍是历史上的
+   `INCONCLUSIVE_PREFLIGHT_FAILURE`，不改变最终 CP7B PASS。
+4. **CP7B 是 serverless L5 backend PASS，不是 IKE/server protocol PASS。** 它
+   证明 PF_KEY/PF_ROUTE constructor、VICI 控制和 clean teardown；没有 endpoint、
+   credential、`load-*`、`initiate`、SA/SPD/route 安装或 server traffic，因此不
+   证明 Main Mode、Quick Mode、ADDRULE 或数据面互通。
 5. **一次只改变一个变量。** 对同一个失败假设最多做三次有信息增益的尝试；
    仍不收敛时记录 last-good-state / first-bad-event，并缩小实验。
 6. **review 绑定 checkpoint 和风险，不绑定 commit。** 除 Live lane 的
@@ -459,10 +458,11 @@ CP7A PASS 后，CP7B 分为两个独立授权阶段：
 `c5464052f21af585a348a3fced8d1b5cf4fa336f8128fd9e64acc10465add877`
 绑定的首次 root/live window。该窗口因 root preflight snapshot 不稳定而在 daemon
 launch 前 fail closed，分类为 `INCONCLUSIVE_PREFLIGHT_FAILURE`。这次授权已经
-消费完毕，既不允许自动重试，也不能迁移到当前 manifest
-`7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`；
-当前候选必须重新取得精确 hash 与命令绑定的明确授权。任一 CP7B 阶段的批准也
-**不自动授权** CP8/CP9 server traffic。
+消费完毕，既不允许自动重试，也不能迁移。用户随后单独授权 manifest
+`7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`
+绑定的第二个窗口；它以 attempt 1 完成 serverless L5 backend 与 teardown，CP7B
+因此 PASS。该授权同样已经消费完毕，不能重放，也**不自动授权** CP8/CP9
+server traffic 或任何 real credential/material 读取。
 
 ### 7.4 Live Approval Gate 2 — server interop
 
@@ -699,7 +699,7 @@ partial-read、length framing、EOF 与 timeout；不得用它替代真实 daemo
 若 official client 与 Swift 均无法得到 response，但已经精确证明是 6.0.7
 runtime/plugin blocker，则 CP7A 可标记 BLOCKED，不得包装成 PASS。
 
-### Checkpoint 7B — privileged backend without server — APPROVAL REQUIRED
+### Checkpoint 7B — privileged backend without server — PASS
 
 #### Objective
 
@@ -762,6 +762,25 @@ macOS 启动、接受 VICI 控制并完整清理，同时不破坏 Surge。
   不做第三次或额外 broad review；
 - canonical CP7B commit 和 evidence report 完成。
 
+#### Accepted live result
+
+Manifest
+`7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`
+绑定的 attempt 1 在 21 秒内 PASS。StrongSwan source 为
+`a81298234753f314dbf2c4f2867a9a144006bd8c`；profile 为
+`pfkey-pfroute` + `socket-dynamic`。官方 VICI `version`/只读 status 成功，且
+runner contract 证明 connection、SA、policy listing 为空。全程 native UDP
+descriptor 为 0，没有 endpoint、server packet、credential read、`initiate` 或
+install。SAD、SPD、ESP port、persistent IPv4/IPv6 route projection、default
+route、DNS、utun、PowerVPN 与 Surge 在 before/during/after 和 teardown 后保持
+稳定；cleanup assertion PASS。runtime 最终为 UID 502:GID 20、mode 700，顶层
+仅有 reviewed `closure`。
+
+这只把证据推进到 serverless L5 backend。IKEv1 Main Mode、Quick Mode、
+ADDRULE、server acceptance、SA/policy install 和 resource data path 仍未测试。
+CP7B 的 integrated preflight review 与一次 additional narrow review 已全部用完；
+不运行第三次 review，也不重审无关历史。
+
 ### Checkpoint 8A — secure runtime material handoff — NO SERVER TRAFFIC
 
 #### Objective
@@ -783,7 +802,12 @@ one approved resource's canonical opaque metadata
 
 #### Rules
 
-- secret 不进入 argv/environment/JSON/fixtures/log；
+- real runtime material 的读取必须绑定用户明确授权的 secure provider/path 和
+  material class；对 provider scaffolding、synthetic handle 与失败路径的离线测试
+  不等于读取授权；
+- secret 不进入 argv、environment、JSON、fixtures、普通文件或 log；任何必须
+  持久化的非秘密 reference 也只能包含 provider/type/presence 等 value-free
+  metadata；
 - 允许使用 Keychain reference、secure prompt 或同等 native in-memory provider；
 - 不从 `/var/log/vsgvpn.log`、vendor XPC dictionary 或 process memory 导出可重放
   secret；
