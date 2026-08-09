@@ -24,7 +24,7 @@ scratch_identity() {
 	fi
 }
 synthetic_report() {
-	jq -n '{schemaVersion:1,mode:"r2_username_password_portal_login",status:"accepted",operations:{loginRequested:true,loginAccepted:true,sessionCheckRequested:true,sessionCheckAccepted:true,resourceListRequested:true,resourceListAccepted:true,logoutRequested:true,logoutAccepted:true},ownedMaterial:{credentialsErased:true,requestBodiesErased:true,responseBodiesErased:true,sessionMaterialErased:true},safety:{credentialSource:"controlling_tty_no_echo",endpointSource:"sealed_installed_configuration",systemTrustRequired:true,redirectsAllowed:false,credentialInArguments:false,credentialInEnvironment:false,credentialWrittenToFile:false,endpointValueRetainedInEvidence:false,platformSerialValueRetainedInEvidence:false,rawRequestRetainedInEvidence:false,rawResponseRetainedInEvidence:false,sessionValueRetainedInEvidence:false,resourceValueRetainedInEvidence:false,portalHTTPSAllowed:true,helperMutationRequested:false,xpcUsed:false,viciUsed:false,ikeTrafficRequested:false,appOwnedCopiesErasureClaimed:true,foundationInternalCopiesErasureClaimed:false},transactionAccepted:true}'
+	jq -n '{schemaVersion:1,mode:"r2_username_password_portal_login",status:"accepted",operations:{loginRequested:true,loginAccepted:true,sessionCheckRequested:true,sessionCheckAccepted:true,resourceListRequested:true,resourceListAccepted:true,logoutRequested:true,logoutAccepted:true},ownedMaterial:{credentialsErased:true,requestBodiesErased:true,responseBodiesErased:true,sessionMaterialErased:true},safety:{credentialSource:"controlling_tty_no_echo",endpointSource:"sealed_installed_configuration",systemTrustRequired:true,redirectsAllowed:false,credentialInArguments:false,credentialInEnvironment:false,credentialWrittenToFile:false,endpointValueRetainedInEvidence:false,platformSerialValueRetainedInEvidence:false,rawRequestRetainedInEvidence:false,rawResponseRetainedInEvidence:false,sessionValueRetainedInEvidence:false,resourceValueRetainedInEvidence:false,portalHTTPSAllowed:true,helperMutationRequested:false,xpcUsed:false,viciUsed:false,ikeTrafficRequested:false,appOwnedSecureBuffersErasureObserved:true,swiftAndFoundationBridgeCopiesErasureClaimed:false},transactionAccepted:true}'
 }
 
 runs_anchor=$(r2_launchd_runs) || exit 1
@@ -50,7 +50,10 @@ grep -Fq 'mkfifo "$fifo"' "$harness"
 grep -Fq 'r2_reconstruct_report "$fifo" "$report"' "$harness"
 if grep -Eq '(^|[[:space:]])read([[:space:]]|$)' "$harness" "$runtime"; then exit 1; fi
 if grep -Eq '(^|[[:space:]])(sudo|security)[[:space:]]' "$harness" "$runtime"; then exit 1; fi
-if grep -Fq '/bin/kill' "$harness" "$runtime"; then exit 1; fi
+grep -Fq '/bin/kill -"$forward_signal" "$owned_cli_pid"' "$harness"
+grep -Fq '/bin/kill -KILL "$owned_cli_pid"' "$harness"
+grep -Fq 'helperKillSent:false' "$harness"
+if grep -E '/bin/kill.*(charon|helper|PowerVPN)' "$harness" "$runtime"; then exit 1; fi
 assert_system_unchanged
 
 set +e
@@ -62,19 +65,21 @@ manifest_sha=$(r2_hash_file "$R2_MANIFEST")
 if [ "$review_state" = integrated_review_pending ]; then
 	[ "$preflight_rc" -eq 1 ]
 	expected_safe=false; expected_review=false
+	expected_exact=$(printf '%s\n' "$preflight" | jq -r '.manifestExact')
 else
 	[ "$review_state" = integrated_review_completed_findings_applied ]
 	[ "$preflight_rc" -eq 0 ]
-	expected_safe=true; expected_review=true
+	expected_safe=true; expected_review=true; expected_exact=true
 fi
 printf '%s\n' "$preflight" | jq -e --arg manifest "$manifest_sha" \
-	--argjson safe "$expected_safe" --argjson reviewed "$expected_review" '
+	--argjson safe "$expected_safe" --argjson reviewed "$expected_review" \
+	--argjson exact "$expected_exact" '
   keys==["candidateManifestSHA256","cliReady","cold","containsSecrets","dependenciesReady","evidenceClass","loginStarted","manifestExact","manifestReviewComplete","networkSnapshotTaken","safeToLogin","schemaVersion"] and
   .schemaVersion==1 and .evidenceClass=="r2_portal_cold_preflight" and
   .loginStarted==false and .networkSnapshotTaken==false and
   .cold=={guiAbsent:true,vendorHelpersAbsent:true,nativeCharonAbsent:true,portalCLIAbsent:true,helperLaunchdInactive:true,helperLaunchdRuns:19} and
-  .cliReady==true and .dependenciesReady==true and .manifestExact==true and
-  .containsSecrets==false and .candidateManifestSHA256==$manifest and
+  .cliReady==true and .dependenciesReady==true and .manifestExact==$exact and
+  .containsSecrets==false and .candidateManifestSHA256==(if $exact then $manifest else null end) and
   .safeToLogin==$safe and .manifestReviewComplete==$reviewed
 ' >/dev/null
 assert_system_unchanged
@@ -140,7 +145,14 @@ assert_system_unchanged
 
 signal_root=$(/usr/bin/mktemp -d "$test_parent/powervpn-r2-harness-test.XXXXXX")
 chmod 700 "$signal_root"
-POWERVPN_R2_TEST_ACTIVE_MONITOR_SIGNAL=reviewed-no-network-v1 \
+synthetic_report | jq '.status="cancelled" | .transactionAccepted=false | .operations[] = false' \
+	>"$signal_root/cancelled-report.json"
+chmod 600 "$signal_root/cancelled-report.json"
+printf '%s\n' '#!/bin/sh' 'report=$1' \
+	'trap '\''cat "$report"; exit 2'\'' INT TERM' \
+	'while :; do sleep 1; done' >"$signal_root/fake-cli"
+chmod 700 "$signal_root/fake-cli"
+POWERVPN_R2_TEST_ACTIVE_MONITOR_SIGNAL=reviewed-no-network-active-cli-v1 \
 	POWERVPN_R2_TEST_SCRATCH_ROOT="$signal_root" \
 	"$harness" --preflight-only >"$signal_root/stdout" 2>"$signal_root/stderr" &
 harness_pid=$!
@@ -157,15 +169,17 @@ set -e
 [ "$signal_rc" -eq 143 ]
 signal_file=$(find "$signal_root" -name incomplete-signal.json -type f -print)
 monitor_file=$(find "$signal_root" -name portal-monitor.json -type f -print)
+cli_report=$(find "$signal_root" -name cli-report.json -type f -print)
 [ "$(printf '%s\n' "$signal_file" | awk 'NF {n++} END {print n+0}')" -eq 1 ]
-[ "$(stat -f '%Lp' "$signal_file")" = 600 ] && [ "$(stat -f '%Lp' "$monitor_file")" = 600 ]
-jq -e 'keys==["complete","containsRawPortal","containsSecrets","evidenceClass","harnessKillSent","monitorStopped","networkCommandStarted","schemaVersion","signalExitStatus"] and .schemaVersion==1 and .evidenceClass=="r2_incomplete_signal_cleanup" and .complete==false and .signalExitStatus==143 and .monitorStopped==true and .networkCommandStarted==false and .harnessKillSent==false and .containsSecrets==false and .containsRawPortal==false' "$signal_file" >/dev/null
+[ "$(stat -f '%Lp' "$signal_file")" = 600 ] && [ "$(stat -f '%Lp' "$monitor_file")" = 600 ] && [ "$(stat -f '%Lp' "$cli_report")" = 600 ]
+jq -e 'keys==["cliDeadlineReached","cliExitStatus","cliExitedWithinDeadline","cliReportExact","cliReportedCancelled","cliSignalForwarded","complete","containsRawPortal","containsSecrets","evidenceClass","harnessKillSent","helperKillSent","monitorStopped","networkCommandStarted","schemaVersion","signalExitStatus"] and .schemaVersion==1 and .evidenceClass=="r2_incomplete_signal_cleanup" and .complete==false and .signalExitStatus==143 and .monitorStopped==true and .networkCommandStarted==false and .cliSignalForwarded==true and .cliExitedWithinDeadline==true and .cliDeadlineReached==false and .cliExitStatus==2 and .cliReportExact==true and .cliReportedCancelled==true and .harnessKillSent==false and .helperKillSent==false and .containsSecrets==false and .containsRawPortal==false' "$signal_file" >/dev/null
+jq -e '.status=="cancelled" and .transactionAccepted==false' "$cli_report" >/dev/null
 jq -e '.targetObserved==true and .inspectionSucceeded==true and .portalTCPObserved==false and .maximumTCPCount==0 and .maximumUDPCount==0 and .vendorHelperObserved==false and .nativeCharonObserved==false' "$monitor_file" >/dev/null
-[ -z "$(find "$signal_root" \( -name '*.fifo' -o -name 'network-*.json' -o -name cli-report.json -o -name result.json \) -print)" ]
+[ -z "$(find "$signal_root" \( -name '*.fifo' -o -name 'network-*.json' -o -name result.json \) -print)" ]
 assert_system_unchanged
 
 find "$fixture_root" "$signal_root" -type f -delete
 find "$fixture_root" "$signal_root" -type p -delete
 find "$fixture_root" "$signal_root" -depth -type d -exec rmdir {} \;
 assert_system_unchanged
-printf '%s\n' 'R2 live harness synthetic tests: PASS (no CLI, XPC, helper, or network command run)'
+printf '%s\n' 'R2 live harness synthetic tests: PASS (fake CLI only; no production CLI, XPC, helper, or network command run)'

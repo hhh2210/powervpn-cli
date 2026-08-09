@@ -44,7 +44,8 @@ actor SyntheticPortalTransport: PortalTransporting {
       let response = PortalHTTPResponse(
         statusCode: status,
         body: try SecureBytes(copying: Array(body.utf8)),
-        setCookieHeader: secureCookie
+        setCookieHeader: secureCookie,
+        setCookieProjection: secureCookie == nil ? .unavailableOrAmbiguous : .provenSingleWireHeader
       )
       retainedResponses.append(response)
       return response

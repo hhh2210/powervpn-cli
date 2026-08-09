@@ -49,7 +49,7 @@ import Testing
 
     try jar.acceptPasswordResponse(
       setCookieHeader: setCookie,
-      projection: .foundationSingleValue,
+      projection: .provenSingleWireHeader,
       passwordURL: url
     )
     let first = try jar.makeOutgoingCookieHeader()
@@ -77,7 +77,7 @@ import Testing
     }
     try jar.acceptPasswordResponse(
       setCookieHeader: setCookie,
-      projection: .foundationSingleValue,
+      projection: .provenSingleWireHeader,
       passwordURL: url
     )
     let header = try jar.makeOutgoingCookieHeader()
@@ -106,7 +106,7 @@ import Testing
     #expect(throws: LeadSecPortalCookieJarError.unsupportedSetCookie) {
       try jar.acceptPasswordResponse(
         setCookieHeader: setCookie,
-        projection: .foundationSingleValue,
+        projection: .provenSingleWireHeader,
         passwordURL: url
       )
     }
@@ -123,10 +123,43 @@ import Testing
       jar.erase()
     }
 
-    #expect(throws: LeadSecPortalCookieJarError.ambiguousSetCookieFraming) {
+    for projection in [
+      LeadSecSetCookieProjection.foundationFoldedValue,
+      .unavailableOrAmbiguous,
+    ] {
+      #expect(throws: LeadSecPortalCookieJarError.ambiguousSetCookieFraming) {
+        try jar.acceptPasswordResponse(
+          setCookieHeader: setCookie,
+          projection: projection,
+          passwordURL: url
+        )
+      }
+    }
+    #expect(jar.retainedSessionByteCount == 0)
+  }
+
+  @Test(arguments: [
+    "VSG_SESSIONID_EXT=synthetic;",
+    "VSG_SESSIONID2=synthetic;",
+    "VSG_SESSIONID=first, VSG_SESSIONID=second",
+    "VSG_SESSIONID=first; Path=/, OTHER=second",
+    "VSG_SESSIONID=first; VSG_SESSIONID=second",
+    "VSG_SESSIONID=first; VSG_SESSIONID_EXT=second",
+  ])
+  func extendedOrFoldedSessionCookieFormsFailClosed(_ value: String) throws {
+    let jar = try LeadSecPortalCookieJar(languageIndex: 0)
+    let setCookie = try secure(value)
+    let url = try secure(passwordURL)
+    defer {
+      setCookie.erase()
+      url.erase()
+      jar.erase()
+    }
+
+    #expect(throws: LeadSecPortalCookieJarError.unsupportedSetCookie) {
       try jar.acceptPasswordResponse(
         setCookieHeader: setCookie,
-        projection: .unavailableOrAmbiguous,
+        projection: .provenSingleWireHeader,
         passwordURL: url
       )
     }
@@ -146,7 +179,7 @@ import Testing
     }
     try jar.acceptPasswordResponse(
       setCookieHeader: firstCookie,
-      projection: .foundationSingleValue,
+      projection: .provenSingleWireHeader,
       passwordURL: url
     )
     let retainedCount = jar.retainedSessionByteCount
@@ -154,7 +187,7 @@ import Testing
     #expect(throws: LeadSecPortalCookieJarError.sessionAlreadyStored) {
       try jar.acceptPasswordResponse(
         setCookieHeader: secondCookie,
-        projection: .foundationSingleValue,
+        projection: .provenSingleWireHeader,
         passwordURL: url
       )
     }
@@ -178,14 +211,14 @@ import Testing
     #expect(throws: LeadSecPortalCookieJarError.invalidPasswordURL) {
       try jar.acceptPasswordResponse(
         setCookieHeader: setCookie,
-        projection: .foundationSingleValue,
+        projection: .provenSingleWireHeader,
         passwordURL: wrongURL
       )
     }
     #expect(throws: LeadSecPortalCookieJarError.invalidSetCookieBytes) {
       try jar.acceptPasswordResponse(
         setCookieHeader: controlCookie,
-        projection: .foundationSingleValue,
+        projection: .provenSingleWireHeader,
         passwordURL: url
       )
     }
@@ -201,7 +234,7 @@ import Testing
     }
     try jar.acceptPasswordResponse(
       setCookieHeader: setCookie,
-      projection: .foundationSingleValue,
+      projection: .provenSingleWireHeader,
       passwordURL: url
     )
 

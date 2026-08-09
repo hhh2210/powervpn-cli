@@ -8,6 +8,7 @@ enum PortalTransportError: Error, Equatable, Sendable, CustomStringConvertible {
   case redirectRejected
   case authenticationChallengeRejected
   case trustRejected
+  case setCookieFramingUnavailable
   case invalidResponse
   case responseTooLarge
   case cancelled
@@ -23,6 +24,7 @@ enum PortalTransportError: Error, Equatable, Sendable, CustomStringConvertible {
     case .redirectRejected: "portal redirect rejected"
     case .authenticationChallengeRejected: "portal authentication challenge rejected"
     case .trustRejected: "portal TLS trust rejected"
+    case .setCookieFramingUnavailable: "portal Set-Cookie wire framing unavailable"
     case .invalidResponse: "invalid portal response"
     case .responseTooLarge: "portal response exceeded the bounded limit"
     case .cancelled: "portal request cancelled"
@@ -147,11 +149,18 @@ final class PortalHTTPResponse: @unchecked Sendable {
   let statusCode: Int
   private let body: SecureBytes
   private let setCookieHeader: SecureBytes?
+  let setCookieProjection: LeadSecSetCookieProjection
 
-  init(statusCode: Int, body: SecureBytes, setCookieHeader: SecureBytes? = nil) {
+  init(
+    statusCode: Int,
+    body: SecureBytes,
+    setCookieHeader: SecureBytes? = nil,
+    setCookieProjection: LeadSecSetCookieProjection = .unavailableOrAmbiguous
+  ) {
     self.statusCode = statusCode
     self.body = body
     self.setCookieHeader = setCookieHeader
+    self.setCookieProjection = setCookieProjection
   }
 
   var bodyByteCount: Int { body.count }
@@ -188,6 +197,7 @@ struct PortalSessionResponseHead: Sendable {
   let statusCode: Int
   let finalURL: URL
   let setCookieHeader: SecureBytes?
+  let setCookieProjection: LeadSecSetCookieProjection
 }
 
 struct PortalSessionByteStream: Sendable {
@@ -197,8 +207,8 @@ struct PortalSessionByteStream: Sendable {
 }
 
 protocol PortalURLSessionPerforming: Sendable {
+  var passwordSetCookieProjection: LeadSecSetCookieProjection { get }
   func open(_ request: URLRequest) async throws -> PortalSessionByteStream
-  func cancelAll()
 }
 
 final class SecureResponseAccumulator {
@@ -241,56 +251,5 @@ final class SecureResponseAccumulator {
     if count > 0 { _ = memset_s(storage, count, 0, count) }
     erased = true
     count = 0
-  }
-}
-
-final class SecureBodyInputStream: InputStream, @unchecked Sendable {
-  private let bytes: SecureBytes
-  private var offset = 0
-  private var status: Stream.Status = .notOpen
-  private var failure: Error?
-
-  init(bytes: SecureBytes) {
-    self.bytes = bytes
-    super.init(data: Data())
-  }
-
-  override func open() {
-    if status == .notOpen { status = .open }
-  }
-
-  override func close() {
-    status = .closed
-  }
-
-  override var streamStatus: Stream.Status { status }
-  override var streamError: Error? { failure }
-  override var hasBytesAvailable: Bool { status == .open && offset < bytes.count }
-
-  override func read(_ buffer: UnsafeMutablePointer<UInt8>, maxLength length: Int) -> Int {
-    guard status == .open, length > 0 else { return status == .atEnd ? 0 : -1 }
-    do {
-      let copied = try bytes.withUnsafeBytes { source -> Int in
-        let remaining = source.count - offset
-        guard remaining > 0 else { return 0 }
-        let copied = min(remaining, length)
-        _ = memcpy(buffer, source.baseAddress!.advanced(by: offset), copied)
-        offset += copied
-        return copied
-      }
-      if copied == 0 { status = .atEnd }
-      return copied
-    } catch {
-      failure = PortalTransportError.invalidRequest
-      status = .error
-      return -1
-    }
-  }
-
-  override func getBuffer(
-    _ buffer: UnsafeMutablePointer<UnsafeMutablePointer<UInt8>?>,
-    length: UnsafeMutablePointer<Int>
-  ) -> Bool {
-    false
   }
 }

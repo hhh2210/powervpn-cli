@@ -22,15 +22,20 @@ upstream strongSwan 6.0.7.
   not log in, contact a server, send `start_connection`, or create an SA,
   route, or utun. Direct SAD/SPD comparison remained unavailable to the
   unprivileged harness and is not claimed.
-- Rescue R2 is an **offline candidate, not PASS**. The dependency-free
+- Rescue R2 is a **hard NO-GO, not PASS**. The dependency-free
   `PowerVPNPortal` target implements the evidence-locked password POST,
   resource GET, 60-second session check and logout with a no-echo controlling
   TTY, system TLS trust, a closed XML profile, bounded response storage and
   app-owned buffer erasure. The current endpoint was confirmed by a narrow
   latest-address query against a mode-600 encrypted database copy; no user row
-  was queried. The one integrated review, reviewed manifest and real server
-  window remain pending. A password exposed in the task text is compromised
-  and cannot be used; it must be rotated before the live gate.
+  was queried. The one permitted integrated review completed with five direct
+  findings, and all five were fixed. The corrected path now rejects the
+  password POST locally before `session.open`, because Foundation's projected
+  `Set-Cookie` value cannot prove raw header multiplicity/framing. No live or
+  network request occurred. The next checkpoint is an independent, value-free
+  R2 raw-header-framing gate; review closure and self-consistency are not server
+  compatibility. A password exposed in the task text remains compromised and
+  forbidden, but no rotation is required until a future live-login gate exists.
 
 - The vendor helper is based on strongSwan 5.8.0. This is proven by unstripped
   Mach-O symbol paths, not inferred from release dates.

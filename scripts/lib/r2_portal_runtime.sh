@@ -51,6 +51,7 @@ r2_candidate_manifest_exact() {
 	runner_sha=$(r2_hash_file "$R2_REPO_ROOT/scripts/run_r2_portal_login.sh") || return 1
 	runtime_sha=$(r2_hash_file "$R2_REPO_ROOT/scripts/lib/r2_portal_runtime.sh") || return 1
 	tests_sha=$(r2_hash_file "$R2_REPO_ROOT/scripts/verify/r2_live_harness_tests.sh") || return 1
+	snapshot_sha=$(r2_hash_file "$R2_SNAPSHOT") || return 1
 	cli_sha=$(r2_hash_file "$R2_CLI") || return 1
 	app_sha=$(r2_hash_file /Applications/PowerVPN.app/Contents/MacOS/PowerVPN) || return 1
 	info_sha=$(r2_hash_file /Applications/PowerVPN.app/Contents/Info.plist) || return 1
@@ -62,7 +63,8 @@ r2_candidate_manifest_exact() {
 	*) return 1 ;;
 	esac
 	jq -e --arg source "$source_aggregate" --arg runner "$runner_sha" \
-		--arg runtime "$runtime_sha" --arg tests "$tests_sha" --arg cli "$cli_sha" \
+		--arg runtime "$runtime_sha" --arg tests "$tests_sha" --arg snapshot "$snapshot_sha" \
+		--arg cli "$cli_sha" \
 		--arg app "$app_sha" --arg info "$info_sha" --arg db "$db_sha" \
 		--arg prefs "$prefs_sha" --arg review "$review_state" '
     keys == ["artifacts", "baseCommit", "evidenceClass", "reviewState",
@@ -75,7 +77,8 @@ r2_candidate_manifest_exact() {
     .artifacts == {arm64CLISHA256:$cli,harnessTestsSHA256:$tests,
       installedAppSHA256:$app,installedDatabaseSHA256:$db,
       installedInfoPlistSHA256:$info,installedPreferencesSHA256:$prefs,
-      runnerSHA256:$runner,runtimeLibrarySHA256:$runtime}
+      networkSnapshotSHA256:$snapshot,runnerSHA256:$runner,
+      runtimeLibrarySHA256:$runtime}
   ' "$R2_MANIFEST" >/dev/null || return 1
 	R2_CANDIDATE_MANIFEST_SHA256=$(r2_hash_file "$R2_MANIFEST") || return 1
 	R2_RUNTIME_SOURCE_AGGREGATE_SHA256=$source_aggregate
@@ -263,7 +266,7 @@ r2_reconstruct_report() {
       (.status | IN("accepted","configuration_rejected","credential_input_rejected","transport_rejected","tls_rejected","redirect_rejected","login_rejected","challenge_required","login_response_rejected","session_rejected","resource_list_rejected","logout_rejected","cancelled","internal_failure")) and
       (.operations | keys) == ["loginAccepted","loginRequested","logoutAccepted","logoutRequested","resourceListAccepted","resourceListRequested","sessionCheckAccepted","sessionCheckRequested"] and all(.operations[]; type == "boolean") and
       (.ownedMaterial | keys) == ["credentialsErased","requestBodiesErased","responseBodiesErased","sessionMaterialErased"] and all(.ownedMaterial[]; type == "boolean") and
-      .safety == {appOwnedCopiesErasureClaimed:true,credentialInArguments:false,credentialInEnvironment:false,credentialSource:"controlling_tty_no_echo",credentialWrittenToFile:false,endpointSource:"sealed_installed_configuration",endpointValueRetainedInEvidence:false,foundationInternalCopiesErasureClaimed:false,helperMutationRequested:false,ikeTrafficRequested:false,platformSerialValueRetainedInEvidence:false,portalHTTPSAllowed:true,rawRequestRetainedInEvidence:false,rawResponseRetainedInEvidence:false,redirectsAllowed:false,resourceValueRetainedInEvidence:false,sessionValueRetainedInEvidence:false,systemTrustRequired:true,viciUsed:false,xpcUsed:false} and
+      .safety == {appOwnedSecureBuffersErasureObserved:true,credentialInArguments:false,credentialInEnvironment:false,credentialSource:"controlling_tty_no_echo",credentialWrittenToFile:false,endpointSource:"sealed_installed_configuration",endpointValueRetainedInEvidence:false,helperMutationRequested:false,ikeTrafficRequested:false,platformSerialValueRetainedInEvidence:false,portalHTTPSAllowed:true,rawRequestRetainedInEvidence:false,rawResponseRetainedInEvidence:false,redirectsAllowed:false,resourceValueRetainedInEvidence:false,sessionValueRetainedInEvidence:false,swiftAndFoundationBridgeCopiesErasureClaimed:false,systemTrustRequired:true,viciUsed:false,xpcUsed:false} and
       (.transactionAccepted | type) == "boolean"
     then {schemaVersion,mode,status,operations,ownedMaterial,safety,transactionAccepted}
     else error("closed portal report schema rejected") end

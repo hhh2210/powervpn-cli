@@ -9,7 +9,7 @@ supersedes_for_active_execution: Native Goal V3
 native_v3_role: frozen fallback
 native_fallback_baseline_commit: 8d2e026c1f5db15f5b1e1e0ca81c72d2ae5f2073
 current_checkpoint: R2-username-password-portal-login
-immediate_next: complete-r2-integrated-review-and-credential-rotation-gate
+immediate_next: complete-independent-r2-raw-header-framing-subcheckpoint
 user_input_contract: username-and-password-only
 review_policy: one integrated review per checkpoint
 ---
@@ -259,6 +259,20 @@ acceptance profile. Unknown header folding, challenge shape or response
 semantics fail closed; a generate/parse round trip is not server-compatibility
 evidence.
 
+#### R2A.1 — independent raw-header-framing gate
+
+The one permitted integrated R2 review is complete and its five direct findings
+have been fixed. The resulting strict Cookie boundary is a hard NO-GO for live
+login: Foundation's projected `Set-Cookie` value does not independently prove
+the raw response-header multiplicity or framing required by the compatibility
+profile. The password request must be rejected locally before `session.open`
+until an independent, value-free raw-header-framing subcheckpoint supplies that
+missing evidence.
+
+This subcheckpoint uses no username or password and does not authorize password
+authentication. R2B remains blocked even though the review findings are fixed;
+review closure is not server-compatibility evidence.
+
 #### R2B live approval
 
 Run only:
@@ -276,11 +290,13 @@ PASS only if the user enters no other material and no secret is persisted or
 printed.
 
 One password was exposed in the Codex task text during R2 implementation. It
-is compromised and MUST NOT be used for the live run. Before R2B, the user must
-rotate it outside PowerVPN and confirm the rotation through a fresh macOS
-attention gate. The new password is entered only in the no-echo controlling
-TTY; neither the old nor new value may appear in chat, Goal text, argv,
-environment, files, fixtures, logs or retained evidence.
+is compromised and MUST NOT be used for any future live run. No password
+rotation or other user action is required for the current raw-header-framing
+subcheckpoint because it performs no password authentication. Before any later
+R2B attempt, the user must rotate the password outside PowerVPN and confirm the
+rotation through a fresh macOS attention gate. The new password is entered only
+in the no-echo controlling TTY; neither the old nor new value may appear in
+chat, Goal text, argv, environment, files, fixtures, logs or retained evidence.
 
 ### R3 — Portal response to vendor XPC snapshot
 

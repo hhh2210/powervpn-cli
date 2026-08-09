@@ -140,7 +140,8 @@ jq -e --arg review "$expected_review" '
   (.runtimeSourceAggregateSHA256 | test("^[0-9a-f]{64}$")) and
   (.artifacts | keys) == ["arm64CLISHA256", "harnessTestsSHA256",
     "installedAppSHA256", "installedDatabaseSHA256", "installedInfoPlistSHA256",
-    "installedPreferencesSHA256", "runnerSHA256", "runtimeLibrarySHA256"] and
+    "installedPreferencesSHA256", "networkSnapshotSHA256", "runnerSHA256",
+    "runtimeLibrarySHA256"] and
   all(.artifacts[]; test("^[0-9a-f]{64}$"))
 ' "$manifest" >/dev/null
 

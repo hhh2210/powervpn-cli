@@ -8,15 +8,18 @@ enum LeadSecPortalCookieJarError: Error, Equatable, Sendable {
 }
 
 enum LeadSecSetCookieProjection: Equatable, Sendable {
-  /// Foundation exposes one projected value; this does not prove that the
-  /// original HTTP response contained exactly one wire header field.
-  case foundationSingleValue, unavailableOrAmbiguous
+  case provenSingleWireHeader
+  /// Foundation may fold repeated fields, so its value cannot prove wire
+  /// multiplicity and is never accepted by the compatibility profile.
+  case foundationFoldedValue
+  case unavailableOrAmbiguous
 }
 
 final class LeadSecPortalCookieJar: @unchecked Sendable {
   private static let httpsPrefix = Array("https://".utf8)
   private static let passwordPath = Array(PortalWireContract.passwordPath.utf8)
-  private static let sessionPrefix = Array("VSG_SESSIONID".utf8)
+  private static let sessionNamePrefix = Array("VSG_SESSIONID".utf8)
+  private static let sessionPrefix = Array("VSG_SESSIONID=".utf8)
   private static let verifyCodePrefix = Array("verifycode".utf8)
   private static let ticketPrefix = Array("VSG_SMC_Ticket".utf8)
   private static let originPrefix = Array(" ORIGINURL=".utf8)
@@ -55,13 +58,13 @@ final class LeadSecPortalCookieJar: @unchecked Sendable {
   ) throws {
     try lock.withLock {
       guard !isErased else { throw LeadSecPortalCookieJarError.erased }
-      guard projection == .foundationSingleValue else {
-        throw LeadSecPortalCookieJarError.ambiguousSetCookieFraming
-      }
       guard sessionEntry == nil else {
         throw LeadSecPortalCookieJarError.sessionAlreadyStored
       }
       guard let setCookieHeader else { throw LeadSecPortalCookieJarError.missingSetCookie }
+      guard projection == .provenSingleWireHeader else {
+        throw LeadSecPortalCookieJarError.ambiguousSetCookieFraming
+      }
       sessionEntry = try Self.makeSessionEntry(
         setCookieHeader: setCookieHeader,
         passwordURL: passwordURL
@@ -133,7 +136,8 @@ final class LeadSecPortalCookieJar: @unchecked Sendable {
         throw LeadSecPortalCookieJarError.invalidSetCookieBytes
       }
       guard !hasPrefix(header, verifyCodePrefix), !hasPrefix(header, ticketPrefix),
-        hasPrefix(header, sessionPrefix)
+        hasPrefix(header, sessionPrefix), !header.contains(0x2c),
+        countOccurrences(of: sessionNamePrefix, in: header) == 1
       else { throw LeadSecPortalCookieJarError.unsupportedSetCookie }
 
       return try passwordURL.withUnsafeBytes { url in

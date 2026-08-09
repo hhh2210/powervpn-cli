@@ -54,8 +54,8 @@ public struct PortalSafetyEvidence: Encodable, Equatable, Sendable {
   public let xpcUsed: Bool
   public let viciUsed: Bool
   public let ikeTrafficRequested: Bool
-  public let appOwnedCopiesErasureClaimed: Bool
-  public let foundationInternalCopiesErasureClaimed: Bool
+  public let appOwnedSecureBuffersErasureObserved: Bool
+  public let swiftAndFoundationBridgeCopiesErasureClaimed: Bool
 
   static let r2 = PortalSafetyEvidence(
     credentialSource: "controlling_tty_no_echo",
@@ -76,8 +76,8 @@ public struct PortalSafetyEvidence: Encodable, Equatable, Sendable {
     xpcUsed: false,
     viciUsed: false,
     ikeTrafficRequested: false,
-    appOwnedCopiesErasureClaimed: true,
-    foundationInternalCopiesErasureClaimed: false
+    appOwnedSecureBuffersErasureObserved: true,
+    swiftAndFoundationBridgeCopiesErasureClaimed: false
   )
 }
 
@@ -125,8 +125,8 @@ public struct PortalLoginReport: Encodable, Equatable, Sendable {
       && !safety.xpcUsed
       && !safety.viciUsed
       && !safety.ikeTrafficRequested
-      && safety.appOwnedCopiesErasureClaimed
-      && !safety.foundationInternalCopiesErasureClaimed
+      && safety.appOwnedSecureBuffersErasureObserved
+      && !safety.swiftAndFoundationBridgeCopiesErasureClaimed
   }
 
   init(

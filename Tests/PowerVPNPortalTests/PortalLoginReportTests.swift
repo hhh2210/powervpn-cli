@@ -17,6 +17,10 @@ import Testing
       ]
     )
     #expect(root["status"] as? String == "accepted")
+    let safety = try #require(root["safety"] as? [String: Any])
+    #expect(safety["appOwnedSecureBuffersErasureObserved"] as? Bool == true)
+    #expect(safety["swiftAndFoundationBridgeCopiesErasureClaimed"] as? Bool == false)
+    #expect(safety["appOwnedCopiesErasureClaimed"] == nil)
     #expect(String(decoding: encoded, as: UTF8.self).contains("166.111") == false)
     #expect(String(decoding: encoded, as: UTF8.self).contains("sessionid") == false)
   }

@@ -96,7 +96,8 @@ import Testing
     let errors: [PortalTransportError] = [
       .invalidOrigin, .invalidRequest, .insecureTransport, .originMismatch,
       .redirectRejected, .authenticationChallengeRejected, .trustRejected,
-      .invalidResponse, .responseTooLarge, .cancelled, .timedOut, .unavailable,
+      .setCookieFramingUnavailable, .invalidResponse, .responseTooLarge,
+      .cancelled, .timedOut, .unavailable,
     ]
     for error in errors {
       #expect(!error.description.contains(sentinel))

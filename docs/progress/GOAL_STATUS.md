@@ -660,10 +660,12 @@ request. R1's read-only authorization does not transfer to R2.
 
 Canonical commit: this cumulative Rescue R1 implementation and evidence commit.
 
-## 2026-08-09 — Rescue R2 offline portal-login candidate
+## 2026-08-09 — Rescue R2 review closure and raw-header-framing blocker
 
-State: **IN PROGRESS — OFFLINE CANDIDATE.** No portal request has been sent.
-R2 is not PASS and the active Goal remains open.
+State: **HARD NO-GO — RAW SET-COOKIE FRAMING UNPROVEN.** R2 is not PASS and
+the active Goal remains open. A synthetic production-path test rejected locally
+before `session.open`; no real credential, portal request or network connection
+was used.
 
 Verified: the new dependency-free `PowerVPNPortal` target implements the exact
 default password body, sealed installed origin, system-trust-only TLS,
@@ -673,9 +675,10 @@ LeadSec profile, fresh isolated Cookie handling, resource fetch, exact
 logout. `powervpn login` rejects every option/extra argument before constructing
 the runtime and emits only a closed value-free JSON report.
 
-User input required: none for offline verification. A future approved live
-window may accept only username + a newly rotated password through the no-echo
-controlling TTY.
+User input required: none. The next raw-header-framing subcheckpoint is
+value-free and requires no password rotation or credential input. The exposed
+password remains forbidden; rotation is deferred until a future real-login
+gate is otherwise ready.
 
 Derived automatically: current origin/version/address-selection/language state,
 raw platform serial, Cookie/session state, operation timing and logout. The
@@ -684,34 +687,43 @@ database copy using the exact SQLCipher 3.4.0 profile. No user-table row was
 queried and no database passphrase was retained.
 
 Evidence: `docs/evidence/checkpoint-r2-validation.md`; the corrected CP5
-password-field fixture; and
-`fixtures/redacted/r2-reviewed-candidate-manifest-v1.json`, currently marked
-`integrated_review_pending`. The live value-free fixture does not yet exist.
+password-field fixture; and reviewed-candidate manifest
+`676e8062b3b29c83dc56e738c475452f029bc3e77f74261eea15878a618774eb`.
+The live value-free fixture does not exist because dispatch stopped before
+`session.open`.
 
-Tests/commands: the cumulative candidate verifier passed with 103 Portal tests
-in 16 suites and 109 Core tests in 10 suites (212 total), the corrected CP5
-password-profile test, arm64 build, strict Swift formatting, shell syntax and
-ShellCheck, closed-schema/signal-cleanup harness tests, secret scan and diff
-check. Launchd runs remained exactly 19 and the helper stayed inactive. The
-same verifier will run once more after direct review fixes and manifest seal.
+Tests/commands: after the five direct review findings were fixed, the complete
+offline verifier passed with 108 Portal tests in 17 suites and 109 Core tests in
+10 suites (217 total), the corrected CP5 password-profile test, arm64 build,
+strict Swift formatting, shell syntax and ShellCheck, closed-schema bounded
+signal-cleanup harness tests, secret scan, exact manifest and diff check.
+This does not claim an R2 live/server acceptance run.
 
-Safety/cleanup: no real credential, portal connection, PowerVPN GUI, helper,
+Safety/cleanup: the synthetic production path failed closed before
+`session.open`; no real credential, portal connection, PowerVPN GUI, helper,
 XPC, VICI, native charon, IKE/UDP, SA, policy, route or utun action occurred.
-All tests use synthetic credentials. One password pasted into Codex task text
-is treated as compromised, was not used, and is forbidden from the live run.
+One password pasted into Codex task text is compromised, was not used, and is
+forbidden from every future live run.
 
-Review result: pending. Exactly one integrated R2 review will inspect the
-frozen cumulative checkpoint. There will be no per-commit or unrelated-history
-review.
+Review result: complete. Exactly one integrated R2 review inspected the frozen
+cumulative checkpoint and returned five direct findings. All five were fixed:
+signal-to-task cancellation, cancellation-safe logout transport, fail-closed
+Set-Cookie framing, manifest binding for the network snapshot dependency, and
+truthful secure-buffer erasure claims. No second or unrelated-history review
+ran.
 
-Remaining: integrated review and direct fixes; final reviewed manifest;
-password rotation outside PowerVPN plus a fresh macOS confirmation; then
-exactly one bounded manifest-bound TTY login/resource/session/logout window.
+Remaining: complete an independent, value-free R2 raw-header-framing
+subcheckpoint. Foundation's projected Set-Cookie value is not raw multiplicity
+evidence, so no password login may run yet. Password rotation and a fresh macOS
+confirmation are deferred until this blocker is independently closed and a
+future live gate is otherwise ready.
 
-Next command: run the one integrated R2 review. Do not run `powervpn login`.
+Next command: execute only the independent R2 raw-header-framing subcheckpoint
+without username/password. Do not run `powervpn login`.
 
-Approval required: **yes**, but only after review and credential rotation. The
-old password and all chat/task text are invalid credential sources.
+Approval required: no credential/live-login approval now. Any future real
+password request still requires fresh approval and prior rotation; the old
+password and all chat/task text are invalid credential sources.
 
 Canonical commit: pending successful live evidence and final checkpoint
 validation.

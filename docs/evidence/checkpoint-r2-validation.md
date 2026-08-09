@@ -1,10 +1,11 @@
 # Rescue R2 username/password portal-login gate
 
-Status: **OFFLINE CANDIDATE; LIVE NOT AUTHORIZED.** R2 replaces neither the
-vendor helper nor the tunnel. It asks whether a fresh arm64 process can perform
-the legal portal transaction using only username and password from a no-echo
-controlling TTY, then erase its app-owned material and exit without starting a
-helper or sending IKE traffic.
+Status: **HARD NO-GO; LIVE NOT AUTHORIZED.** The one permitted integrated R2
+review is complete and all five direct findings have been fixed, but the strict
+post-review path rejects the password POST locally before `session.open`.
+Foundation's projected `Set-Cookie` value cannot prove the raw response-header
+multiplicity/framing required by the compatibility profile. No live request or
+network connection occurred, and R2 remains active rather than PASS.
 
 ## Scope
 
@@ -73,10 +74,12 @@ R2 does not infer the unobserved `encode=2` version-preflight path.
 Login accepts numeric hexadecimal `RESPONSE.RESULT.code == 0`; the known
 verification-code challenge fails closed. A `VSG_SESSIONID` comes from the
 password response's `Set-Cookie`, not the XML. The fresh isolated jar preserves
-the observed vendor spacing and `ORIGINURL` suffix. Foundation exposes a
-single projected Set-Cookie value, not raw header multiplicity; therefore the
-cookie implementation remains a bounded compatibility hypothesis until the
-resource and session requests are both accepted by the real server.
+the observed vendor spacing and `ORIGINURL` suffix, but Foundation exposes only
+a projected Set-Cookie value and cannot establish raw header multiplicity.
+Treating that projection as a proven single wire field would violate the
+compatibility invariant. The production path therefore rejects the request
+before `session.open`; server tolerance cannot substitute for vendor-exact
+framing evidence.
 
 Resource acceptance mirrors the vendor's minimal gate: an empty or missing
 resource list is allowed, while `0x80000020` and `RESPONSE.ERROR` reject. The
@@ -95,11 +98,13 @@ XML scalar values and the session cookie are held in app-owned, explicitly
 erasable buffers. The workflow reports erasure only after observing those
 owned buffers at zero length and no active tracked request/response.
 
-URLSession necessarily creates transient Foundation/CF copies for at least the
-Cookie header and HTTP implementation. R2 does not claim those framework-
-internal copies are zeroized. The retained report is a closed value-free JSON
-projection and contains no endpoint, serial, cookie, body, resource value or
-credential length.
+The URLRequest bridge explicitly constructs one transient Swift `String` from
+the Cookie buffer, after which URLSession may create additional Foundation/CF
+copies. None of those bridge/framework copies is claimed zeroized. The report
+claims only `appOwnedSecureBuffersErasureObserved`; it separately fixes
+`swiftAndFoundationBridgeCopiesErasureClaimed=false`. The retained projection
+contains no endpoint, serial, cookie, body, resource value or credential
+length.
 
 ## Offline acceptance and live boundary
 
@@ -111,9 +116,11 @@ construction. The live harness clears the child environment, leaves stdin at
 through a FIFO and closed `jq` schema, and retains only mode-600 value-free
 evidence.
 
-The harness requires all of these before a request can leave the machine:
+Any future live harness would require all of these before a request could leave
+the machine:
 
 - reviewed candidate manifest and exact authorized manifest SHA-256;
+- exact manifest-bound network snapshot script;
 - PowerVPN GUI, all vendor helpers and native charon absent;
 - exact inactive launchd generation;
 - a new-password rotation confirmation;
@@ -126,11 +133,37 @@ route/DNS/interface/utun drift, invalid report, or cleanup residue fails the
 checkpoint.
 
 One password was pasted into the Codex task text during R2 development. It is
-treated as compromised, was not used by code or tests, and is forbidden from
-the live window. The user must rotate it outside PowerVPN and later enter only
-the new value through the no-echo TTY. A chat message is not accepted as the
-rotation gate.
+treated as compromised, was not used by code or tests, and remains forbidden
+from every future live window. No rotation or credential input is required now:
+the next subcheckpoint is value-free and performs no password authentication.
+Rotation outside PowerVPN plus a fresh macOS confirmation remains mandatory
+before any later real login; a chat message is not accepted as that gate.
 
-The integrated review, reviewed manifest, real TTY run and retained runtime
-fixture are pending. Until all four are complete, R2 is not PASS and the Goal
-must remain active.
+## Integrated review closure and current blocker
+
+Exactly one cumulative R2 integrated review completed. Its five direct findings
+were fixed:
+
+1. real process signals now enter bounded task cancellation/cleanup;
+2. request cancellation no longer destroys the transport needed for logout;
+3. unknown or folded Set-Cookie framing fails closed before network dispatch;
+4. the network snapshot dependency is included in manifest identity; and
+5. the report limits its erasure claim to observed app-owned secure buffers.
+
+The fixed cumulative candidate is bound by reviewed manifest SHA-256
+`676e8062b3b29c83dc56e738c475452f029bc3e77f74261eea15878a618774eb`.
+Its final offline verifier passed 108 Portal tests in 17 suites, 109 Core tests
+in 10 suites, the arm64 build, strict formatting, the no-network signal harness,
+the secret scan and the exact manifest gate. This proves the fixed offline
+implementation and safety boundary only; it does not prove server compatibility.
+
+The third fix intentionally exposes the remaining protocol-evidence blocker:
+the current Foundation API surface cannot prove raw Set-Cookie field
+multiplicity/framing. A synthetic production-path test stopped locally before
+`session.open`; no real credential, portal TCP connection, helper, XPC, VICI,
+IKE, UDP, route, policy, SA or utun action occurred.
+
+Next checkpoint: an independent R2 raw-header-framing subcheckpoint that uses
+no username/password and does not infer wire structure from Foundation's
+projected value. Until that evidence exists, R2 is hard NO-GO, the runtime
+fixture does not exist, and the Goal remains active.

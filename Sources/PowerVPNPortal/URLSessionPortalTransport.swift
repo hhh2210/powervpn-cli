@@ -9,6 +9,7 @@ struct URLSessionPortalTransport: PortalTransporting {
   private let session: any PortalURLSessionPerforming
   private let maximumResponseBytes: Int
   private let timeout: TimeInterval
+  private let activeRequests = PortalRequestCancellationRegistry()
 
   init(
     allowedOrigin: PortalHTTPOrigin,
@@ -48,13 +49,25 @@ struct URLSessionPortalTransport: PortalTransporting {
     defer { request.erase() }
     try validate(request)
     let urlRequest = try makeURLRequest(request)
+    let cancellation = PortalRequestCancellation()
+    activeRequests.register(cancellation)
+    defer { activeRequests.unregister(cancellation) }
 
     do {
       return try await withTaskCancellationHandler {
-        let stream = try await session.open(urlRequest)
-        return try await consume(stream, requestURL: request.url)
+        let operation = Task { [session, allowedOrigin, maximumResponseBytes] in
+          let stream = try await session.open(urlRequest)
+          return try await Self.consume(
+            stream,
+            requestURL: request.url,
+            allowedOrigin: allowedOrigin,
+            maximumResponseBytes: maximumResponseBytes
+          )
+        }
+        cancellation.install(operation)
+        return try await operation.value
       } onCancel: {
-        session.cancelAll()
+        activeRequests.cancel(cancellation)
       }
     } catch {
       throw normalize(error)
@@ -62,7 +75,7 @@ struct URLSessionPortalTransport: PortalTransporting {
   }
 
   func cancel() {
-    session.cancelAll()
+    activeRequests.cancelAll()
   }
 
   static func makeEphemeralConfiguration(
@@ -95,6 +108,11 @@ struct URLSessionPortalTransport: PortalTransporting {
       throw PortalTransportError.invalidRequest
     }
     guard allowedOrigin.matches(request.url) else { throw PortalTransportError.originMismatch }
+    if request.method == .post, request.url.path == PortalWireContract.passwordPath,
+      session.passwordSetCookieProjection != .provenSingleWireHeader
+    {
+      throw PortalTransportError.setCookieFramingUnavailable
+    }
     if request.method == .get, request.requestBody != nil {
       throw PortalTransportError.invalidRequest
     }
@@ -130,9 +148,11 @@ struct URLSessionPortalTransport: PortalTransporting {
     return result
   }
 
-  private func consume(
+  private static func consume(
     _ stream: PortalSessionByteStream,
-    requestURL: URL
+    requestURL: URL,
+    allowedOrigin: PortalHTTPOrigin,
+    maximumResponseBytes: Int
   ) async throws -> PortalHTTPResponse {
     var transferredCookie = false
     defer {
@@ -169,7 +189,8 @@ struct URLSessionPortalTransport: PortalTransporting {
       let response = PortalHTTPResponse(
         statusCode: stream.head.statusCode,
         body: try accumulator.finish(),
-        setCookieHeader: stream.head.setCookieHeader
+        setCookieHeader: stream.head.setCookieHeader,
+        setCookieProjection: stream.head.setCookieProjection
       )
       transferredCookie = true
       return response
@@ -198,6 +219,7 @@ struct URLSessionPortalTransport: PortalTransporting {
 
 final class FoundationPortalURLSession: @unchecked Sendable, PortalURLSessionPerforming {
   private let session: URLSession
+  let passwordSetCookieProjection = LeadSecSetCookieProjection.foundationFoldedValue
 
   init(session: URLSession) {
     self.session = session
@@ -226,15 +248,12 @@ final class FoundationPortalURLSession: @unchecked Sendable, PortalURLSessionPer
       head: PortalSessionResponseHead(
         statusCode: response.statusCode,
         finalURL: finalURL,
-        setCookieHeader: setCookie
+        setCookieHeader: setCookie,
+        setCookieProjection: setCookie == nil ? .unavailableOrAmbiguous : .foundationFoldedValue
       ),
       bytes: stream,
       cancel: { cancellation.cancel() }
     )
-  }
-
-  func cancelAll() {
-    session.invalidateAndCancel()
   }
 
   deinit {

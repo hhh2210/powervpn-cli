@@ -42,7 +42,8 @@ import Testing
     let response = PortalHTTPResponse(
       statusCode: 200,
       body: try SecureBytes(copying: []),
-      setCookieHeader: try SecureBytes(copying: Array(syntheticSessionCookie.utf8))
+      setCookieHeader: try SecureBytes(copying: Array(syntheticSessionCookie.utf8)),
+      setCookieProjection: .provenSingleWireHeader
     )
     defer { response.erase() }
     try factory.acceptPasswordSession(from: response, passwordURL: password.url)
@@ -86,10 +87,36 @@ import Testing
     let response = PortalHTTPResponse(
       statusCode: 200,
       body: try SecureBytes(copying: []),
-      setCookieHeader: try SecureBytes(copying: Array("OTHER=value".utf8))
+      setCookieHeader: try SecureBytes(copying: Array("OTHER=value".utf8)),
+      setCookieProjection: .provenSingleWireHeader
     )
     defer { response.erase() }
     #expect(throws: LeadSecPortalCookieJarError.unsupportedSetCookie) {
+      try factory.acceptPasswordSession(
+        from: response,
+        passwordURL: URL(
+          string: "https://166.111.143.19:4443/vpn/user/auth/password"
+        )!
+      )
+    }
+    #expect(factory.retainedSessionByteCount == 0)
+  }
+
+  @Test func foundationSetCookieProjectionFailsClosedAsAmbiguous() throws {
+    let factory = try PortalRequestFactory(
+      profile: syntheticPortalProfile(),
+      operatingSystemVersion: "synthetic"
+    )
+    defer { factory.eraseSession() }
+    let response = PortalHTTPResponse(
+      statusCode: 200,
+      body: try SecureBytes(copying: []),
+      setCookieHeader: try SecureBytes(copying: Array(syntheticSessionCookie.utf8)),
+      setCookieProjection: .foundationFoldedValue
+    )
+    defer { response.erase() }
+
+    #expect(throws: LeadSecPortalCookieJarError.ambiguousSetCookieFraming) {
       try factory.acceptPasswordSession(
         from: response,
         passwordURL: URL(

@@ -130,7 +130,7 @@ import Testing
     #expect(session.streamCancelCount == 1)
   }
 
-  @Test func taskCancellationCancelsTheWholeEphemeralSession() async throws {
+  @Test func taskCancellationIsNormalizedWithoutInvalidatingTheSession() async throws {
     let url = try #require(URL(string: "https://portal.example.invalid/check"))
     let session = ScriptedPortalSession(.suspend)
     let task = Task {
@@ -145,7 +145,7 @@ import Testing
     } catch let error as PortalTransportError {
       #expect(error == .cancelled)
     }
-    #expect(session.cancelAllCount == 1)
+    #expect(session.openCount == 1)
   }
 
   @Test func foreignErrorsCannotEchoTheirSecretPayload() async throws {
@@ -215,10 +215,10 @@ private enum ScriptedSessionBehavior {
 }
 
 private final class ScriptedPortalSession: @unchecked Sendable, PortalURLSessionPerforming {
+  let passwordSetCookieProjection = LeadSecSetCookieProjection.provenSingleWireHeader
   private let lock = NSLock()
   private let behavior: ScriptedSessionBehavior
   private var opens = 0
-  private var cancellations = 0
   private var streamCancellations = 0
   private var method: String?
   private var body: [UInt8]?
@@ -230,7 +230,6 @@ private final class ScriptedPortalSession: @unchecked Sendable, PortalURLSession
   }
 
   var openCount: Int { lock.withLock { opens } }
-  var cancelAllCount: Int { lock.withLock { cancellations } }
   var streamCancelCount: Int { lock.withLock { streamCancellations } }
   var lastMethod: String? { lock.withLock { method } }
   var lastBody: [UInt8]? { lock.withLock { body } }
@@ -261,7 +260,8 @@ private final class ScriptedPortalSession: @unchecked Sendable, PortalURLSession
         head: PortalSessionResponseHead(
           statusCode: status,
           finalURL: finalURL,
-          setCookieHeader: cookie
+          setCookieHeader: cookie,
+          setCookieProjection: cookie == nil ? .unavailableOrAmbiguous : .provenSingleWireHeader
         ),
         bytes: stream,
         cancel: { [weak self] in
@@ -269,10 +269,6 @@ private final class ScriptedPortalSession: @unchecked Sendable, PortalURLSession
         }
       )
     }
-  }
-
-  func cancelAll() {
-    lock.withLock { cancellations += 1 }
   }
 
   private func readBody(_ stream: InputStream?) -> [UInt8]? {

@@ -101,7 +101,7 @@ struct PortalRequestFactory: Sendable {
     defer { secureURL.erase() }
     try cookieJar.acceptPasswordResponse(
       setCookieHeader: setCookie,
-      projection: .foundationSingleValue,
+      projection: response.setCookieProjection,
       passwordURL: secureURL
     )
   }

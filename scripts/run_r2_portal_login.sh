@@ -18,7 +18,7 @@ fi
 test_active=false
 case "${POWERVPN_R2_TEST_ACTIVE_MONITOR_SIGNAL:-}" in
 '') ;;
-reviewed-no-network-v1)
+reviewed-no-network-active-cli-v1)
 	[ "$mode" = preflight ] || usage
 	test_active=true
 	test_root=${POWERVPN_R2_TEST_SCRATCH_ROOT:-}
@@ -26,6 +26,12 @@ reviewed-no-network-v1)
 	case "$test_root" in "$test_parent"/powervpn-r2-harness-test.*) ;; *) usage ;; esac
 	[ -d "$test_root" ] && [ ! -L "$test_root" ] &&
 		[ "$(/usr/bin/stat -f '%u:%Lp' "$test_root")" = "$(id -u):700" ] || usage
+	test_cli=$test_root/fake-cli
+	test_report=$test_root/cancelled-report.json
+	[ -f "$test_cli" ] && [ ! -L "$test_cli" ] && [ -x "$test_cli" ] &&
+		[ "$(/usr/bin/stat -f '%u:%Lp' "$test_cli")" = "$(id -u):700" ] || usage
+	[ -f "$test_report" ] && [ ! -L "$test_report" ] &&
+		[ "$(/usr/bin/stat -f '%u:%Lp' "$test_report")" = "$(id -u):600" ] || usage
 	R2_SCRATCH_ROOT=$test_root
 	;;
 *) usage ;;
@@ -33,13 +39,12 @@ esac
 
 r2_cold_preflight
 if [ "$test_active" = true ] && [ "$R2_PREFLIGHT_SAFE" = false ] &&
-	[ "$R2_MANIFEST_EXACT" = true ] && [ "$R2_MANIFEST_REVIEW_COMPLETE" = false ] &&
 	[ "$R2_GUI_ABSENT" = true ] && [ "$R2_HELPERS_ABSENT" = true ] &&
 	[ "$R2_NATIVE_ABSENT" = true ] && [ "$R2_CLI_ABSENT" = true ] &&
 	[ "$R2_LAUNCHD_EXACT" = true ] && [ "$R2_CLI_READY" = true ] &&
 	[ "$R2_DEPENDENCIES_READY" = true ]; then
-	# This branch is preflight-only and exists solely to exercise signal cleanup
-	# before the integrated review changes the manifest state. It cannot run CLI.
+	# The hidden preflight-only branch runs only the owned fake child validated
+	# above, so it remains independent of a changing candidate manifest.
 	R2_PREFLIGHT_SAFE=true
 fi
 if [ "$mode" = preflight ] && [ "$test_active" = false ]; then
@@ -89,6 +94,41 @@ ready_file="$run_dir/.monitor-ready"; stop_file="$run_dir/.monitor-stop"
 signal_evidence="$run_dir/incomplete-signal.json"
 monitor_pid=; cli_pid=; jq_pid=
 network_command_started=false
+cli_signal_forwarded=false; cli_exited_within_deadline=false
+cli_deadline_reached=false; cli_signal_rc=null; harness_kill_sent=false
+
+cli_is_owned_child() {
+	owned_pid=$1
+	[ -n "$owned_pid" ] && /bin/ps -p "$owned_pid" -o ppid= -o state= 2>/dev/null |
+		awk -v parent="$$" '$1 == parent && $2 !~ /^Z/ { active=1 } END { exit !active }'
+}
+wait_cli_naturally() {
+	natural_cli_pid=$cli_pid
+	while cli_is_owned_child "$natural_cli_pid"; do sleep 0.05; done
+	set +e; wait "$natural_cli_pid"; natural_cli_rc=$?; set -e
+}
+signal_cli_bounded() {
+	forward_signal=$1; owned_cli_pid=$cli_pid
+	[ -n "$owned_cli_pid" ] || return 0
+	if cli_is_owned_child "$owned_cli_pid" &&
+		/bin/kill -"$forward_signal" "$owned_cli_pid" 2>/dev/null; then
+		cli_signal_forwarded=true
+	fi
+	wait_attempt=0
+	while cli_is_owned_child "$owned_cli_pid" && [ "$wait_attempt" -lt 500 ]; do
+		wait_attempt=$((wait_attempt + 1)); sleep 0.05
+	done
+	if cli_is_owned_child "$owned_cli_pid"; then
+		cli_deadline_reached=true
+		if /bin/kill -KILL "$owned_cli_pid" 2>/dev/null; then
+			harness_kill_sent=true
+		fi
+	else
+		cli_exited_within_deadline=true
+	fi
+	set +e; wait "$owned_cli_pid"; cli_signal_rc=$?; set -e
+	cli_pid=
+}
 
 cleanup_monitor() {
 	if [ -n "$monitor_pid" ]; then
@@ -99,27 +139,38 @@ cleanup_monitor() {
 	rm -f "$ready_file" "$stop_file"
 }
 cleanup_runtime() {
-	if [ -n "$cli_pid" ]; then wait "$cli_pid" 2>/dev/null || true; cli_pid=; fi
+	if [ -n "$cli_pid" ]; then signal_cli_bounded TERM; fi
 	if [ -n "$jq_pid" ]; then wait "$jq_pid" 2>/dev/null || true; jq_pid=; fi
 	cleanup_monitor
 	rm -f "$fifo"
 }
 signal_exit() {
-	signal_status=$1
-	trap - EXIT HUP INT TERM
-	cleanup_runtime
+	forward_signal=$1; signal_status=$2
+	trap - EXIT; trap '' HUP INT TERM
+	signal_cli_bounded "$forward_signal"
+	report_rc=-1
+	if [ -n "$jq_pid" ]; then set +e; wait "$jq_pid"; report_rc=$?; set -e; jq_pid=; fi
+	cleanup_monitor; rm -f "$fifo"
 	monitor_stopped=false
 	[ -f "$monitor" ] && [ ! -L "$monitor" ] && monitor_stopped=true
+	report_exact=false; reported_cancelled=false
+	if [ "$report_rc" -eq 0 ] && jq -e '.status=="cancelled" and .transactionAccepted==false' "$report" >/dev/null 2>&1; then
+		report_exact=true; reported_cancelled=true
+	fi
 	jq -n --argjson status "$signal_status" --argjson stopped "$monitor_stopped" \
 		--argjson started "$network_command_started" \
-		'{schemaVersion:1,evidenceClass:"r2_incomplete_signal_cleanup",complete:false,signalExitStatus:$status,monitorStopped:$stopped,networkCommandStarted:$started,harnessKillSent:false,containsSecrets:false,containsRawPortal:false}' >"$signal_evidence"
+		--argjson forwarded "$cli_signal_forwarded" --argjson exited "$cli_exited_within_deadline" \
+		--argjson deadline "$cli_deadline_reached" --argjson cliRC "$cli_signal_rc" \
+		--argjson exact "$report_exact" --argjson cancelled "$reported_cancelled" \
+		--argjson killed "$harness_kill_sent" \
+		'{schemaVersion:1,evidenceClass:"r2_incomplete_signal_cleanup",complete:false,signalExitStatus:$status,monitorStopped:$stopped,networkCommandStarted:$started,cliSignalForwarded:$forwarded,cliExitedWithinDeadline:$exited,cliDeadlineReached:$deadline,cliExitStatus:$cliRC,cliReportExact:$exact,cliReportedCancelled:$cancelled,harnessKillSent:$killed,helperKillSent:false,containsSecrets:false,containsRawPortal:false}' >"$signal_evidence"
 	chmod 600 "$signal_evidence"
 	exit "$signal_status"
 }
 trap cleanup_runtime EXIT
-trap 'signal_exit 129' HUP
-trap 'signal_exit 130' INT
-trap 'signal_exit 143' TERM
+trap 'signal_exit TERM 129' HUP
+trap 'signal_exit INT 130' INT
+trap 'signal_exit TERM 143' TERM
 
 start_monitor() {
 	monitor_target=$1
@@ -138,8 +189,15 @@ start_monitor() {
 }
 
 if [ "$test_active" = true ]; then
-	start_monitor "$$"
-	while :; do sleep 1; done
+	mkfifo "$fifo"; chmod 600 "$fifo"
+	r2_reconstruct_report "$fifo" "$report" & jq_pid=$!
+	(
+		while [ ! -f "$ready_file" ]; do sleep 0.01; done
+		exec "$test_cli" "$test_report" >"$fifo" 2>/dev/null
+	) & cli_pid=$!
+	start_monitor "$cli_pid"
+	wait_cli_naturally
+	exit 12
 fi
 
 launchd_runs_before=$(r2_launchd_runs)
@@ -158,10 +216,8 @@ network_command_started=true
 cli_pid=$!
 start_monitor "$cli_pid"
 
-set +e
-wait "$cli_pid"; cli_rc=$?; cli_pid=
+wait_cli_naturally; cli_rc=$natural_cli_rc; cli_pid=
 wait "$jq_pid"; report_rc=$?; jq_pid=
-set -e
 cleanup_monitor
 rm -f "$fifo"
 
