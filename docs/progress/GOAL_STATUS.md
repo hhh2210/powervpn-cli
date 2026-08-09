@@ -563,3 +563,43 @@ zeroization tests without reading real runtime material or contacting a server.
 
 Approval required: **yes before any real runtime-material read**; the completed
 CP7B authorization does not transfer to CP8A material access or CP8B traffic.
+
+## 2026-08-09 — Rescue R0 preserve and switch
+
+State: **PASS. Native V3 is paused and Rescue is the only active execution
+contract.**
+
+Verified: the complete noncanonical CP8A candidate is preserved on
+`native-v3-cp8a-wip` at
+`75dee758ce0be6dbfa15ea0a2a0211123102ed79`; `main` remains the clean CP7B
+fallback at `8d2e026c1f5db15f5b1e1e0ca81c72d2ae5f2073`; and
+`rescue-state-machine` was created directly from that same clean baseline.
+The user-provided compact Rescue contract replaced the repository-root
+`GOAL.md`, which now advances only to R1.
+
+User input required: none.
+
+Derived automatically: branch identities and the active checkpoint only. No
+gateway, identity, credential, session, route, resource or protocol material
+was requested or derived.
+
+Evidence: exact Git refs for all three branches; a byte-for-byte comparison of
+the installed Rescue Goal before its checkpoint-state transition; and a clean,
+recoverable CP8A WIP commit.
+
+Tests/commands: `git diff --cached --check`; exact branch/ref assertions; Rescue
+Goal `cmp`; R0 integrated review; clean-worktree assertion after the R0 commit.
+
+Safety/cleanup: no GUI/helper action, login, credential read, server packet,
+XPC request, SA, policy, route, utun, vendor modification, signing change or
+Surge action occurred.
+
+Remaining: R1 read-only direct XPC `get_version`, including interruption,
+invalidation, timeout and helper-generation evidence.
+
+Next command: implement and verify the arm64 read-only charon helper probe; do
+not authenticate or send `start_connection`.
+
+Approval required: no additional approval for the user-requested read-only R1
+probe while the GUI is already absent. Stopping an active GUI/tunnel would
+require a separate explicit approval.
