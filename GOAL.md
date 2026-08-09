@@ -8,8 +8,8 @@ strategy: arm64 control plane over installed vendor helpers
 supersedes_for_active_execution: Native Goal V3
 native_v3_role: frozen fallback
 native_fallback_baseline_commit: 8d2e026c1f5db15f5b1e1e0ca81c72d2ae5f2073
-current_checkpoint: R1-read-only-direct-xpc
-immediate_next: implement-and-run-read-only-charon-get-version
+current_checkpoint: R2-username-password-portal-login
+immediate_next: request-r2-username-password-login-approval
 user_input_contract: username-and-password-only
 review_policy: one integrated review per checkpoint
 ---

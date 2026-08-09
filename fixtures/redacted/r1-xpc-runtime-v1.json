@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "r1_read_only_vendor_xpc_runtime",
+  "experimentAttempt": 3,
+  "checkpointPass": true,
+  "artifactIdentityStable": true,
+  "candidateManifestSHA256": "472526cb210aff500e8b744b85d82364f0192498a3e1beb2e55ef6400e5fd044",
+  "containsSecrets": false,
+  "containsRawXPC": false,
+  "coldPreflight": {
+    "guiAbsent": true,
+    "helperAbsent": true,
+    "otherVendorHelpersAbsent": true,
+    "launchdInactive": true,
+    "dnsRecoveryLstatENOENT": true,
+    "vendorLogRegularAndBounded": true,
+    "artifactsExact": true
+  },
+  "r1Transaction": {
+    "transportOutcome": "accepted",
+    "exactReplySchema": true,
+    "versionByteLength": 5,
+    "versionMatchesLockedBuild": true,
+    "getVersionSuccess": true,
+    "connectionCancelRequested": true,
+    "replyPeerMatchesObservedGeneration": true,
+    "helperGenerationRelation": "launched_and_exited",
+    "transactionAccepted": true
+  },
+  "helper": {
+    "processObserved": true,
+    "inspectionSucceeded": true,
+    "maximumTCPUDPFDCount": 0,
+    "absentWithinDeadlineWithoutHarnessKill": true,
+    "launchdRunsDelta": 1
+  },
+  "network": {
+    "stable": true,
+    "serverTrafficObservationState": "observed_no_tcp_udp_fds",
+    "serverTrafficObserved": false
+  },
+  "sadSpd": {
+    "directComparisonState": "unavailable_unprivileged",
+    "claimedStable": false
+  },
+  "vendorLog": {
+    "beforeAbsent": false,
+    "afterSafe": true,
+    "metadataChanged": true,
+    "contentsRead": false
+  }
+}

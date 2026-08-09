@@ -11,6 +11,19 @@ upstream strongSwan 6.0.7.
 
 ## Current verdict
 
+- Active execution has switched to the Rescue CLI on
+  `rescue-state-machine`; Native V3 remains frozen at the clean CP7B fallback,
+  and its noncanonical CP8A work is preserved on `native-v3-cp8a-wip`.
+- Rescue R1 is **PASS**. The arm64 CLI directly received the installed charon
+  helper's exact `version="24572"`, `get_version=true` business event and bound
+  it synchronously to the single cold-start launchd generation. The helper had
+  zero TCP/UDP descriptors and exited naturally within the deadline; network,
+  Surge, route, DNS, interface, and utun evidence stayed stable. The probe did
+  not log in, contact a server, send `start_connection`, or create an SA,
+  route, or utun. Direct SAD/SPD comparison remained unavailable to the
+  unprivileged harness and is not claimed. The next active gate is a separate
+  authorization for the R2 username/password-only portal login test.
+
 - The vendor helper is based on strongSwan 5.8.0. This is proven by unstripped
   Mach-O symbol paths, not inferred from release dates.
 - `leadsecbridge` is both a custom strongSwan kernel plugin and part of a
@@ -79,13 +92,13 @@ upstream strongSwan 6.0.7.
 - CP7B does **not** prove IKE or server compatibility: no connection was loaded,
   no credential was handed off, and no SA/policy/route was installed. Main
   Mode, Quick Mode, ADDRULE, resource data path, and server acceptance remain
-  untested. The next checkpoint is CP8A secure runtime-material handoff with
-  **NO SERVER TRAFFIC**. Real material may be read only through a user-authorized
-  secure provider/path, and no secret may enter argv, environment, files,
-  fixtures, or logs. CP7B's one integrated review and one additional narrow
-  review are complete; no third or unrelated-history review is planned.
+  untested. CP8A secure runtime-material handoff remains the next Native V3
+  fallback step, but it is paused rather than active. Rescue R1 first tests
+  whether the installed helper can be controlled read-only without the GUI.
+  CP7B's one integrated review and one additional narrow review are complete;
+  no third or unrelated-history review is planned.
 
-The target is therefore:
+The frozen Native V3 target remains:
 
 ```text
 upstream strongSwan 6.0.7
@@ -136,6 +149,7 @@ swift run powervpn spec validate-redacted fixtures/redacted/tunnel-spec.example.
 swift run powervpn spec vici-dry-run fixtures/redacted/tunnel-spec.vici-dry-run.json --json
 swift run powervpn vici version --socket <scratch-charon.vici> --timeout-ms 2000 --json
 swift run powervpn vici cp7a-smoke --socket <scratch-charon.vici> --timeout-ms 2000 --json
+swift run powervpn xpc get-version --timeout-ms 2000 --json
 ```
 
 The VICI runtime commands connect only to an explicitly supplied local socket;
@@ -144,6 +158,11 @@ The VICI runtime commands connect only to an explicitly supplied local socket;
 read-only. The old `reconnect` command was removed because terminating and
 relaunching the vendor GUI automates a workaround; it does not advance the
 native replacement.
+
+The XPC command has no configurable service or payload. It is the Rescue R1
+read-only gate and fails closed unless the GUI and helper are absent and the
+legacy DNS/log cold-start hazards are safe. Run the reviewed live harness, not
+the raw command, for checkpoint evidence.
 
 ## Repository map
 

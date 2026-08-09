@@ -13,9 +13,40 @@ Detailed evidence and code locations are in
 | charon | `start_connection`, `updown_nc`, `stop_connection`, `get_version` |
 | ipsec | `start_connection`, `updown_ipsec`, `get_tun_name`, `stop_connection` |
 
-Every request starts with ordered `type:string`, `rpc:string`. Both helpers
-create a reply dictionary, scan their fixed four-entry command table, invoke one
-handler, and reply.
+Every request starts with ordered `type:string`, `rpc:string`. Both dispatchers
+allocate an outbound dictionary, scan their fixed four-entry command table,
+invoke one handler, and send that dictionary. A handler may separately send its
+business result first, as the exact `get_version` path below demonstrates.
+
+## R1 exact charon `get_version` framing
+
+The Rescue R1 static pass resolves the previously value-free `get_version`
+envelope. The installed GUI inserts exactly:
+
+```text
+type:string = "rpc"
+rpc:string  = "get_version"
+```
+
+It creates the privileged Mach connection to
+`com.leadsec.charon-xpc`. The handler ordinary-sends the full business
+dictionary through the connection:
+
+```text
+version:string = installed build bytes
+get_version:boolean = true
+```
+
+For the pinned installed helper, the expected version is build 24572. The
+outer dispatcher then ordinary-sends an empty dictionary. Although the GUI
+uses `xpc_connection_send_message_with_reply`, its reply callback performs no
+business decoding; the full result is consumed by its connection event
+handler. A compatible probe must therefore accept only the exact full event
+from that handler and must never promote the empty dispatcher tail or an empty
+reply acknowledgement to success.
+
+This is a read-only helper-control contract, not the owned product XPC design.
+It carries no session, PSK, endpoint, route, resource, or tunnel action.
 
 ## Confirmed start schemas
 

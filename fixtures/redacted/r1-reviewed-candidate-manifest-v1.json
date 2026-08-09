@@ -1,0 +1,17 @@
+{
+  "artifacts": {
+    "arm64CLISHA256": "9ff03eaad9a155aa369708ada17bfbd87783fae7acd66401e359c0ea5cbac8a5",
+    "experimentLibrarySHA256": "84088928b414329995f2fe674650c5e94b9c96bb326940fcb371483a7a8fce63",
+    "launchDaemonPlistSHA256": "3d753e4b3dc1bcbfceb01598b24d144f05a4dca1074a2e09eb9e5874ddfaa5c9",
+    "librarySHA256": "3b4843997487b04057d5e7c5e714d53d30a28780d4cc2a01360e46198c60a6b5",
+    "runnerSHA256": "552358cbd573c326891ac589731e2197a84387f36851667676efc5b109cd5435",
+    "vendorAppSHA256": "069dee7b624ff2d8a3714bfed06aa6444ad45406d102b5933b987b88a39c7a46",
+    "vendorBundledHelperSHA256": "ce25374f028216374d386c91a7ee8fea8146b4bfd80f5fde6a59954700555404",
+    "vendorInstalledHelperSHA256": "ce25374f028216374d386c91a7ee8fea8146b4bfd80f5fde6a59954700555404"
+  },
+  "baseCommit": "a0a465c215a2f949f71b3448ad78e6d0c41e6af0",
+  "evidenceClass": "r1_reviewed_candidate_manifest",
+  "reviewState": "integrated_review_completed_findings_applied",
+  "runtimeSourceAggregateSHA256": "a527d36edc33eec424dc3f461fd1ed28550d832c9fd63d41c03008ee5b6f7a8b",
+  "schemaVersion": 1
+}

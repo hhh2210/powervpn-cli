@@ -603,3 +603,59 @@ not authenticate or send `start_connection`.
 Approval required: no additional approval for the user-requested read-only R1
 probe while the GUI is already absent. Stopping an active GUI/tunnel would
 require a separate explicit approval.
+
+## 2026-08-09 — Rescue R1 direct vendor XPC acceptance
+
+State: **PASS.** Rescue may advance only to the R2 username/password portal
+login approval gate; R2 has not started.
+
+Verified: the arm64 CLI sent only the locked two-field `get_version` request and
+received the genuine installed helper business event for build `24572` with
+`get_version=true`. The reply was synchronously bound to the exact cold-start
+helper generation; launchd runs increased by exactly one. The helper was
+observed with zero TCP/UDP descriptors and became absent within the deadline
+without a harness kill.
+
+User input required: none. Username and password were not read in R1.
+
+Derived automatically: installed app/helper/LaunchDaemon identities, the
+reviewed source/runner/library/arm64 CLI manifest binding, and the single live
+helper generation. No gateway, identity, PSK, session, VIP, route, resource, or
+protocol material was requested from the user.
+
+Evidence: reviewed-candidate manifest SHA-256
+`472526cb210aff500e8b744b85d82364f0192498a3e1beb2e55ef6400e5fd044`;
+byte-exact canonical result
+`fixtures/redacted/r1-xpc-runtime-v1.json`; and three retained value-free runs.
+Attempt 1 proved the genuine reply but lacked lifetime binding, attempt 2
+exposed late-event/classifier defects, and the explicitly predecessor-gated
+attempt 3 is the accepted result.
+
+Tests/commands: 33 focused VendorXPC/helper-generation tests; full Swift tests;
+arm64 build; strict Swift formatting; shell syntax and ShellCheck; active-monitor,
+closed-schema, predecessor-tamper, and CLI-negative harness tests; secret scan;
+and one final `scripts/verify_checkpoint.sh r1` acceptance run.
+
+Review result: the only integrated R1 review initially returned BLOCKED with
+seven direct findings. All were fixed in the cumulative candidate. No second
+R1 review and no unrelated-history review ran.
+
+Safety/cleanup: no login, server request, `start_connection`, credential read,
+SA, policy, route, or utun action occurred. Persistent route projections,
+default route, DNS, interfaces/utun, Surge, PowerVPN, and ESP-port metadata were
+stable. Vendor-log contents were not read. Direct global SAD/SPD comparison was
+unavailable to the unprivileged harness and is not claimed. Cancel request and
+cleanup evidence remain distinct: external bounded observation proves natural
+helper absence and no harness kill.
+
+Remaining: R2 legal portal authentication using only username and password from
+secure TTY. Every gateway/session/PSK/resource value remains the client's
+derivation responsibility.
+
+Next command: none until a fresh explicit R2 live-login authorization is
+received. Do not authenticate in the current checkpoint.
+
+Approval required: **yes** before sending the real username/password login
+request. R1's read-only authorization does not transfer to R2.
+
+Canonical commit: this cumulative Rescue R1 implementation and evidence commit.

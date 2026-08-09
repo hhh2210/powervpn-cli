@@ -39,6 +39,8 @@ struct PowerVPNCommand {
       try runSpec(arguments, json: json)
     case "vici":
       try runVICICommand(arguments, json: json)
+    case "xpc":
+      try await runVendorXPCCommand(arguments, json: json)
     case "help", "--help", "-h":
       printUsage()
     default:
@@ -238,6 +240,8 @@ struct PowerVPNCommand {
                                Run a value-free version request against charon
         vici cp7a-smoke --socket <path> [--timeout-ms N]
                                Run bounded synthetic load/list/unload over VICI
+        xpc get-version [--timeout-ms N]
+                               Read the installed charon helper version over exact XPC
 
       Options:
         --json                 Emit JSON
