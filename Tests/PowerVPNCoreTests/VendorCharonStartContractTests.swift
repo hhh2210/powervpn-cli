@@ -20,6 +20,8 @@ import Testing
     #expect(rule(.negotiateMode).requirement == .optionalPerTunnel)
     #expect(rule(.routeNetwork).requirement == .requiredPerRoute)
     #expect(rule(.routePrefix).valueKind == .routePrefix)
+    #expect(rule(.name).allowsEmptyText)
+    #expect(!rule(.sessionID).allowsEmptyText)
   }
 
   @Test func fieldNameSetCannotSubstituteForNestedTypedMaterial() {

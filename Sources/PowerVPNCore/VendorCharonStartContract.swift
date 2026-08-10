@@ -54,15 +54,18 @@ public struct VendorCharonStartFieldRule: Codable, Equatable, Sendable {
   public let field: VendorCharonStartField
   public let requirement: VendorCharonStartFieldRequirement
   public let valueKind: VendorCharonStartValueKind
+  public let allowsEmptyText: Bool
 
   public init(
     field: VendorCharonStartField,
     requirement: VendorCharonStartFieldRequirement,
-    valueKind: VendorCharonStartValueKind
+    valueKind: VendorCharonStartValueKind,
+    allowsEmptyText: Bool = false
   ) {
     self.field = field
     self.requirement = requirement
     self.valueKind = valueKind
+    self.allowsEmptyText = allowsEmptyText
   }
 }
 
@@ -70,6 +73,8 @@ public enum VendorCharonStartMaterialSource: String, CaseIterable, Codable, Send
   case generatedConstant = "generated_constant"
   case generatedContainer = "generated_container"
   case authenticatedPortalResource = "authenticated_portal_resource"
+  case authenticatedPortalOrigin = "authenticated_portal_origin"
+  case authenticatedPortalMetadata = "authenticated_portal_metadata"
   case installedVendorOnboarding = "installed_vendor_onboarding"
 }
 
@@ -98,7 +103,7 @@ public enum VendorCharonStartContract {
     rule(.tunnelName, .requiredPerTunnel, .string),
     rule(.family, .requiredPerTunnel, .int32),
     rule(.resourceFlag, .requiredPerTunnel, .int32),
-    rule(.name, .requiredPerTunnel, .string),
+    rule(.name, .requiredPerTunnel, .string, allowsEmptyText: true),
     rule(.routes, .requiredPerTunnel, .array),
     rule(.mapID, .requiredPerTunnel, .string),
     rule(.negotiateMode, .optionalPerTunnel, .int32),
@@ -109,12 +114,14 @@ public enum VendorCharonStartContract {
   private static func rule(
     _ field: VendorCharonStartField,
     _ requirement: VendorCharonStartFieldRequirement,
-    _ kind: VendorCharonStartValueKind
+    _ kind: VendorCharonStartValueKind,
+    allowsEmptyText: Bool = false
   ) -> VendorCharonStartFieldRule {
     VendorCharonStartFieldRule(
       field: field,
       requirement: requirement,
-      valueKind: kind
+      valueKind: kind,
+      allowsEmptyText: allowsEmptyText
     )
   }
 }

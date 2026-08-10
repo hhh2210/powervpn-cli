@@ -78,7 +78,7 @@ Nested names observed by the parser, in parser order, are:
 
 | Parent | Ordered field names | Type confidence |
 | --- | --- | --- |
-| `VERSION` | `major`, `minor` | unknown without a live XML specimen |
+| `VERSION` | `major`, `minor` | `major` is an exact attribute; `minor` is not promoted by the current mapper |
 | `SESSION` | `collect_machineinfo`, `login-addr`, `login-time`, `sid_name` | unknown |
 | `USER` | `client_jump_pskey`, `jump-mapid`, `modify_flag` | unknown |
 | `DNS_INFO` | `DOMAIN_HOST`, `dnssrv`, `dns`, `dnssrv_v6`, `dnsv6` | unknown |
@@ -87,6 +87,14 @@ Nested names observed by the parser, in parser order, are:
 
 Evidence: the resource reply block at `0x1000a8040..0x1000ab1e0`. Existence and
 read order are confirmed; scalar/array runtime classes and lengths are not.
+
+The installed XMLReader representation and its consumers narrow the leaf shape
+further: XML attributes become direct keys on each element dictionary, and the
+SP2 helper builder and GUI display lookup read those direct keys. Nested child
+text is therefore not an equivalent source for a helper or display leaf. The
+offline mapper enforces that exact boundary: a resource display name is the
+first `TUNNEL@tunnel-name`, and authenticated context metadata comes from
+`VERSION@major` in the same resource document generation.
 
 ## Portal object to helper ordering
 
@@ -121,11 +129,22 @@ at `0x100068210` narrows this boundary without reading any values:
 - `common.gateway` comes from the builder's `VSGResourceRule.vpnAddress`
   argument, while DNS and major version arrive as separate arguments.
 
-Only the first mapping is currently promoted by the owned Product mapper. The
-generation-bound resource-tree borrow cannot by itself prove how to obtain the
-gateway, DNS or major-version arguments, so those fields remain unavailable in
-the offline Product dry-run. This static narrowing does not prove a live
-`start_connection` or authorize one.
+The owned Product mapper now builds each candidate from one `NC_RESOURCE` and
+adds only `VERSION@major` metadata borrowed from that same authenticated
+document generation. It promotes `CLIENT@id`, `PRIVATE-IP@addr`, `SERVER@port`,
+IKE/ESP transform attributes, `PSK@key`, both lifetimes, tunnel direct
+attributes and authority/family defaults, route flag/name, resource-or-tunnel
+map ID, negotiate mode, direct IPv4/CIDR routes and the vendor empty-route
+defaults. A direct IPv4 address becomes `/32`; CIDR retains its literal network
+text and integer prefix. Hyphenated ranges are deliberately unsupported and
+leave the whole routes field missing, so partial expansion cannot pass
+readiness.
+
+The first missing field in that offline authenticated candidate remains
+`common.gateway`. The installed GUI passes the builder a resolved
+`VSGResourceRule.vpnAddress`; the resource-request URL host does not prove that
+resolved value and is not substituted. This static narrowing does not prove or
+authorize a live `start_connection`.
 
 ## Charon helper consumer schema
 
@@ -169,6 +188,12 @@ tunnels[]
 
 A later status path also reads `common.hostItem`; its exact class remains
 unknown.
+
+Core now has a scoped encoder for a complete validated charon snapshot. It
+constructs the exact root/common/tunnel/route key and type tree in memory only,
+allows the statically recovered empty default for `tunnels[].name`, and exposes
+the object only for the duration of a closure. It creates no XPC connection and
+sends no message; the M1/Goal state therefore remains ACTIVE.
 
 ## IPsec helper consumer schema
 

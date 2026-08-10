@@ -992,15 +992,27 @@ first missing required vendor-snapshot field.
 Production code changed: active development moved to `rescue-mvp`; the frozen
 evidence branch remains `rescue-state-machine@b1908f2`. Portal now exposes a
 generation-bound, memory-only authenticated lease and a scoped resource-tree
-borrow. Product retains only the exact `NC_RESOURCE/name` catalog label as a
-display name and binds it to a snapshot-stable opaque handle; helper/session,
-route and PSK values are not serialized. Core now owns the nested typed charon
-start contract, ordered value-free field reports, an opaque non-Codable
-snapshot proof and a package-only lineage token. Every value in a complete
-candidate must share that same resource lineage. This replaces the former
-`Set(allCases)` readiness model: every tunnel and every materialized route must
-be complete within one candidate. Product maps candidates independently from
-single `NC_RESOURCE` nodes and never unions sibling resources. CLI parsing
+borrow. The XMLReader fidelity boundary now admits helper leaves and GUI
+display fields only as exact attributes: each resource display name is the
+first `TUNNEL@tunnel-name`, and `VERSION@major` is borrowed as
+generation-bound Portal metadata. Product binds that display name to a
+snapshot-stable opaque handle; helper/session, route and PSK values are never
+serialized into Product JSON. Core owns the nested typed charon start contract,
+ordered value-free field reports, an opaque non-Codable snapshot proof and a
+package-only lineage token. Every value in a complete candidate must share that
+same resource lineage. This replaces the former `Set(allCases)` readiness
+model: every tunnel and every materialized route must be complete within one
+candidate. Product maps candidates independently from single `NC_RESOURCE`
+nodes and never unions sibling resources.
+
+The same-resource SP2 mapper now promotes the proven session ID, VIP, IKE port,
+major version, IKE/ESP proposals, PSK and lifetimes; tunnel status/name and
+direct-or-vendor-default authority/family; route flag/name, map ID and negotiate
+mode; direct IPv4/CIDR routes; and the exact empty-route shape. A hyphenated
+range leaves the whole routes field missing rather than emitting a partial
+candidate. Core also has a scoped exact XPC encoder for a complete snapshot: it
+constructs only the in-memory `start_connection` object, permits the proven
+empty `tunnels[].name`, creates no XPC connection and sends nothing. CLI parsing
 continues to accept only the four exact M1 argument sequences, and
 `doctor=ready` still additionally requires GUI absence, observable helper
 generation, safe preflight and current direct-XPC reachability.
@@ -1016,10 +1028,11 @@ so their first missing field remains `common.sessionid`. In the offline
 authenticated synthetic path, Product derives that field only from
 `NC_RESOURCE.TUNNEL.IKE.CLIENT.id` in the same resource generation; the Portal
 `VSG_SESSIONID` cookie is neither exposed nor used as helper material. That
-dry-run advances to the next exact missing field, `common.gateway`. The current
-resource-tree seam does not prove the raw gateway, major-version or DNS-derived
-mapping, so no complete vendor snapshot can yet be constructed. M1 is blocked
-on this product mapping and the Goal remains ACTIVE.
+dry-run now maps the other proven SP2 fields above and still advances to the
+next exact missing field, `common.gateway`. The installed GUI supplies the
+builder with resolved `VSGResourceRule.vpnAddress`; the resource-request URL
+host is not an exact substitute, so no complete vendor snapshot can yet be
+constructed. M1 is blocked on this product mapping and the Goal remains ACTIVE.
 
 Cleanup status: no helper process was started, launchd remained inactive, and
 the commands wrote no runtime artifact or secret-bearing file.

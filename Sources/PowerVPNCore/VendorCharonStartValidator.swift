@@ -74,7 +74,8 @@ public enum VendorCharonStartValidator {
     _ expectedLineage: VendorCharonStartLineage?
   ) -> VendorCharonStartFieldReport {
     guard let value else { return absent(rule, path) }
-    return validLineage(value.lineage, expectedLineage) && validText(value.value)
+    return validLineage(value.lineage, expectedLineage)
+      && validText(value.value, allowsEmpty: rule.allowsEmptyText)
       ? make(rule, .available, [value.source])
       : make(rule, .invalid, [value.source], path: path)
   }
@@ -110,7 +111,9 @@ public enum VendorCharonStartValidator {
       }
       sawValue = true
       sources.append(value.source)
-      if !validLineage(value.lineage, candidate.lineage) || !validText(value.value) {
+      if !validLineage(value.lineage, candidate.lineage)
+        || !validText(value.value, allowsEmpty: rule.allowsEmptyText)
+      {
         return make(rule, .invalid, unique(sources), path: path(rule.field, index))
       }
     }
@@ -166,7 +169,9 @@ public enum VendorCharonStartValidator {
     for item in routes {
       guard let value = item.route.network else { return absent(rule, item.path + ".net") }
       sources.append(value.source)
-      if !validLineage(value.lineage, candidate.lineage) || !validText(value.value) {
+      if !validLineage(value.lineage, candidate.lineage)
+        || !validText(value.value, allowsEmpty: rule.allowsEmptyText)
+      {
         return make(rule, .invalid, unique(sources), path: item.path + ".net")
       }
     }
@@ -200,11 +205,16 @@ public enum VendorCharonStartValidator {
     }
   }
 
-  private static func validText(_ material: any VendorCharonStartTextMaterial) -> Bool {
-    guard (1...maximumTextBytes).contains(material.byteCount) else { return false }
+  private static func validText(
+    _ material: any VendorCharonStartTextMaterial,
+    allowsEmpty: Bool = false
+  ) -> Bool {
+    let minimum = allowsEmpty ? 0 : 1
+    let declaredByteCount = material.byteCount
+    guard (minimum...maximumTextBytes).contains(declaredByteCount) else { return false }
     return
       (try? material.withUnsafeUTF8Bytes { bytes in
-        bytes.count == material.byteCount && !bytes.contains(0)
+        bytes.count == declaredByteCount && !bytes.contains(0)
       }) == true
   }
 

@@ -204,6 +204,26 @@ package final class AuthenticatedPortalSnapshot: @unchecked Sendable {
     }
   }
 
+  /// Borrows context proven to originate in this generation's resource reply.
+  package func withPortalContext<Result>(
+    _ operation: (AuthenticatedPortalContext) throws -> Result
+  ) throws -> Result {
+    try lock.withLock {
+      guard let resourceDocument else { throw AuthenticatedPortalSnapshotError.erased }
+      guard authenticationGeneration.isActive else {
+        throw AuthenticatedPortalSnapshotError.inaccessible
+      }
+      guard let integration = try LeadSecPortalProfile.integrationInfo(resourceDocument) else {
+        throw AuthenticatedPortalContextBorrowError.missingIntegrationInfo
+      }
+      let scope = AuthenticatedPortalContextBorrowScope(
+        authenticationGeneration: authenticationGeneration
+      )
+      defer { scope.invalidate() }
+      return try operation(AuthenticatedPortalContext(integrationInfo: integration, scope: scope))
+    }
+  }
+
   package func erase() {
     lock.withLock {
       resourceDocument?.erase()

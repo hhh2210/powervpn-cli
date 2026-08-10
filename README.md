@@ -31,22 +31,28 @@ On this Mac they currently establish:
 - the Portal target now has a generation-bound, memory-only authenticated lease
   with a scoped resource-tree borrow, and Core has a nested typed charon
   `start_connection` contract instead of a forgeable field-name set;
-- Product retains only the exact `NC_RESOURCE/name` catalog label and pairs it
-  with a snapshot-stable opaque handle; helper/session/PSK values stay borrowed
-  and every Core value must share one non-serializable resource lineage;
-- an offline synthetic authenticated dry-run maps `common.sessionid` only from
-  `NC_RESOURCE.TUNNEL.IKE.CLIENT.id` in that same resource. It never uses the
-  Portal cookie and then stops truthfully at `common.gateway`.
+- Product accepts statically proven XMLReader helper leaves only as element
+  attributes. Each resource display name is the first `TUNNEL@tunnel-name`,
+  while `VERSION@major` is generation-bound Portal metadata;
+- the same-resource SP2 mapper now covers session ID (only `CLIENT@id`, never
+  the Portal cookie), VIP, IKE port/version, IKE/ESP proposals, PSK/lifetimes,
+  tunnel direct/default fields, map ID, negotiate mode, direct IPv4/CIDR routes
+  and the exact empty-route shape. Hyphenated address ranges fail closed instead
+  of producing a partial route;
+- Core can encode a complete validated snapshot into the exact scoped,
+  in-memory charon XPC object, including the vendor-valid empty
+  `tunnels[].name`. The encoder creates no connection and sends nothing.
 
 The four commands contact no server, read no TTY credential, send no XPC,
 serialize no complete helper snapshot, and contain no credential, cookie, PSK,
 route value, or session value. The current product state is therefore **blocked
 at M1**, not a usable VPN yet, and the Goal remains **ACTIVE**.
-The existing resource-tree seam does not yet prove the raw sources for gateway,
-major version or DNS-derived material, and no complete helper snapshot exists.
-The next product slice is to map the remaining fields from one lawful resource
-generation without combining sibling resources; `vendor_once` remains the
-declared fallback if the owned Portal response cannot supply them.
+The first authenticated dry-run blocker remains `common.gateway`: the installed
+GUI resolves `VSGResourceRule.vpnAddress` before building helper input, and the
+resource-request URL host is not an exact substitute. No complete helper
+snapshot exists. The next product slice must obtain that resolved value from
+the same lawful resource generation; `vendor_once` remains the declared
+fallback if the owned Portal response cannot supply it.
 
 ## Development
 
