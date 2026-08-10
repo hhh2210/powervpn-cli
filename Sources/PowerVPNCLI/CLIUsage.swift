@@ -4,8 +4,8 @@ func printCLIUsage() {
     Usage: powervpn <command> [options]
 
       status                 Show GUI, helper, crash, and tunnel state
-      probe [--timeout N]    Read SSH banners from thu21 and thu52
-      diagnose              Run status and probe together
+      probe                  Blocked until an explicitly approved M2 transaction
+      diagnose              Blocked until a local-only M3 diagnostic exists
       oracle [inventory]     Read-only vendor helper and protocol inventory
       oracle correlate <value-free-trace.json>
                              Validate metadata-only control/XPC correlation

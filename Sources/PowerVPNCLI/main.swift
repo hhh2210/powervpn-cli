@@ -11,6 +11,9 @@ struct PowerVPNCommand {
     } catch let error as M2ConnectOnceCommandError {
       FileHandle.standardError.write(Data("error: \(error)\n".utf8))
       Foundation.exit(64)
+    } catch let error as LegacyNetworkCommandError {
+      FileHandle.standardError.write(Data("error: \(error)\n".utf8))
+      Foundation.exit(64)
     } catch let error as ProductCommandError {
       FileHandle.standardError.write(Data("error: \(error)\n".utf8))
       Foundation.exit(64)
@@ -33,20 +36,10 @@ struct PowerVPNCommand {
       }
     case "status":
       renderStatus(SystemInspector().status(), json: json)
-    case "probe":
-      let timeout = timeoutValue(arguments) ?? 5
-      let results = await probeAll(timeout: timeout)
-      renderProbe(results, json: json)
-      if results.contains(where: { $0.status != .healthy }) {
-        Foundation.exit(2)
-      }
-    case "diagnose":
-      renderStatus(SystemInspector().status(), json: json)
-      let results = await probeAll(timeout: timeoutValue(arguments) ?? 5)
-      renderProbe(results, json: json)
-      if results.contains(where: { $0.status != .healthy }) {
-        Foundation.exit(2)
-      }
+    case "probe", "diagnose":
+      let result = try runLegacyNetworkCommand(arguments)
+      print(result.standardOutput)
+      Foundation.exit(result.exitCode)
     case "oracle":
       try runOracle(arguments, json: json)
     case "spec":
@@ -156,18 +149,6 @@ struct PowerVPNCommand {
     }
   }
 
-  private static func probeAll(timeout: TimeInterval) async -> [ProbeResult] {
-    await withTaskGroup(of: ProbeResult.self) { group in
-      let probe = SSHBannerProbe()
-      for target in VPNTarget.defaults {
-        group.addTask { await probe.probe(target: target, timeout: timeout) }
-      }
-      var results: [ProbeResult] = []
-      for await result in group { results.append(result) }
-      return results.sorted { $0.target.name < $1.target.name }
-    }
-  }
-
   private static func renderStatus(_ status: PowerVPNStatus, json: Bool) {
     if json {
       printJSON(status)
@@ -185,18 +166,6 @@ struct PowerVPNCommand {
     }
     let tunnelLabel = status.tunnel.historicalHint ? "historical tunnel hint" : "tunnel"
     print("\(tunnelLabel): \(status.tunnel.health.rawValue) (\(status.tunnel.latestEvent))")
-  }
-
-  private static func renderProbe(_ results: [ProbeResult], json: Bool) {
-    if json {
-      printJSON(results)
-      return
-    }
-    for result in results {
-      print(
-        "\(result.target.name): \(result.status.rawValue) \(result.latencyMilliseconds)ms — \(result.detail)"
-      )
-    }
   }
 
   private static func renderOracle(_ inventory: VendorHelperInventory, json: Bool) {
@@ -238,13 +207,6 @@ struct PowerVPNCommand {
     if let data = try? encoder.encode(value) {
       print(String(decoding: data, as: UTF8.self))
     }
-  }
-
-  private static func timeoutValue(_ arguments: [String]) -> TimeInterval? {
-    guard let index = arguments.firstIndex(of: "--timeout"),
-      arguments.indices.contains(index + 1)
-    else { return nil }
-    return TimeInterval(arguments[index + 1])
   }
 
 }
