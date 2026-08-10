@@ -13,7 +13,7 @@ enum VendorCharonControlConnectionEvent: Equatable, Sendable {
 }
 
 enum VendorCharonControlReplyEvent: Equatable, Sendable {
-  case emptyAcknowledgement(peerPID: Int32)
+  case emptyAcknowledgement
   case connectionInterrupted
   case connectionInvalid
   case peerCodeSigningRequirement
@@ -25,7 +25,7 @@ protocol VendorCharonControlConnectionDriving: AnyObject, Sendable {
   func submit(
     _ request: xpc_object_t,
     replyHandler: @escaping @Sendable (VendorCharonControlReplyEvent) -> Void
-  )
+  ) -> VendorXPCSessionSubmission
 
   func cancel()
 }
@@ -35,56 +35,58 @@ final class SystemVendorCharonControlConnectionDriver: @unchecked Sendable,
 {
   static let serviceName = "com.leadsec.charon-xpc"
 
-  private let connection: xpc_connection_t
-  private let queue: DispatchQueue
-  private let connectionEventHandler: @Sendable (VendorCharonControlConnectionEvent) -> Void
-  private var activated = false
-  private var cancelled = false
+  private let session: VendorXPCSession
 
   init(
     queue: DispatchQueue,
     connectionEventHandler: @escaping @Sendable (VendorCharonControlConnectionEvent) -> Void
   ) {
-    self.queue = queue
-    self.connectionEventHandler = connectionEventHandler
-    connection = Self.serviceName.withCString { service in
-      xpc_connection_create_mach_service(
-        service,
-        queue,
-        UInt64(XPC_CONNECTION_MACH_SERVICE_PRIVILEGED)
-      )
-    }
+    session = VendorXPCSession(
+      queue: queue,
+      incomingDecoder: { object in
+        connectionEventHandler(VendorCharonControlWireCodec.connectionEvent(object))
+      },
+      cancellationHandler: { outcome in
+        connectionEventHandler(Self.connectionEvent(outcome))
+      }
+    )
   }
 
   func submit(
     _ request: xpc_object_t,
     replyHandler: @escaping @Sendable (VendorCharonControlReplyEvent) -> Void
-  ) {
-    guard !cancelled else {
-      replyHandler(.connectionInvalid)
-      return
-    }
-    if !activated {
-      xpc_connection_set_event_handler(connection) { [connectionEventHandler] object in
-        connectionEventHandler(VendorCharonControlWireCodec.connectionEvent(object))
+  ) -> VendorXPCSessionSubmission {
+    session.send(
+      request,
+      replyDecoder: { object in
+        replyHandler(VendorCharonControlWireCodec.replyEvent(object))
+      },
+      failureHandler: { outcome in
+        replyHandler(Self.replyEvent(outcome))
       }
-      xpc_connection_activate(connection)
-      activated = true
-    }
-    xpc_connection_send_message_with_reply(connection, request, queue) { [connection] object in
-      replyHandler(
-        VendorCharonControlWireCodec.replyEvent(
-          object,
-          peerPID: xpc_connection_get_pid(connection)
-        ))
+    )
+  }
+
+  func cancel() { session.cancel() }
+
+  private static func connectionEvent(
+    _ outcome: VendorCharonControlOutcome
+  ) -> VendorCharonControlConnectionEvent {
+    switch outcome {
+    case .peerCodeSigningRequirement: return .peerCodeSigningRequirement
+    case .connectionInvalid: return .connectionInvalid
+    default: return .unexpectedXPCError
     }
   }
 
-  func cancel() {
-    guard !cancelled else { return }
-    cancelled = true
-    xpc_connection_set_event_handler(connection) { _ in }
-    xpc_connection_cancel(connection)
+  private static func replyEvent(
+    _ outcome: VendorCharonControlOutcome
+  ) -> VendorCharonControlReplyEvent {
+    switch outcome {
+    case .peerCodeSigningRequirement: return .peerCodeSigningRequirement
+    case .connectionInvalid: return .connectionInvalid
+    default: return .unexpectedXPCError
+    }
   }
 }
 
@@ -121,10 +123,7 @@ enum VendorCharonControlWireCodec {
       ))
   }
 
-  static func replyEvent(
-    _ object: xpc_object_t,
-    peerPID: Int32
-  ) -> VendorCharonControlReplyEvent {
+  static func replyEvent(_ object: xpc_object_t) -> VendorCharonControlReplyEvent {
     if object === XPC_ERROR_CONNECTION_INTERRUPTED { return .connectionInterrupted }
     if object === XPC_ERROR_CONNECTION_INVALID { return .connectionInvalid }
     if #available(macOS 15.0, *), object === XPC_ERROR_PEER_CODE_SIGNING_REQUIREMENT {
@@ -135,7 +134,7 @@ enum VendorCharonControlWireCodec {
     guard type == XPC_TYPE_DICTIONARY, xpc_dictionary_get_count(object) == 0 else {
       return .unexpectedPayload
     }
-    return .emptyAcknowledgement(peerPID: peerPID)
+    return .emptyAcknowledgement
   }
 
   private static func hasExactStatusShape(_ object: xpc_object_t) -> Bool {

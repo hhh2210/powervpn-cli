@@ -105,6 +105,7 @@ final class ScriptedCharonControlDriver: @unchecked Sendable,
   private var replyHandlers: [@Sendable (VendorCharonControlReplyEvent) -> Void] = []
   private var envelopes: [ControlEnvelopeObservation] = []
   private var cancels = 0
+  private var sessionValid = true
 
   func install(
     connectionHandler: @escaping @Sendable (VendorCharonControlConnectionEvent) -> Void
@@ -116,7 +117,10 @@ final class ScriptedCharonControlDriver: @unchecked Sendable,
   func submit(
     _ request: xpc_object_t,
     replyHandler: @escaping @Sendable (VendorCharonControlReplyEvent) -> Void
-  ) {
+  ) -> VendorXPCSessionSubmission {
+    guard lock.withLock({ sessionValid }) else {
+      return .rejected(.connectionInvalid)
+    }
     let operation = xpc_dictionary_get_string(request, "rpc").map(String.init(cString:))
     let startShape: Bool
     if operation == "start_connection" {
@@ -141,6 +145,7 @@ final class ScriptedCharonControlDriver: @unchecked Sendable,
         ))
       replyHandlers.append(replyHandler)
     }
+    return .submitted
   }
 
   func cancel() {
@@ -153,9 +158,17 @@ final class ScriptedCharonControlDriver: @unchecked Sendable,
 
   func emitReply(_ event: VendorCharonControlReplyEvent, at index: Int) {
     let handler = lock.withLock {
-      replyHandlers.indices.contains(index) ? replyHandlers[index] : nil
+      return replyHandlers.indices.contains(index) ? replyHandlers[index] : nil
     }
     handler?(event)
+  }
+
+  func invalidateSession() {
+    let handler = lock.withLock {
+      sessionValid = false
+      return connectionHandler
+    }
+    handler?(.connectionInvalid)
   }
 
   func emitConnection(_ event: VendorCharonControlConnectionEvent) {

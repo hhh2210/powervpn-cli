@@ -78,14 +78,14 @@ import Testing
   @Test func onlyExactEmptyReplyIsTransportAcknowledgement() {
     let empty = xpc_dictionary_create(nil, nil, 0)
     #expect(
-      VendorCharonControlWireCodec.replyEvent(empty, peerPID: 91)
-        == .emptyAcknowledgement(peerPID: 91))
+      VendorCharonControlWireCodec.replyEvent(empty)
+        == .emptyAcknowledgement)
 
     xpc_dictionary_set_bool(empty, "success", true)
-    #expect(VendorCharonControlWireCodec.replyEvent(empty, peerPID: 91) == .unexpectedPayload)
+    #expect(VendorCharonControlWireCodec.replyEvent(empty) == .unexpectedPayload)
 
     let array = xpc_array_create(nil, 0)
-    #expect(VendorCharonControlWireCodec.replyEvent(array, peerPID: 91) == .unexpectedPayload)
+    #expect(VendorCharonControlWireCodec.replyEvent(array) == .unexpectedPayload)
   }
 }
 

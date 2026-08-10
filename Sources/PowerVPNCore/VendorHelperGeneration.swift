@@ -25,11 +25,11 @@ public struct VendorHelperGenerationSnapshot: Equatable, Sendable {
     self.pid = pid
     self.runs = runs
   }
-  var exactInactive: Bool {
+  package var exactInactive: Bool {
     launchdObserved && inactiveConfirmed && !running
       && activeCount == 0 && pid == nil && runs != nil
   }
-  var exactRunning: Bool {
+  package var exactRunning: Bool {
     launchdObserved && !inactiveConfirmed && running
       && activeCount.map { $0 > 0 } == true
       && pid.map { $0 > 0 } == true && runs != nil

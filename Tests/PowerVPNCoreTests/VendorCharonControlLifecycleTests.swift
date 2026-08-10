@@ -11,14 +11,14 @@ import Testing
     let pending = controlTransport(factory).beginStart(
       snapshot: snapshot,
       timeoutMilliseconds: 500,
-      peerGenerationValidator: { _ in true }
+      peerGenerationValidator: { true }
     )
 
     #expect(factory.callCount == 1)
     #expect(factory.driver.submitCount == 1)
     #expect(factory.driver.observations.first?.exactStartShape == true)
     fixture.session.failBorrows()
-    factory.driver.emitReply(.emptyAcknowledgement(peerPID: 2), at: 0)
+    factory.driver.emitReply(.emptyAcknowledgement, at: 0)
     let result = await pending.result()
 
     #expect(result.receipt.outcome == .transportAcknowledged)
@@ -36,12 +36,12 @@ import Testing
       await transport.start(
         snapshot: snapshot,
         timeoutMilliseconds: 500,
-        peerGenerationValidator: { $0 == 44 }
+        peerGenerationValidator: { true }
       )
     }
     #expect(await waitForControl { factory.driver.submitCount == 1 })
     factory.driver.emitConnection(.emptyDispatcherTail)
-    factory.driver.emitReply(.emptyAcknowledgement(peerPID: 44), at: 0)
+    factory.driver.emitReply(.emptyAcknowledgement, at: 0)
     let start = await startTask.value
 
     #expect(start.receipt.outcome == .transportAcknowledged)
@@ -74,14 +74,9 @@ import Testing
           && lease.observation.latestStatus == connected
       })
 
-    let stopTask = Task {
-      await lease.stop(
-        timeoutMilliseconds: 500,
-        peerGenerationValidator: { $0 == 44 }
-      )
-    }
+    let stopTask = Task { await lease.stop(timeoutMilliseconds: 500) }
     #expect(await waitForControl { factory.driver.submitCount == 2 })
-    factory.driver.emitReply(.emptyAcknowledgement(peerPID: 44), at: 1)
+    factory.driver.emitReply(.emptyAcknowledgement, at: 1)
     let stop = await stopTask.value
 
     #expect(stop.outcome == .transportAcknowledged)
@@ -99,10 +94,7 @@ import Testing
         VendorXPCRequestField(key: "rpc", value: "stop_connection"),
       ])
 
-    let repeated = await lease.stop(
-      timeoutMilliseconds: 500,
-      peerGenerationValidator: { _ in true }
-    )
+    let repeated = await lease.stop(timeoutMilliseconds: 500)
     #expect(repeated.outcome == .leaseClosed)
     #expect(!repeated.requestSent)
     #expect(!repeated.connectionCancelRequested)
@@ -120,11 +112,11 @@ import Testing
         await transport.start(
           snapshot: snapshot,
           timeoutMilliseconds: 500,
-          peerGenerationValidator: { _ in true }
+          peerGenerationValidator: { true }
         )
       }
       #expect(await waitForControl { factory.driver.submitCount == 1 })
-      factory.driver.emitReply(.emptyAcknowledgement(peerPID: 8), at: 0)
+      factory.driver.emitReply(.emptyAcknowledgement, at: 0)
       let result = await task.value
       lease = result.lease
       #expect(lease != nil)
@@ -144,28 +136,18 @@ import Testing
       await controlTransport(factory).start(
         snapshot: snapshot,
         timeoutMilliseconds: 500,
-        peerGenerationValidator: { _ in true }
+        peerGenerationValidator: { true }
       )
     }
     #expect(await waitForControl { factory.driver.submitCount == 1 })
-    factory.driver.emitReply(.emptyAcknowledgement(peerPID: 3), at: 0)
+    factory.driver.emitReply(.emptyAcknowledgement, at: 0)
     let start = await startTask.value
     let lease = try #require(start.lease)
 
-    let first = Task {
-      await lease.stop(
-        timeoutMilliseconds: 500,
-        peerGenerationValidator: { _ in true }
-      )
-    }
-    let second = Task {
-      await lease.stop(
-        timeoutMilliseconds: 500,
-        peerGenerationValidator: { _ in true }
-      )
-    }
+    let first = Task { await lease.stop(timeoutMilliseconds: 500) }
+    let second = Task { await lease.stop(timeoutMilliseconds: 500) }
     #expect(await waitForControl { factory.driver.submitCount == 2 })
-    factory.driver.emitReply(.emptyAcknowledgement(peerPID: 3), at: 1)
+    factory.driver.emitReply(.emptyAcknowledgement, at: 1)
     let receipts = [await first.value, await second.value]
 
     #expect(receipts.map(\.outcome).filter { $0 == .transportAcknowledged }.count == 1)
@@ -181,32 +163,22 @@ import Testing
     let pending = controlTransport(factory).beginStart(
       snapshot: snapshot,
       timeoutMilliseconds: 500,
-      peerGenerationValidator: { _ in true }
+      peerGenerationValidator: { true }
     )
-    factory.driver.emitReply(.emptyAcknowledgement(peerPID: 3), at: 0)
+    factory.driver.emitReply(.emptyAcknowledgement, at: 0)
     let start = await pending.result()
     let lease = try #require(start.lease)
 
-    let winner = Task {
-      await lease.stop(
-        timeoutMilliseconds: 500,
-        peerGenerationValidator: { _ in true }
-      )
-    }
+    let winner = Task { await lease.stop(timeoutMilliseconds: 500) }
     #expect(await waitForControl { factory.driver.submitCount == 2 })
-    let loser = Task {
-      await lease.stop(
-        timeoutMilliseconds: 500,
-        peerGenerationValidator: { _ in true }
-      )
-    }
+    let loser = Task { await lease.stop(timeoutMilliseconds: 500) }
     loser.cancel()
     let loserReceipt = await loser.value
     #expect(loserReceipt.outcome == .leaseClosed || loserReceipt.outcome == .cancelled)
     #expect(!loserReceipt.requestSent)
     #expect(factory.driver.cancelCount == 0)
 
-    factory.driver.emitReply(.emptyAcknowledgement(peerPID: 3), at: 1)
+    factory.driver.emitReply(.emptyAcknowledgement, at: 1)
     let winnerReceipt = await winner.value
     #expect(winnerReceipt.outcome == .transportAcknowledged)
     #expect(winnerReceipt.requestSent)
@@ -219,7 +191,7 @@ import Testing
     let invalid = await controlTransport(invalidFactory).start(
       snapshot: try ControlSnapshotFixture().snapshot(),
       timeoutMilliseconds: 0,
-      peerGenerationValidator: { _ in true }
+      peerGenerationValidator: { true }
     )
     #expect(invalid.receipt.outcome == .invalidTimeout)
     #expect(!invalid.receipt.requestSent)
@@ -232,7 +204,7 @@ import Testing
       return await controlTransport(cancelledFactory).start(
         snapshot: cancelledSnapshot,
         timeoutMilliseconds: 500,
-        peerGenerationValidator: { _ in true }
+        peerGenerationValidator: { true }
       )
     }.value
     #expect(cancelled.receipt.outcome == .cancelled)
@@ -249,7 +221,7 @@ import Testing
     let result = await controlTransport(factory).start(
       snapshot: snapshot,
       timeoutMilliseconds: 500,
-      peerGenerationValidator: { _ in true }
+      peerGenerationValidator: { true }
     )
 
     #expect(result.receipt.outcome == .snapshotEncodingFailed)

@@ -147,6 +147,21 @@ enum VendorXPCWireCodec {
     return .business(reply, peerPID: peerPID)
   }
 
+  static func sessionConnectionEvent(
+    _ object: xpc_object_t
+  ) -> VendorCharonEmergencyProbeEvent {
+    switch connectionEvent(object, peerPID: 0) {
+    case .business(let reply, _): return .business(reply)
+    case .emptyDispatcherTail: return .emptyDispatcherTail
+    case .malformedBusinessEvent: return .malformedBusinessEvent
+    case .connectionInterrupted: return .connectionInterrupted
+    case .connectionInvalid: return .connectionInvalid
+    case .peerCodeSigningRequirement: return .peerCodeSigningRequirement
+    case .unexpectedXPCError: return .unexpectedXPCError
+    case .unexpectedConnectionEvent: return .unexpectedConnectionEvent
+    }
+  }
+
   static func replyCallback(_ object: xpc_object_t) -> VendorXPCReplyCallbackEvent {
     if object === XPC_ERROR_CONNECTION_INTERRUPTED { return .connectionInterrupted }
     if object === XPC_ERROR_CONNECTION_INVALID { return .connectionInvalid }

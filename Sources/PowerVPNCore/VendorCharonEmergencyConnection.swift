@@ -1,20 +1,29 @@
 import Dispatch
 @preconcurrency import XPC
 
+enum VendorCharonEmergencyProbeEvent: Equatable, Sendable {
+  case business(VendorXPCBusinessReply)
+  case emptyDispatcherTail
+  case malformedBusinessEvent
+  case connectionInterrupted
+  case connectionInvalid
+  case peerCodeSigningRequirement
+  case unexpectedXPCError
+  case unexpectedConnectionEvent
+}
+
 protocol VendorCharonEmergencyConnectionDriving: AnyObject, Sendable {
-  func beginProbe(_ request: xpc_object_t)
+  func beginProbe(_ request: xpc_object_t) -> VendorXPCSessionSubmission
 
   func submitStop(
     _ request: xpc_object_t,
-    expectedPeerPID: Int32,
     replyHandler: @escaping @Sendable (VendorCharonControlReplyEvent) -> Void
-  ) -> Bool
+  ) -> VendorXPCSessionSubmission
 
   func cancel()
 }
 
-/// One fixed-service XPC connection used first for exact peer authentication
-/// and then, only on that authenticated connection, for exact emergency stop.
+/// One fixed-service, non-reconnecting XPC session used for probe then stop.
 final class SystemVendorCharonEmergencyConnectionDriver: @unchecked Sendable,
   VendorCharonEmergencyConnectionDriving
 {
@@ -22,89 +31,125 @@ final class SystemVendorCharonEmergencyConnectionDriver: @unchecked Sendable,
 
   static let serviceName = "com.leadsec.charon-xpc"
 
-  private let connection: xpc_connection_t
-  private let queue: DispatchQueue
-  private let probeEventHandler: @Sendable (VendorXPCConnectionEvent) -> Void
+  private let probeEventHandler: @Sendable (VendorCharonEmergencyProbeEvent) -> Void
   private let probeReplyHandler: @Sendable (VendorXPCReplyCallbackEvent) -> Void
   private let stopEventHandler: @Sendable (VendorCharonControlConnectionEvent) -> Void
+  private var session: VendorXPCSession!
   private var phase = Phase.probing
 
   init(
     queue: DispatchQueue,
-    probeEventHandler: @escaping @Sendable (VendorXPCConnectionEvent) -> Void,
+    probeEventHandler: @escaping @Sendable (VendorCharonEmergencyProbeEvent) -> Void,
     probeReplyHandler: @escaping @Sendable (VendorXPCReplyCallbackEvent) -> Void,
     stopEventHandler: @escaping @Sendable (VendorCharonControlConnectionEvent) -> Void
   ) {
-    self.queue = queue
     self.probeEventHandler = probeEventHandler
     self.probeReplyHandler = probeReplyHandler
     self.stopEventHandler = stopEventHandler
-    connection = Self.serviceName.withCString { service in
-      xpc_connection_create_mach_service(
-        service,
-        queue,
-        UInt64(XPC_CONNECTION_MACH_SERVICE_PRIVILEGED)
-      )
-    }
+    session = VendorXPCSession(
+      queue: queue,
+      incomingDecoder: { [weak self] object in self?.handleIncoming(object) },
+      cancellationHandler: { [weak self] outcome in self?.handleCancellation(outcome) }
+    )
   }
 
-  func beginProbe(_ request: xpc_object_t) {
-    guard phase == .probing else { return }
-    xpc_connection_set_event_handler(connection) { [self] object in
-      switch phase {
-      case .probing:
-        probeEventHandler(
-          VendorXPCWireCodec.connectionEvent(
-            object,
-            peerPID: xpc_connection_get_pid(connection)
-          ))
-      case .stopping:
-        stopEventHandler(VendorCharonControlWireCodec.connectionEvent(object))
-      case .closed:
-        break
-      }
-    }
-    xpc_connection_activate(connection)
-    xpc_connection_send_message_with_reply(
-      connection,
+  func beginProbe(_ request: xpc_object_t) -> VendorXPCSessionSubmission {
+    guard phase == .probing else { return .rejected(.connectionInvalid) }
+    return session.send(
       request,
-      queue
-    ) { [probeReplyHandler] object in
-      probeReplyHandler(VendorXPCWireCodec.replyCallback(object))
-    }
+      replyDecoder: { [probeReplyHandler] object in
+        probeReplyHandler(VendorXPCWireCodec.replyCallback(object))
+      },
+      failureHandler: { [probeReplyHandler] outcome in
+        probeReplyHandler(Self.probeReplyEvent(outcome))
+      }
+    )
   }
 
   func submitStop(
     _ request: xpc_object_t,
-    expectedPeerPID: Int32,
     replyHandler: @escaping @Sendable (VendorCharonControlReplyEvent) -> Void
-  ) -> Bool {
-    guard phase == .probing else {
-      return false
-    }
-    let currentPeerPID = xpc_connection_get_pid(connection)
-    guard currentPeerPID > 0, currentPeerPID == expectedPeerPID else {
-      return false
-    }
-    phase = .stopping
-    xpc_connection_send_message_with_reply(
-      connection,
+  ) -> VendorXPCSessionSubmission {
+    guard phase == .probing else { return .rejected(.connectionInvalid) }
+    let submission = session.send(
       request,
-      queue
-    ) { [connection] object in
-      replyHandler(
-        VendorCharonControlWireCodec.replyEvent(
-          object,
-          peerPID: xpc_connection_get_pid(connection)
-        ))
-    }
-    return true
+      replyDecoder: { object in
+        replyHandler(VendorCharonControlWireCodec.replyEvent(object))
+      },
+      failureHandler: { outcome in
+        replyHandler(Self.stopReplyEvent(outcome))
+      }
+    )
+    guard submission == .submitted else { return submission }
+    phase = .stopping
+    return .submitted
   }
 
   func cancel() {
     guard phase != .closed else { return }
     phase = .closed
-    xpc_connection_set_event_handler(connection) { _ in }
-    xpc_connection_cancel(connection)
+    session.cancel()
+  }
+
+  private func handleIncoming(_ object: xpc_object_t) {
+    switch phase {
+    case .probing:
+      probeEventHandler(VendorXPCWireCodec.sessionConnectionEvent(object))
+    case .stopping:
+      stopEventHandler(VendorCharonControlWireCodec.connectionEvent(object))
+    case .closed:
+      break
+    }
+  }
+
+  private func handleCancellation(_ outcome: VendorCharonControlOutcome) {
+    switch phase {
+    case .probing:
+      probeEventHandler(Self.probeEvent(outcome))
+    case .stopping:
+      stopEventHandler(Self.controlEvent(outcome))
+    case .closed:
+      break
+    }
+  }
+
+  private static func probeEvent(
+    _ outcome: VendorCharonControlOutcome
+  ) -> VendorCharonEmergencyProbeEvent {
+    switch outcome {
+    case .peerCodeSigningRequirement: return .peerCodeSigningRequirement
+    case .connectionInvalid: return .connectionInvalid
+    default: return .unexpectedXPCError
+    }
+  }
+
+  private static func controlEvent(
+    _ outcome: VendorCharonControlOutcome
+  ) -> VendorCharonControlConnectionEvent {
+    switch outcome {
+    case .peerCodeSigningRequirement: return .peerCodeSigningRequirement
+    case .connectionInvalid: return .connectionInvalid
+    default: return .unexpectedXPCError
+    }
+  }
+
+  private static func probeReplyEvent(
+    _ outcome: VendorCharonControlOutcome
+  ) -> VendorXPCReplyCallbackEvent {
+    switch outcome {
+    case .peerCodeSigningRequirement: return .peerCodeSigningRequirement
+    case .connectionInvalid: return .connectionInvalid
+    default: return .unexpectedXPCError
+    }
+  }
+
+  private static func stopReplyEvent(
+    _ outcome: VendorCharonControlOutcome
+  ) -> VendorCharonControlReplyEvent {
+    switch outcome {
+    case .peerCodeSigningRequirement: return .peerCodeSigningRequirement
+    case .connectionInvalid: return .connectionInvalid
+    default: return .unexpectedXPCError
+    }
   }
 }

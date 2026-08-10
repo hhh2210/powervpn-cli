@@ -14,7 +14,7 @@ package struct RawVendorCharonControlTransport: Sendable {
   typealias EmergencyDriverFactory =
     @Sendable (
       DispatchQueue,
-      @escaping @Sendable (VendorXPCConnectionEvent) -> Void,
+      @escaping @Sendable (VendorCharonEmergencyProbeEvent) -> Void,
       @escaping @Sendable (VendorXPCReplyCallbackEvent) -> Void,
       @escaping @Sendable (VendorCharonControlConnectionEvent) -> Void
     ) -> any VendorCharonEmergencyConnectionDriving
@@ -62,7 +62,7 @@ package struct RawVendorCharonControlTransport: Sendable {
   package func beginStart(
     snapshot: VendorCharonStartSnapshot,
     timeoutMilliseconds: Int = Self.defaultTimeoutMilliseconds,
-    peerGenerationValidator: @escaping @Sendable (Int32) -> Bool
+    peerGenerationValidator: @escaping @Sendable () -> Bool
   ) -> VendorCharonPendingStart {
     guard Self.validTimeoutMilliseconds.contains(timeoutMilliseconds) else {
       return VendorCharonPendingStart(immediate: immediateStartResult(.invalidTimeout))
@@ -85,7 +85,7 @@ package struct RawVendorCharonControlTransport: Sendable {
   package func start(
     snapshot: VendorCharonStartSnapshot,
     timeoutMilliseconds: Int = Self.defaultTimeoutMilliseconds,
-    peerGenerationValidator: @escaping @Sendable (Int32) -> Bool
+    peerGenerationValidator: @escaping @Sendable () -> Bool
   ) async -> VendorCharonStartControlResult {
     await beginStart(
       snapshot: snapshot,

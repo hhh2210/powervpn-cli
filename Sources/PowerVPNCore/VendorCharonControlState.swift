@@ -26,7 +26,7 @@ final class VendorCharonControlState: @unchecked Sendable {
   var completedStartResult: VendorCharonStartControlResult?
   var stopContinuation: CheckedContinuation<VendorCharonControlReceipt, Never>?
   var currentStopAttempt: StopAttempt?
-  var currentValidator: (@Sendable (Int32) -> Bool)?
+  var currentValidator: (@Sendable () -> Bool)?
   var requestSent = false
   var emptyReplyObserved = false
   var statusEvents = 0
@@ -58,7 +58,7 @@ final class VendorCharonControlState: @unchecked Sendable {
 
   func beginStartSynchronously(
     timeoutMilliseconds: Int,
-    peerGenerationValidator: @escaping @Sendable (Int32) -> Bool
+    peerGenerationValidator: @escaping @Sendable () -> Bool
   ) {
     queue.sync {
       beginStart(
@@ -87,8 +87,7 @@ final class VendorCharonControlState: @unchecked Sendable {
   }
 
   func stop(
-    timeoutMilliseconds: Int,
-    peerGenerationValidator: @escaping @Sendable (Int32) -> Bool
+    timeoutMilliseconds: Int
   ) async -> VendorCharonControlReceipt {
     guard RawVendorCharonControlTransport.validTimeoutMilliseconds.contains(timeoutMilliseconds)
     else { return await immediateStop(.invalidTimeout) }
@@ -113,10 +112,7 @@ final class VendorCharonControlState: @unchecked Sendable {
           }
           currentStopAttempt = attempt
           stopContinuation = continuation
-          beginStop(
-            timeoutMilliseconds: timeoutMilliseconds,
-            peerGenerationValidator: peerGenerationValidator
-          )
+          beginStop(timeoutMilliseconds: timeoutMilliseconds)
         }
       }
     } onCancel: {
@@ -156,7 +152,7 @@ final class VendorCharonControlState: @unchecked Sendable {
 
   private func beginStart(
     timeoutMilliseconds: Int,
-    peerGenerationValidator: @escaping @Sendable (Int32) -> Bool
+    peerGenerationValidator: @escaping @Sendable () -> Bool
   ) {
     guard phase == .idle, let snapshot else {
       finishStart(.leaseClosed)
@@ -173,11 +169,11 @@ final class VendorCharonControlState: @unchecked Sendable {
         }
         self.driver = driver
         armTimeout(milliseconds: timeoutMilliseconds, operation: .startConnection)
-        requestSent = true
-        driver.submit(request) { [weak self] event in
+        let submission = driver.submit(request) { [weak self] event in
           guard let self else { return }
           self.queue.async { self.handle(event, operation: .startConnection) }
         }
+        handleSubmission(submission, operation: .startConnection)
       }
     } catch let error as VendorCharonStartEncodingError {
       finishStart(.snapshotEncodingFailed, encodingError: error)
@@ -186,23 +182,21 @@ final class VendorCharonControlState: @unchecked Sendable {
     }
   }
 
-  private func beginStop(
-    timeoutMilliseconds: Int,
-    peerGenerationValidator: @escaping @Sendable (Int32) -> Bool
-  ) {
+  private func beginStop(timeoutMilliseconds: Int) {
     guard phase == .active, let driver else {
       finishStop(.leaseClosed, retainConnection: false)
       return
     }
     phase = .stopping
-    currentValidator = peerGenerationValidator
-    requestSent = true
     emptyReplyObserved = false
     armTimeout(milliseconds: timeoutMilliseconds, operation: .stopConnection)
-    driver.submit(VendorCharonControlWireCodec.makeStopRequest()) { [weak self] event in
+    let submission = driver.submit(
+      VendorCharonControlWireCodec.makeStopRequest()
+    ) { [weak self] event in
       guard let self else { return }
       self.queue.async { self.handle(event, operation: .stopConnection) }
     }
+    handleSubmission(submission, operation: .stopConnection)
   }
 
   private func armTimeout(
@@ -232,11 +226,14 @@ final class VendorCharonControlState: @unchecked Sendable {
     else { return }
     let outcome: VendorCharonControlOutcome
     switch event {
-    case .emptyAcknowledgement(let peerPID):
+    case .emptyAcknowledgement:
       emptyReplyObserved = true
-      outcome =
-        currentValidator?(peerPID) == true
-        ? .transportAcknowledged : .peerGenerationMismatch
+      if operation == .startConnection {
+        let accepted = currentValidator?() == true
+        outcome = accepted ? .transportAcknowledged : .peerGenerationMismatch
+      } else {
+        outcome = .transportAcknowledged
+      }
     case .connectionInterrupted: outcome = .connectionInterrupted
     case .connectionInvalid: outcome = .connectionInvalid
     case .peerCodeSigningRequirement: outcome = .peerCodeSigningRequirement

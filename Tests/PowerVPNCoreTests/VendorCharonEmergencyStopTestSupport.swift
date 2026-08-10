@@ -14,7 +14,7 @@ final class ScriptedEmergencyConnectionDriver: @unchecked Sendable,
   VendorCharonEmergencyConnectionDriving
 {
   private let lock = NSLock()
-  private let probeEventHandler: @Sendable (VendorXPCConnectionEvent) -> Void
+  private let probeEventHandler: @Sendable (VendorCharonEmergencyProbeEvent) -> Void
   private let probeReplyHandler: @Sendable (VendorXPCReplyCallbackEvent) -> Void
   private let stopEventHandler: @Sendable (VendorCharonControlConnectionEvent) -> Void
   private var stopReplyHandler: (@Sendable (VendorCharonControlReplyEvent) -> Void)?
@@ -22,10 +22,10 @@ final class ScriptedEmergencyConnectionDriver: @unchecked Sendable,
   private var probes = 0
   private var stops = 0
   private var cancels = 0
-  private var currentPeerPID: Int32 = 0
+  private var sessionValid = true
 
   init(
-    probeEventHandler: @escaping @Sendable (VendorXPCConnectionEvent) -> Void,
+    probeEventHandler: @escaping @Sendable (VendorCharonEmergencyProbeEvent) -> Void,
     probeReplyHandler: @escaping @Sendable (VendorXPCReplyCallbackEvent) -> Void,
     stopEventHandler: @escaping @Sendable (VendorCharonControlConnectionEvent) -> Void
   ) {
@@ -34,26 +34,25 @@ final class ScriptedEmergencyConnectionDriver: @unchecked Sendable,
     self.stopEventHandler = stopEventHandler
   }
 
-  func beginProbe(_ request: xpc_object_t) {
+  func beginProbe(_ request: xpc_object_t) -> VendorXPCSessionSubmission {
     lock.withLock {
+      guard sessionValid else { return .rejected(.connectionInvalid) }
       probes += 1
       envelopes.append(Self.observation(request))
+      return .submitted
     }
   }
 
   func submitStop(
     _ request: xpc_object_t,
-    expectedPeerPID: Int32,
     replyHandler: @escaping @Sendable (VendorCharonControlReplyEvent) -> Void
-  ) -> Bool {
+  ) -> VendorXPCSessionSubmission {
     lock.withLock {
-      guard currentPeerPID > 0, currentPeerPID == expectedPeerPID else {
-        return false
-      }
+      guard sessionValid else { return .rejected(.connectionInvalid) }
       stops += 1
       envelopes.append(Self.observation(request))
       stopReplyHandler = replyHandler
-      return true
+      return .submitted
     }
   }
 
@@ -66,24 +65,22 @@ final class ScriptedEmergencyConnectionDriver: @unchecked Sendable,
   var stopCount: Int { lock.withLock { stops } }
   var cancelCount: Int { lock.withLock { cancels } }
 
-  func emitProbeBusiness(peerPID: Int32) {
-    lock.withLock { currentPeerPID = peerPID }
+  func emitProbeBusiness() {
     emitProbe(
       .business(
         VendorXPCBusinessReply(
           versionByteLength: 5,
           versionMatchesLockedBuild: true,
           getVersionSuccess: true
-        ),
-        peerPID: peerPID
+        )
       ))
   }
 
-  func setCurrentPeerPID(_ peerPID: Int32) {
-    lock.withLock { currentPeerPID = peerPID }
+  func invalidateSession() {
+    lock.withLock { sessionValid = false }
   }
 
-  func emitProbe(_ event: VendorXPCConnectionEvent) {
+  func emitProbe(_ event: VendorCharonEmergencyProbeEvent) {
     probeEventHandler(event)
   }
 
@@ -120,7 +117,7 @@ final class EmergencyConnectionDriverFactory: @unchecked Sendable {
 
   func make(
     queue _: DispatchQueue,
-    probeEventHandler: @escaping @Sendable (VendorXPCConnectionEvent) -> Void,
+    probeEventHandler: @escaping @Sendable (VendorCharonEmergencyProbeEvent) -> Void,
     probeReplyHandler: @escaping @Sendable (VendorXPCReplyCallbackEvent) -> Void,
     stopEventHandler: @escaping @Sendable (VendorCharonControlConnectionEvent) -> Void
   ) -> any VendorCharonEmergencyConnectionDriving {
@@ -161,7 +158,7 @@ func emergencyTransport(
 func emergencyStopTask(
   _ factory: EmergencyConnectionDriverFactory,
   gate: @escaping @Sendable () -> Bool = { true },
-  peerGenerationValidator: @escaping @Sendable (Int32) -> Bool = { _ in true }
+  peerGenerationValidator: @escaping @Sendable () -> Bool = { true }
 ) -> Task<VendorCharonControlReceipt, Never> {
   Task {
     await emergencyTransport(factory).emergencyStop(

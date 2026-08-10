@@ -17,7 +17,11 @@ let package = Package(
       name: "CPortalCurl",
       linkerSettings: [.linkedLibrary("curl")]
     ),
-    .target(name: "PowerVPNCore"),
+    .target(
+      name: "CPowerVPNXPCSession",
+      linkerSettings: [.linkedFramework("Security")]
+    ),
+    .target(name: "PowerVPNCore", dependencies: ["CPowerVPNXPCSession"]),
     .target(name: "PowerVPNPortal", dependencies: ["CPortalCurl"]),
     .target(
       name: "PowerVPNProduct",

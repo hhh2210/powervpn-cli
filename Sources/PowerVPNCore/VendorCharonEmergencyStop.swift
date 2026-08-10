@@ -3,11 +3,11 @@ import Foundation
 
 extension RawVendorCharonControlTransport {
   /// Authenticates the expected running helper with exact `get_version`, then
-  /// sends exact `stop_connection` over that same fixed-service connection.
+  /// sends exact `stop_connection` over that same non-reconnecting session.
   package func emergencyStop(
     timeoutMilliseconds: Int = Self.defaultTimeoutMilliseconds,
     expectedRunningPredicate: @escaping @Sendable () -> Bool,
-    peerGenerationValidator: @escaping @Sendable (Int32) -> Bool
+    peerGenerationValidator: @escaping @Sendable () -> Bool
   ) async -> VendorCharonControlReceipt {
     guard Self.validTimeoutMilliseconds.contains(timeoutMilliseconds) else {
       return Self.unsentEmergencyStop(.invalidTimeout)
@@ -50,7 +50,7 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
 
   private let queue = DispatchQueue(label: "com.powervpn.vendor-charon-emergency-stop")
   private let driverFactory: RawVendorCharonControlTransport.EmergencyDriverFactory
-  private let peerGenerationValidator: @Sendable (Int32) -> Bool
+  private let peerGenerationValidator: @Sendable () -> Bool
   private var phase = Phase.idle
   private var driver: (any VendorCharonEmergencyConnectionDriving)?
   private var timer: DispatchSourceTimer?
@@ -60,8 +60,6 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
   private var emptyStopReplyObserved = false
   private var probeBusinessValidated = false
   private var probeEmptyReplyObserved = false
-  /// Retained only inside this transaction; never serialized or reported.
-  private var authenticatedPeerPID: Int32?
   private var peerGenerationValidated = false
   private var statusEventCount = 0
   private var dispatcherTailEventCount = 0
@@ -69,7 +67,7 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
 
   init(
     driverFactory: @escaping RawVendorCharonControlTransport.EmergencyDriverFactory,
-    peerGenerationValidator: @escaping @Sendable (Int32) -> Bool
+    peerGenerationValidator: @escaping @Sendable () -> Bool
   ) {
     self.driverFactory = driverFactory
     self.peerGenerationValidator = peerGenerationValidator
@@ -96,7 +94,8 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
       )
       self.driver = driver
       armTimeout(milliseconds: timeoutMilliseconds)
-      driver.beginProbe(VendorXPCWireCodec.makeGetVersionRequest())
+      let submission = driver.beginProbe(VendorXPCWireCodec.makeGetVersionRequest())
+      if case .rejected(let outcome) = submission { finish(outcome) }
     }
   }
 
@@ -130,10 +129,10 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
     queue.async { [self] in finish(.cancelled) }
   }
 
-  private func handleProbe(_ event: VendorXPCConnectionEvent) {
+  private func handleProbe(_ event: VendorCharonEmergencyProbeEvent) {
     guard phase == .probing else { return }
     switch event {
-    case .business(let reply, let peerPID):
+    case .business(let reply):
       guard !probeBusinessValidated else {
         finish(.unexpectedConnectionEvent)
         return
@@ -146,12 +145,11 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
         finish(.helperVersionRejected)
         return
       }
-      guard peerPID > 0, peerGenerationValidator(peerPID) else {
+      guard peerGenerationValidator() else {
         finish(.peerGenerationMismatch)
         return
       }
       probeBusinessValidated = true
-      authenticatedPeerPID = peerPID
       peerGenerationValidated = true
       beginStopIfProbeComplete()
     case .emptyDispatcherTail:
@@ -183,20 +181,17 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
     guard phase == .probing,
       probeBusinessValidated,
       probeEmptyReplyObserved,
-      let driver,
-      let authenticatedPeerPID
+      let driver
     else { return }
     phase = .stopping
-    let submitted = driver.submitStop(
-      VendorCharonControlWireCodec.makeStopRequest(),
-      expectedPeerPID: authenticatedPeerPID
+    let submission = driver.submitStop(
+      VendorCharonControlWireCodec.makeStopRequest()
     ) { [weak self] event in
       guard let self else { return }
       self.queue.async { self.handleStopReply(event) }
     }
-    guard submitted else {
-      peerGenerationValidated = false
-      finish(.peerGenerationMismatch)
+    guard case .submitted = submission else {
+      if case .rejected(let outcome) = submission { finish(outcome) }
       return
     }
     stopRequestSent = true
@@ -205,13 +200,8 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
   private func handleStopReply(_ event: VendorCharonControlReplyEvent) {
     guard phase == .stopping else { return }
     switch event {
-    case .emptyAcknowledgement(let peerPID):
+    case .emptyAcknowledgement:
       emptyStopReplyObserved = true
-      guard peerPID > 0, peerPID == authenticatedPeerPID else {
-        peerGenerationValidated = false
-        finish(.peerGenerationMismatch)
-        return
-      }
       finish(.transportAcknowledged)
     case .connectionInterrupted: finish(.connectionInterrupted)
     case .connectionInvalid: finish(.connectionInvalid)

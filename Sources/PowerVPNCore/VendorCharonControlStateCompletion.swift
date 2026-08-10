@@ -1,4 +1,21 @@
 extension VendorCharonControlState {
+  func handleSubmission(
+    _ submission: VendorXPCSessionSubmission,
+    operation: VendorCharonControlOperation
+  ) {
+    switch submission {
+    case .submitted:
+      requestSent = true
+    case .rejected(let outcome):
+      requestSent = false
+      if operation == .startConnection {
+        finishStart(outcome)
+      } else {
+        finishStop(outcome, retainConnection: false)
+      }
+    }
+  }
+
   func finishStart(
     _ outcome: VendorCharonControlOutcome,
     encodingError: VendorCharonStartEncodingError? = nil

@@ -82,12 +82,8 @@ package final class VendorCharonControlLease: @unchecked Sendable {
   }
 
   package func stop(
-    timeoutMilliseconds: Int,
-    peerGenerationValidator: @escaping @Sendable (Int32) -> Bool
+    timeoutMilliseconds: Int
   ) async -> VendorCharonControlReceipt {
-    await state.stop(
-      timeoutMilliseconds: timeoutMilliseconds,
-      peerGenerationValidator: peerGenerationValidator
-    )
+    await state.stop(timeoutMilliseconds: timeoutMilliseconds)
   }
 }

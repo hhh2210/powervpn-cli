@@ -9,7 +9,7 @@ import Testing
     let invalid = await emergencyTransport(invalidFactory).emergencyStop(
       timeoutMilliseconds: 0,
       expectedRunningPredicate: gate.evaluate,
-      peerGenerationValidator: { _ in true }
+      peerGenerationValidator: { true }
     )
     #expect(invalid.outcome == .invalidTimeout)
     #expect(gate.callCount == 0)
@@ -21,7 +21,7 @@ import Testing
       return await emergencyTransport(cancelledFactory).emergencyStop(
         timeoutMilliseconds: 500,
         expectedRunningPredicate: { true },
-        peerGenerationValidator: { _ in true }
+        peerGenerationValidator: { true }
       )
     }.value
     #expect(cancelled.outcome == .cancelled)
