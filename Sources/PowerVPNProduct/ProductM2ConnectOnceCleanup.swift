@@ -5,7 +5,7 @@ package struct ProductM2CleanupResult: Sendable {
   let path: ProductM2CleanupPath
   let stop: ProductM2ControlReceipt
   let emergencyStop: ProductM2ControlReceipt
-  let portalLogout: ProductM2PortalLogoutOutcome
+  let authorizationClose: ProductM2AuthorizationCloseOutcome
   let evidence: ProductM2CleanupEvidence
   let verified: Bool
 }
@@ -43,7 +43,7 @@ package struct ProductM2CleanupRunner: Sendable {
       path: control.path,
       stop: control.stop,
       emergencyStop: control.emergencyStop,
-      portalLogout: logout,
+      authorizationClose: logout,
       evidence: evidence,
       verified: portalClosed && controlClassified && evidence.allDimensionsRestored
     )
@@ -123,7 +123,7 @@ package struct ProductM2CleanupRunner: Sendable {
 
   private func closePortal(
     _ lease: (any ProductM2PortalLeasing)?
-  ) async -> ProductM2PortalLogoutOutcome {
+  ) async -> ProductM2AuthorizationCloseOutcome {
     guard let lease else { return .notRequired }
     let status = await Task.detached { await lease.logoutAndErase() }.value
     switch status {
@@ -151,18 +151,22 @@ private struct ControlCleanup {
 package struct ProductM2Execution {
   let request: ProductM2ConnectRequest
   let networkWindow: NetworkCleanupCaptureWindow
-  var outcome: ProductM2ConnectOutcome = .portalAcquisitionRejected
+  var outcome: ProductM2ConnectOutcome = .authorizationAcquisitionRejected
   var finalState: ProductM2ConnectionState = .signedOut
   var lastGoodState: ProductM2ConnectionState = .signedOut
   var firstBadEvent: ProductM2BadEvent?
-  var portalAcquisition: ProductM2PortalAcquisitionOutcome = .notRequested
+  var authorizationSource: ProductM2AuthorizationSource
+  var authorizationAcquisition: ProductM2AuthorizationAcquisitionOutcome = .notRequested
+  var authorizationFailure: ProductM2AuthorizationFailure?
   var startOutcome: ProductM2ControlOutcome = .notAttempted
+  var vendorStatusEvidence = ProductM2VendorStatusEvidence.notAttempted
+  var activeNetworkEvidence = ProductM2ActiveNetworkEvidence.unavailable
   var sshProof: ProductM2SSHProofOutcome = .notAttempted
   var sshProofEvidence: ProductM2FreshSSHProofEvidence?
   var cleanupPath: ProductM2CleanupPath = .notRequired
   var stopOutcome: ProductM2ControlOutcome = .notAttempted
   var emergencyStopOutcome: ProductM2ControlOutcome = .notAttempted
-  var portalLogout: ProductM2PortalLogoutOutcome = .notRequired
+  var authorizationClose: ProductM2AuthorizationCloseOutcome = .notRequired
   var cleanupEvidence = ProductM2CleanupEvidence.unavailable
   var cleanupVerified = false
   var serverContactRequested = false
@@ -182,7 +186,7 @@ package struct ProductM2Execution {
     cleanupPath = cleanup.path
     stopOutcome = cleanup.stop.outcome
     emergencyStopOutcome = cleanup.emergencyStop.outcome
-    portalLogout = cleanup.portalLogout
+    authorizationClose = cleanup.authorizationClose
     cleanupEvidence = cleanup.evidence
     cleanupVerified = cleanup.verified
     helperMutationRequested =
@@ -192,15 +196,39 @@ package struct ProductM2Execution {
     guard cleanup.verified else {
       if firstBadEvent == nil {
         firstBadEvent =
-          cleanup.portalLogout == .accepted
-            || cleanup.portalLogout == .notRequired
-          ? .cleanupVerificationRejected : .portalLogoutRejected
+          cleanup.authorizationClose == .accepted
+            || cleanup.authorizationClose == .notRequired
+          ? .cleanupVerificationRejected : .authorizationCloseRejected
       }
       outcome = .cleanupUnproven
       finalState = .failed
       return
     }
     if outcome == .connectedAndCleanedUp {
+      guard cleanup.path == .sameLeaseStop,
+        cleanup.stop.requestSent,
+        cleanup.stop.statusEventCount > 0,
+        cleanup.stop.statusAtSubmission == .connected
+      else {
+        let latest = cleanup.stop.statusAtSubmission
+        vendorStatusEvidence = ProductM2VendorStatusEvidence(
+          outcome: latest == .disconnected ? .disconnected : .leaseClosed,
+          statusEventCount: cleanup.stop.statusEventCount,
+          latestClassification: latest,
+          terminalControlOutcome: latest == nil ? cleanup.stop.outcome : nil
+        )
+        firstBadEvent = firstBadEvent ?? .vendorStatusUnproven
+        outcome = .vendorStatusUnproven
+        finalState = .disconnected
+        return
+      }
+      vendorStatusEvidence = ProductM2VendorStatusEvidence(
+        outcome: .connected,
+        statusEventCount: cleanup.stop.statusEventCount,
+        latestClassification: .connected,
+        terminalControlOutcome: nil
+      )
+      lastGoodState = .connected
       finalState = .disconnected
     } else if helperMutationRequested {
       finalState = .disconnected
@@ -215,14 +243,18 @@ package struct ProductM2Execution {
       firstBadEvent: firstBadEvent,
       resourceDisplayName: request.resourceDisplayName,
       sshTarget: request.sshTarget,
-      portalAcquisition: portalAcquisition,
+      authorizationSource: authorizationSource,
+      authorizationAcquisition: authorizationAcquisition,
+      authorizationFailure: authorizationFailure,
       startOutcome: startOutcome,
+      vendorStatusEvidence: vendorStatusEvidence,
+      activeNetworkEvidence: activeNetworkEvidence,
       sshProof: sshProof,
       sshProofEvidence: sshProofEvidence,
       cleanupPath: cleanupPath,
       stopOutcome: stopOutcome,
       emergencyStopOutcome: emergencyStopOutcome,
-      portalLogout: portalLogout,
+      authorizationClose: authorizationClose,
       cleanupEvidence: cleanupEvidence,
       cleanupVerified: cleanupVerified,
       serverContactRequested: serverContactRequested,

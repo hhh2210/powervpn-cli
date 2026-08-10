@@ -15,11 +15,11 @@ import Testing
         return true
       },
       generationObserver: CurrentMachineGenerationObserver(trace: trace),
-      preflightChecker: CurrentMachinePreflightChecker(trace: trace),
+      preflightChecker: CurrentMachinePreflightChecker(trace: trace, accepted: false),
       networkObserver: CurrentMachineNetworkObserver(trace: trace),
-      acquirePortal: {
+      authorizationProvider: ProductM2PortalAdapter {
         trace.record("portal")
-        return .rejected(.internalFailure, serverContactRequested: false)
+        fatalError("preflight rejection must not acquire native authorization")
       },
       control: productM2TestControl(trace: coordinatorTrace, plan: .acknowledged),
       freshSSHProver: ProductM2FreshSSHProver(
@@ -41,6 +41,48 @@ import Testing
     #expect(trace.events == ["session_preflight", "generation", "preflight"])
     #expect(trace.count("network") == 0)
     #expect(trace.count("portal") == 0)
+    #expect(trace.count("ssh") == 0)
+    #expect(coordinatorTrace.count("begin_start") == 0)
+    #expect(coordinatorTrace.count("emergency_stop") == 0)
+  }
+
+  @Test func defaultVendorOnceProviderFailsBeforeNetworkPortalOrControl() async {
+    let trace = CurrentMachineRuntimeTrace()
+    let coordinatorTrace = ProductM2TestTrace()
+    let runtime = ProductM2CurrentMachineRuntime(
+      controlRuntimePreflightAccepted: {
+        trace.record("session_preflight")
+        return true
+      },
+      generationObserver: CurrentMachineGenerationObserver(trace: trace),
+      preflightChecker: CurrentMachinePreflightChecker(trace: trace, accepted: true),
+      networkObserver: CurrentMachineNetworkObserver(trace: trace),
+      control: productM2TestControl(trace: coordinatorTrace, plan: .acknowledged),
+      freshSSHProver: ProductM2FreshSSHProver(
+        homeDirectory: "/tmp",
+        generateChallenge: { "00000000000000000000000000000000" },
+        execute: { _ in
+          trace.record("ssh")
+          return ProductM2FreshSSHProcessResult(processStarted: false, exitStatus: nil)
+        }
+      )
+    )
+
+    let report = await runtime.run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(report.schemaVersion == 4)
+    #expect(report.outcome == .authorizationAcquisitionRejected)
+    #expect(report.firstBadEvent == .authorizationAcquisitionRejected)
+    #expect(report.authorizationSource == .vendorOnce)
+    #expect(report.authorizationAcquisition == .rejected)
+    #expect(report.authorizationFailure == .providerUnavailable)
+    #expect(!report.serverContactRequested)
+    #expect(!report.helperMutationRequested)
+    #expect(runtime.authorizationAvailabilityFailure == .providerUnavailable)
+    #expect(trace.events.isEmpty)
+    #expect(trace.count("network") == 0)
     #expect(trace.count("ssh") == 0)
     #expect(coordinatorTrace.count("begin_start") == 0)
     #expect(coordinatorTrace.count("emergency_stop") == 0)
@@ -69,13 +111,14 @@ private struct CurrentMachineGenerationObserver: BoundedVendorHelperGenerationOb
 
 private struct CurrentMachinePreflightChecker: BoundedVendorXPCPreflightChecking {
   let trace: CurrentMachineRuntimeTrace
+  let accepted: Bool
 
   func check(
     generation: VendorHelperGenerationSnapshot
   ) async -> VendorXPCPreflightEvidence {
     trace.record("preflight")
     return VendorXPCPreflightEvidence(
-      guiProcessAbsent: false,
+      guiProcessAbsent: accepted,
       helperProcessAbsent: true,
       otherVendorHelperProcessesAbsent: true,
       helperLaunchdInactive: generation.exactInactive,

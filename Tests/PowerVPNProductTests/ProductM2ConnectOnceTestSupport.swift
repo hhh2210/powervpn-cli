@@ -19,6 +19,7 @@ final class ProductM2TestTrace: @unchecked Sendable {
     generation: VendorHelperGenerationSnapshot = m2ColdGeneration,
     baselines: [ProductM2NetworkBaseline] = [
       ProductM2NetworkBaseline(), ProductM2NetworkBaseline(),
+      ProductM2NetworkBaseline(),
     ],
     preflightResults: [Bool] = [true, true]
   ) {
@@ -108,100 +109,12 @@ actor ProductM2TestPortalLease: ProductM2PortalLeasing {
   }
 }
 
-struct ProductM2TestControlPlan: Sendable {
-  let startOutcome: ProductM2ControlOutcome
-  let startRequestSent: Bool
-  let retainLease: Bool
-  let generationAfterBegin: VendorHelperGenerationSnapshot
-  let stopOutcome: ProductM2ControlOutcome
-  let stopRequestSent: Bool
-
-  static let acknowledged = Self(
-    startOutcome: .transportAcknowledged,
-    startRequestSent: true,
-    retainLease: true,
-    generationAfterBegin: m2RunningGeneration,
-    stopOutcome: .transportAcknowledged,
-    stopRequestSent: true
-  )
-
-  static func noLease(
-    generation: VendorHelperGenerationSnapshot
-  ) -> Self {
-    Self(
-      startOutcome: .timeout,
-      startRequestSent: true,
-      retainLease: false,
-      generationAfterBegin: generation,
-      stopOutcome: .notAttempted,
-      stopRequestSent: false
-    )
-  }
-
-  static func acknowledgedStop(
-    outcome: ProductM2ControlOutcome,
-    requestSent: Bool
-  ) -> Self {
-    Self(
-      startOutcome: .transportAcknowledged,
-      startRequestSent: true,
-      retainLease: true,
-      generationAfterBegin: m2RunningGeneration,
-      stopOutcome: outcome,
-      stopRequestSent: requestSent
-    )
-  }
-}
-
-func productM2TestControl(
-  trace: ProductM2TestTrace,
-  plan: ProductM2TestControlPlan
-) -> ProductM2ControlAdapter {
-  ProductM2ControlAdapter(
-    beginStart: { _, validator in
-      trace.record("begin_start")
-      trace.setGeneration(plan.generationAfterBegin)
-      return ProductM2PendingStart {
-        trace.record("await_start")
-        let validatorAccepted =
-          plan.startOutcome == .transportAcknowledged
-          ? await validator() : false
-        let acknowledged =
-          plan.startOutcome == .transportAcknowledged
-          && validatorAccepted
-        let receipt = m2Receipt(
-          acknowledged
-            ? .transportAcknowledged
-            : plan.startOutcome == .transportAcknowledged
-              ? .peerGenerationMismatch : plan.startOutcome,
-          requestSent: plan.startRequestSent
-        )
-        let lease: ProductM2ControlLease? =
-          acknowledged && plan.retainLease
-          ? ProductM2ControlLease {
-            trace.record("stop")
-            return m2Receipt(plan.stopOutcome, requestSent: plan.stopRequestSent)
-          } : nil
-        return ProductM2StartResult(receipt: receipt, lease: lease)
-      }
-    },
-    emergencyStop: { predicate, validator in
-      trace.record("emergency_stop")
-      guard await predicate() else { return .unsent(.preflightBlocked) }
-      let accepted = await validator()
-      return m2Receipt(
-        accepted ? .transportAcknowledged : .peerGenerationMismatch,
-        requestSent: accepted
-      )
-    }
-  )
-}
-
 func productM2TestDependencies(
   snapshot: AuthenticatedPortalSnapshot,
   trace: ProductM2TestTrace,
   plan: ProductM2TestControlPlan = .acknowledged,
   baselineStable: Bool = true,
+  activeNetwork: ProductM2ActiveNetworkEvidence = m2ProvenActiveNetwork,
   sshProof: ProductM2SSHProofOutcome = .proven,
   sshEvidenceTarget: ProductM2SSHTarget? = nil,
   cleanup: ProductM2CleanupEvidence = m2CompleteCleanup,
@@ -229,10 +142,15 @@ func productM2TestDependencies(
       trace.record("baseline_stable")
       return baselineStable
     },
-    acquirePortal: {
+    assessActiveConnection: { _, _ in
+      trace.record("active_assessment")
+      return activeNetwork
+    },
+    authorizationSource: .nativePortal,
+    acquireAuthorization: {
       trace.record("acquire")
       if cancelDuringAcquire { withUnsafeCurrentTask { $0?.cancel() } }
-      return .acquired(lease)
+      return .acquired(source: .nativePortal, lease: lease)
     },
     control: productM2TestControl(trace: trace, plan: plan),
     proveFreshSSH: { target in

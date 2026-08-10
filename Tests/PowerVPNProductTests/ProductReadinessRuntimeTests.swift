@@ -16,7 +16,7 @@ import Testing
     #expect(doctor.profileSource == .sealedInstalledConfiguration)
     #expect(doctor.resourceSource == .unavailable)
     #expect(doctor.firstMissingField == .sessionID)
-    #expect(doctor.blocker == .authenticatedPortalSnapshotUnavailable)
+    #expect(doctor.blocker == .authorizedResourceProviderUnavailable)
     #expect(!doctor.networkRequested)
     #expect(!doctor.helperMutationRequested)
 
@@ -24,7 +24,7 @@ import Testing
     #expect(resources.productState == .blocked)
     #expect(resources.selectableResourceCount == 0)
     #expect(resources.selectableResources.isEmpty)
-    #expect(resources.blocker == .authenticatedPortalSnapshotUnavailable)
+    #expect(resources.blocker == .authorizedResourceProviderUnavailable)
 
     let snapshot = runtime.snapshotDryRun()
     #expect(!snapshot.snapshotComplete)

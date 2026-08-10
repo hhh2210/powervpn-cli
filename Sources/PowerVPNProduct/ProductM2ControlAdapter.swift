@@ -9,53 +9,38 @@ package protocol ProductM2PortalLeasing: Sendable {
 
 extension AuthenticatedPortalLease: ProductM2PortalLeasing {}
 
-package enum ProductM2PortalAcquisition: Sendable {
-  case acquired(any ProductM2PortalLeasing)
-  case rejected(PortalLoginStatus, serverContactRequested: Bool)
-}
-
-package enum ProductM2PortalAdapter {
-  /// Performs TTY credential input and Portal requests. Call only after a fresh
-  /// user approval; no Product runtime invokes this wrapper by default.
-  package static func acquireCurrentMachine() async -> ProductM2PortalAcquisition {
-    switch await PortalLoginRuntime.acquireCurrentMachine() {
-    case .acquired(let lease): return .acquired(lease)
-    case .rejected(let report):
-      let operations = report.operations
-      return .rejected(
-        report.status,
-        serverContactRequested: operations.loginRequested
-          || operations.sessionCheckRequested
-          || operations.resourceListRequested
-          || operations.logoutRequested
-      )
-    }
-  }
-}
-
 package struct ProductM2ControlReceipt: Equatable, Sendable {
   package let outcome: ProductM2ControlOutcome
   package let requestSent: Bool
   package let transportAcknowledged: Bool
   package let peerGenerationValidated: Bool
+  package let statusEventCount: Int
+  package let statusAtSubmission: ProductM2VendorStatusClassification?
 
   init(_ receipt: VendorCharonControlReceipt) {
     outcome = ProductM2ControlOutcome(receipt.outcome)
     requestSent = receipt.requestSent
     transportAcknowledged = receipt.transportAcknowledged
     peerGenerationValidated = receipt.peerGenerationValidated
+    statusEventCount = receipt.statusEventCount
+    statusAtSubmission = receipt.statusAtSubmission.map(
+      ProductM2VendorStatusClassification.init)
   }
 
   init(
     outcome: ProductM2ControlOutcome,
     requestSent: Bool,
     transportAcknowledged: Bool,
-    peerGenerationValidated: Bool
+    peerGenerationValidated: Bool,
+    statusEventCount: Int = 0,
+    statusAtSubmission: ProductM2VendorStatusClassification? = nil
   ) {
     self.outcome = outcome
     self.requestSent = requestSent
     self.transportAcknowledged = transportAcknowledged
     self.peerGenerationValidated = peerGenerationValidated
+    self.statusEventCount = statusEventCount
+    self.statusAtSubmission = statusAtSubmission
   }
 
   package static func unsent(
@@ -65,22 +50,31 @@ package struct ProductM2ControlReceipt: Equatable, Sendable {
       outcome: outcome,
       requestSent: false,
       transportAcknowledged: false,
-      peerGenerationValidated: false
+      peerGenerationValidated: false,
+      statusEventCount: 0,
+      statusAtSubmission: nil
     )
   }
 }
 
 package struct ProductM2ControlLease: Sendable {
-  private let operation: @Sendable () async -> ProductM2ControlReceipt
+  private let stopOperation: @Sendable () async -> ProductM2ControlReceipt
+  private let statusOperation: @Sendable () async -> ProductM2VendorStatusEvidence
 
   init(
-    operation: @escaping @Sendable () async -> ProductM2ControlReceipt
+    stopOperation: @escaping @Sendable () async -> ProductM2ControlReceipt,
+    statusOperation: @escaping @Sendable () async -> ProductM2VendorStatusEvidence
   ) {
-    self.operation = operation
+    self.stopOperation = stopOperation
+    self.statusOperation = statusOperation
   }
 
   package func stop() async -> ProductM2ControlReceipt {
-    await operation()
+    await stopOperation()
+  }
+
+  package func waitForConnectedStatus() async -> ProductM2VendorStatusEvidence {
+    await statusOperation()
   }
 }
 
@@ -122,13 +116,22 @@ package struct ProductM2ControlAdapter: Sendable {
         return ProductM2StartResult(
           receipt: ProductM2ControlReceipt(result.receipt),
           lease: result.lease.map { lease in
-            ProductM2ControlLease {
-              ProductM2ControlReceipt(
-                await lease.stop(
-                  timeoutMilliseconds: RawVendorCharonControlTransport
-                    .defaultTimeoutMilliseconds
-                ))
-            }
+            ProductM2ControlLease(
+              stopOperation: {
+                ProductM2ControlReceipt(
+                  await lease.stop(
+                    timeoutMilliseconds: RawVendorCharonControlTransport
+                      .defaultTimeoutMilliseconds
+                  ))
+              },
+              statusOperation: {
+                ProductM2VendorStatusEvidence(
+                  await lease.waitForConnectedStatus(
+                    timeoutMilliseconds: RawVendorCharonControlTransport
+                      .defaultTimeoutMilliseconds
+                  ))
+              }
+            )
           }
         )
       }
@@ -223,7 +226,7 @@ package enum ProductM2GenerationFence {
 }
 
 extension ProductM2ControlOutcome {
-  fileprivate init(_ outcome: VendorCharonControlOutcome) {
+  package init(_ outcome: VendorCharonControlOutcome) {
     switch outcome {
     case .transportAcknowledged: self = .transportAcknowledged
     case .preflightBlocked: self = .preflightBlocked

@@ -14,8 +14,19 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
   ) async -> ProductM2ConnectReport {
     var execution = ProductM2Execution(
       request: request,
-      networkWindow: NetworkCleanupCaptureWindow()
+      networkWindow: NetworkCleanupCaptureWindow(),
+      authorizationSource: dependencies.authorizationSource
     )
+    if let failure = dependencies.authorizationAvailabilityFailure {
+      execution.authorizationAcquisition = .rejected
+      execution.authorizationFailure = failure
+      execution.fail(
+        .authorizationAcquisitionRejected,
+        event: .authorizationAcquisitionRejected,
+        state: .blocked
+      )
+      return execution.report()
+    }
     guard dependencies.controlRuntimePreflightAccepted() else {
       execution.fail(.preflightBlocked, event: .preflightRejected, state: .blocked)
       return execution.report()
@@ -63,21 +74,40 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
     }
 
     execution.lastGoodState = .authenticating
-    let acquisition = await dependencies.acquirePortal()
+    let acquisition = await dependencies.acquireAuthorization()
     let portalLease: (any ProductM2PortalLeasing)?
     switch acquisition {
-    case .acquired(let lease):
+    case .acquired(let source, let lease):
       portalLease = lease
-      execution.portalAcquisition = .acquired
-      execution.serverContactRequested = true
-    case .rejected(let status, let contacted):
+      execution.serverContactRequested = source == .nativePortal
+      guard source == dependencies.authorizationSource else {
+        execution.authorizationAcquisition = .rejected
+        execution.authorizationFailure = .sourceMismatch
+        execution.fail(
+          .authorizationAcquisitionRejected,
+          event: .authorizationAcquisitionRejected,
+          state: .blocked
+        )
+        return await finish(
+          &execution,
+          baseline: baseline,
+          coldGeneration: coldGeneration,
+          portalLease: lease
+        )
+      }
+      execution.authorizationAcquisition = .acquired
+    case .rejected(let source, let failure, let contacted):
       portalLease = nil
       execution.serverContactRequested = contacted
-      execution.portalAcquisition = status == .cancelled ? .cancelled : .rejected
+      let normalizedFailure =
+        source == dependencies.authorizationSource ? failure : .sourceMismatch
+      execution.authorizationAcquisition =
+        normalizedFailure == .cancelled ? .cancelled : .rejected
+      execution.authorizationFailure = normalizedFailure
       execution.fail(
-        status == .cancelled ? .cancelled : .portalAcquisitionRejected,
-        event: status == .cancelled ? .cancelled : .portalAcquisitionRejected,
-        state: status == .cancelled ? .failed : .blocked
+        normalizedFailure == .cancelled ? .cancelled : .authorizationAcquisitionRejected,
+        event: normalizedFailure == .cancelled ? .cancelled : .authorizationAcquisitionRejected,
+        state: normalizedFailure == .cancelled ? .failed : .blocked
       )
       return await finish(
         &execution,
@@ -88,8 +118,8 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
 
     guard let portalLease else {
       execution.fail(
-        .portalAcquisitionRejected,
-        event: .portalAcquisitionRejected,
+        .authorizationAcquisitionRejected,
+        event: .authorizationAcquisitionRejected,
         state: .blocked
       )
       return await finish(

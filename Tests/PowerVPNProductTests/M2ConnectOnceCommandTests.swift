@@ -53,6 +53,7 @@ import Testing
       do {
         _ = try await runM2ConnectOnceCommand(
           candidate,
+          authorizationAvailabilityFailure: { nil },
           generateApprovalCode: {
             trace.record("code")
             return "A1B2C3D4"
@@ -82,6 +83,7 @@ import Testing
     let trace = M2CommandTrace()
     let result = try await runM2ConnectOnceCommand(
       validArguments,
+      authorizationAvailabilityFailure: { nil },
       generateApprovalCode: {
         trace.record("code")
         return "A1B2C3D4"
@@ -104,7 +106,7 @@ import Testing
     #expect(trace.count("runtime: Campus NC :thu21") == 1)
     let prompt = try #require(trace.prompt)
     for marker in [
-      " Campus NC ", "thu21", "A1B2C3D4", "Portal login", "start_connection",
+      " Campus NC ", "thu21", "A1B2C3D4", "authorized resource", "start_connection",
       "fresh SSH proof", "stop", "cleanup",
     ] {
       #expect(prompt.contains(marker))
@@ -123,6 +125,7 @@ import Testing
       let trace = M2CommandTrace()
       let result = try await runM2ConnectOnceCommand(
         validArguments,
+        authorizationAvailabilityFailure: { nil },
         generateApprovalCode: { code },
         approval: approval(trace: trace, response: response),
         signalMonitorFactory: {
@@ -141,6 +144,35 @@ import Testing
       #expect(trace.count("approval") == (code == "invalid" ? 0 : 1))
       assertSortedJSON(result.standardOutput)
     }
+  }
+
+  @Test func defaultUnavailableProviderStopsBeforeApprovalSignalAndRuntime() async throws {
+    let trace = M2CommandTrace()
+    let result = try await runM2ConnectOnceCommand(
+      validArguments,
+      generateApprovalCode: {
+        trace.record("code")
+        return "A1B2C3D4"
+      },
+      approval: approval(trace: trace, response: .line("A1B2C3D4")),
+      signalMonitorFactory: {
+        trace.record("monitor")
+        return M2ManualSignalMonitor()
+      },
+      runtime: { _ in
+        trace.record("runtime")
+        return successReport()
+      }
+    )
+
+    #expect(result.exitCode == 69)
+    #expect(trace.events.isEmpty)
+    #expect(trace.prompt == nil)
+    #expect(result.standardOutput.contains("\"containsSecrets\" : false"))
+    #expect(result.standardOutput.contains("\"outcome\" : \"provider_unavailable\""))
+    #expect(result.standardOutput.contains("\"runtimeInvoked\" : false"))
+    #expect(!result.standardOutput.contains("Campus NC"))
+    assertSortedJSON(result.standardOutput)
   }
 
   private func arguments(name: String, target: String = "thu21") -> [String] {

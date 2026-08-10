@@ -10,7 +10,14 @@ package struct ProductM2ConnectOnceDependencies: Sendable {
       VendorCharonSelectedRouteMatcher?
     ) async -> ProductM2NetworkBaseline?
   package let baselineStable: @Sendable (ProductM2NetworkBaseline, ProductM2NetworkBaseline) -> Bool
-  package let acquirePortal: @Sendable () async -> ProductM2PortalAcquisition
+  package let assessActiveConnection:
+    @Sendable (
+      ProductM2NetworkBaseline,
+      ProductM2NetworkBaseline
+    ) -> ProductM2ActiveNetworkEvidence
+  package let authorizationSource: ProductM2AuthorizationSource
+  package let authorizationAvailabilityFailure: ProductM2AuthorizationFailure?
+  package let acquireAuthorization: @Sendable () async -> ProductM2AuthorizedResourceAcquisition
   package let control: ProductM2ControlAdapter
   package let proveFreshSSH: @Sendable (ProductM2SSHTarget) async -> ProductM2FreshSSHProofEvidence
   package let verifyCleanup:
@@ -38,7 +45,15 @@ package struct ProductM2ConnectOnceDependencies: Sendable {
         ProductM2NetworkBaseline,
         ProductM2NetworkBaseline
       ) -> Bool,
-    acquirePortal: @escaping @Sendable () async -> ProductM2PortalAcquisition,
+    assessActiveConnection:
+      @escaping @Sendable (
+        ProductM2NetworkBaseline,
+        ProductM2NetworkBaseline
+      ) -> ProductM2ActiveNetworkEvidence,
+    authorizationSource: ProductM2AuthorizationSource = .nativePortal,
+    authorizationAvailabilityFailure: ProductM2AuthorizationFailure? = nil,
+    acquireAuthorization:
+      @escaping @Sendable () async -> ProductM2AuthorizedResourceAcquisition,
     control: ProductM2ControlAdapter,
     proveFreshSSH:
       @escaping @Sendable (
@@ -57,7 +72,10 @@ package struct ProductM2ConnectOnceDependencies: Sendable {
     self.preflightAccepted = preflightAccepted
     self.captureNetworkBaseline = captureNetworkBaseline
     self.baselineStable = baselineStable
-    self.acquirePortal = acquirePortal
+    self.assessActiveConnection = assessActiveConnection
+    self.authorizationSource = authorizationSource
+    self.authorizationAvailabilityFailure = authorizationAvailabilityFailure
+    self.acquireAuthorization = acquireAuthorization
     self.control = control
     self.proveFreshSSH = proveFreshSSH
     self.verifyCleanup = verifyCleanup
@@ -71,7 +89,7 @@ package struct ProductM2ConnectOnceDependencies: Sendable {
     generationObserver: any BoundedVendorHelperGenerationObserving,
     preflightChecker: any BoundedVendorXPCPreflightChecking,
     networkObserver: any NetworkCleanupObserving,
-    acquirePortal: @escaping @Sendable () async -> ProductM2PortalAcquisition,
+    authorizationProvider: any ProductM2AuthorizedResourceProviding,
     control: ProductM2ControlAdapter,
     freshSSHProver: ProductM2FreshSSHProver
   ) {
@@ -89,7 +107,17 @@ package struct ProductM2ConnectOnceDependencies: Sendable {
         return snapshot.complete ? ProductM2NetworkBaseline(snapshot: snapshot) : nil
       },
       baselineStable: ProductM2NetworkBaseline.stable,
-      acquirePortal: acquirePortal,
+      assessActiveConnection: { before, active in
+        guard let before = before.snapshot, let active = active.snapshot else {
+          return .unavailable
+        }
+        return ProductM2ActiveNetworkEvidence(
+          NetworkConnectionAssessment.assess(before: before, active: active)
+        )
+      },
+      authorizationSource: authorizationProvider.source,
+      authorizationAvailabilityFailure: authorizationProvider.availabilityFailure,
+      acquireAuthorization: authorizationProvider.acquire,
       control: control,
       proveFreshSSH: freshSSHProver.prove,
       verifyCleanup: { baseline, window, selectedRoutes, startRequestSent in

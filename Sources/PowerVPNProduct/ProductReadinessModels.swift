@@ -36,6 +36,7 @@ public enum ProductBlocker: String, Codable, Equatable, Sendable {
   case directXPCNotProbed = "direct_xpc_not_probed"
   case directXPCUnreachable = "direct_xpc_unreachable"
   case directXPCPreflightUnsafe = "direct_xpc_preflight_unsafe"
+  case authorizedResourceProviderUnavailable = "authorized_resource_provider_unavailable"
   case authenticatedPortalSnapshotUnavailable = "authenticated_portal_snapshot_unavailable"
   case authorizedResourceSnapshotIncomplete = "authorized_resource_snapshot_incomplete"
   case resourceCatalogInvalid = "resource_catalog_invalid"

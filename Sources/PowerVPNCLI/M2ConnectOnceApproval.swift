@@ -32,7 +32,7 @@ struct M2TTYApproval: Sendable {
       "PowerVPN M2 one-time approval\n"
       + "Resource: \(resourceDisplayName)\n"
       + "SSH target: \(sshTarget)\n"
-      + "This will perform one Portal login, start_connection, fresh SSH proof, stop, and cleanup.\n"
+      + "This will acquire one authorized resource, run start_connection, perform a fresh SSH proof, stop, and verify cleanup.\n"
       + "Type \(code) exactly and press Return to continue: "
     switch exchange(prompt) {
     case .line(let response): return response == code ? .accepted : .denied

@@ -9,6 +9,7 @@ import Testing
     let monitor = M2ManualSignalMonitor(emitOnStart: 2)
     let result = try await runM2ConnectOnceCommand(
       m2ValidArguments,
+      authorizationAvailabilityFailure: { nil },
       generateApprovalCode: { "A1B2C3D4" },
       approval: approval(trace: trace, response: .line("A1B2C3D4")),
       signalMonitorFactory: { monitor },
@@ -31,6 +32,7 @@ import Testing
     let command = Task {
       try await runM2ConnectOnceCommand(
         m2ValidArguments,
+        authorizationAvailabilityFailure: { nil },
         generateApprovalCode: { "A1B2C3D4" },
         approval: M2TTYApproval(exchange: { _ in .line("A1B2C3D4") }),
         signalMonitorFactory: { monitor },

@@ -5,7 +5,7 @@ GUI-free use of the installed LeadSec PowerVPN tunnel helpers. Authentication
 is never bypassed, and the current product still requires the official PowerVPN
 installation.
 
-## Current product status — 2026-08-10
+## Current product status — 2026-08-11
 
 The active branch is `rescue-mvp`. M1 now exposes four strict, value-free
 product-readiness commands:
@@ -53,7 +53,7 @@ On this Mac they currently establish:
   `helperSuccessEstablished` remains false.
 
 The four M1 observation commands still contact no server, read no TTY
-credential and send no XPC. The production M2 path is now composed behind one
+credential and send no XPC. The bounded M2 transaction is exposed behind one
 strict, single-process command:
 
 ```sh
@@ -63,19 +63,32 @@ powervpn m2 connect-once \
   --json
 ```
 
-That command requires a fresh random confirmation code through `/dev/tty`
-before constructing the current-machine runtime. One approved transaction then
-owns Portal login, scoped snapshot construction, `start_connection`, a fresh
-strict SSH proof, same-session stop or authenticated emergency cleanup, Portal
-logout and value-free network restoration evidence. It has no retry and does
-not implement cross-process `connect`/`disconnect` state.
+The default runtime currently stops with
+`authorized_resource_provider_unavailable` before generating an approval code,
+opening `/dev/tty`, installing signal handlers or running any observer. It does
+not silently fall back to the native username/password Portal lane whose last
+authorized result was `tls_rejected`. Once a legitimate `vendor_once`
+authorized-resource provider exists, one approved transaction will own scoped
+snapshot construction, `start_connection`, a bounded same-session connected
+status wait, and an active network snapshot whose effective route for the
+locked SSH target uniquely resolves to a selected-resource binding introduced
+in this transaction. Only then may it run a fresh strict SSH proof. The same
+transaction retains the session through stop (or authenticated emergency
+cleanup), authorization close and value-free network restoration evidence. At
+the stop submission boundary it atomically rechecks that the latest vendor
+status is still connected. It has no retry and does not implement cross-process
+`connect`/`disconnect` state.
 
 All M2 verification so far is offline and synthetic. The real binary was run
-only for `help`, strict rejection of a `--yes` bypass, and the no-controlling-TTY
-gate (`exit 77`, `runtimeInvoked=false`). No Portal request, helper/XPC request,
-SSH connection or network mutation ran. The product is therefore not yet a
-usable VPN and the Goal remains **ACTIVE**. Fresh explicit approval is required
-immediately before the first bounded M2 live transaction.
+for `help`, strict rejection of a `--yes` bypass, the historical
+no-controlling-TTY gate (`exit 77`, `runtimeInvoked=false`), and the current
+default-provider gate (`exit 69`, `outcome=provider_unavailable`,
+`runtimeInvoked=false`). No Portal request, helper/XPC request, SSH connection
+or network mutation ran. The product is therefore not yet a usable VPN and the
+Goal remains **ACTIVE**. The immediate blocker is the missing
+authorized-resource provider; fresh explicit approval will be required only
+after that offline blocker is closed and immediately before the first bounded
+M2 live transaction.
 
 ## Development
 

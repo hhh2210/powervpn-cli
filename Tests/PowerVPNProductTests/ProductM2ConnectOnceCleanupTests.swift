@@ -227,9 +227,9 @@ import Testing
       ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
     )
 
-    #expect(report.portalLogout != .accepted)
+    #expect(report.authorizationClose != .accepted)
     #expect(report.outcome == .cleanupUnproven)
-    #expect(report.firstBadEvent == .portalLogoutRejected)
+    #expect(report.firstBadEvent == .authorizationCloseRejected)
     #expect(!report.cleanupVerified)
   }
 }

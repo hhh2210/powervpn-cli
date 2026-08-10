@@ -173,7 +173,7 @@ public struct ProductReadinessRuntime: Sendable {
       blocker: available
         ? nil
         : (observation.resourceSource == .unavailable
-          ? .authenticatedPortalSnapshotUnavailable : .resourceCatalogInvalid)
+          ? .authorizedResourceProviderUnavailable : .resourceCatalogInvalid)
     )
   }
 
@@ -212,9 +212,9 @@ public struct ProductReadinessRuntime: Sendable {
     if complete {
       blocker = nil
     } else if observation.resourceSource == .unavailable {
-      blocker = .authenticatedPortalSnapshotUnavailable
+      blocker = .authorizedResourceProviderUnavailable
     } else if observation.resourceCandidates.isEmpty {
-      blocker = .authenticatedPortalSnapshotUnavailable
+      blocker = .authorizedResourceProviderUnavailable
     } else if !catalogValid {
       blocker = .resourceCatalogInvalid
     } else if observation.resourceCandidates.count != 1 {

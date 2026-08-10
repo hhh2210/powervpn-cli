@@ -36,6 +36,14 @@ func m2ObservedNetworkBaseline(
       extensionProcessCount: 0,
       helperProcessCount: 0
     ),
+    vendorProcesses: NetworkCleanupVendorProcessSnapshot(
+      fingerprint: fingerprint,
+      officialGUIProcessCount: 0,
+      charonProcessCount: 0,
+      ipsecProcessCount: 0,
+      shellProcessCount: 0,
+      identityTokens: []
+    ),
     helperGeneration: generation,
     helperObservationState: .observed
   )
@@ -61,6 +69,28 @@ func m2SSHEvidence(
   )
 }
 
+let m2ConnectedStatus = ProductM2VendorStatusEvidence(
+  outcome: .connected,
+  statusEventCount: 1,
+  latestClassification: .connected,
+  terminalControlOutcome: nil
+)
+
+let m2ProvenActiveNetwork = ProductM2ActiveNetworkEvidence(
+  complete: true,
+  helperSingleRunningGeneration: true,
+  surgeStable: true,
+  vendorGUIAbsent: true,
+  unrelatedVendorHelpersAbsent: true,
+  selectedRouteBindingDeltaCount: 1,
+  effectiveSelectedRouteBindingIntroduced: true,
+  newUtunCount: 1,
+  defaultRouteChanged: false,
+  dnsChanged: false,
+  persistentRoutesChanged: true,
+  selectedResourcePathProven: true
+)
+
 let m2CompleteCleanup = ProductM2CleanupEvidence(
   defaultRouteRestored: true,
   dnsRestored: true,
@@ -72,12 +102,16 @@ let m2CompleteCleanup = ProductM2CleanupEvidence(
 
 func m2Receipt(
   _ outcome: ProductM2ControlOutcome,
-  requestSent: Bool
+  requestSent: Bool,
+  statusEventCount: Int = 0,
+  statusAtSubmission: ProductM2VendorStatusClassification? = nil
 ) -> ProductM2ControlReceipt {
   ProductM2ControlReceipt(
     outcome: outcome,
     requestSent: requestSent,
     transportAcknowledged: outcome == .transportAcknowledged,
-    peerGenerationValidated: outcome == .transportAcknowledged
+    peerGenerationValidated: outcome == .transportAcknowledged,
+    statusEventCount: statusEventCount,
+    statusAtSubmission: statusAtSubmission
   )
 }

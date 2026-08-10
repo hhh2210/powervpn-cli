@@ -62,6 +62,14 @@ extension ProductM2ConnectOnceCoordinator {
     }
 
     if execution.firstBadEvent == nil {
+      await proveVendorStatusAndActiveNetwork(
+        &execution,
+        baseline: baseline,
+        selectedRoutes: selectedRoutes,
+        controlLease: start.lease
+      )
+    }
+    if execution.firstBadEvent == nil {
       await proveFreshSSH(&execution)
     }
     return await finish(
@@ -73,6 +81,57 @@ extension ProductM2ConnectOnceCoordinator {
       controlLease: start.lease,
       startReceipt: start.receipt
     )
+  }
+
+  private func proveVendorStatusAndActiveNetwork(
+    _ execution: inout ProductM2Execution,
+    baseline: ProductM2NetworkBaseline,
+    selectedRoutes: VendorCharonSelectedRouteMatcher,
+    controlLease: ProductM2ControlLease?
+  ) async {
+    guard let controlLease else {
+      execution.fail(.startRejected, event: .startControlRejected, state: .failed)
+      return
+    }
+    let status = await controlLease.waitForConnectedStatus()
+    execution.vendorStatusEvidence = status
+    if Task.isCancelled || status.outcome == .cancelled {
+      execution.fail(.cancelled, event: .cancelled, state: .failed)
+      return
+    }
+    guard status.connectedProven else {
+      execution.fail(
+        .vendorStatusUnproven,
+        event: .vendorStatusUnproven,
+        state: .failed
+      )
+      return
+    }
+
+    guard
+      let active = await dependencies.captureNetworkBaseline(
+        execution.networkWindow,
+        selectedRoutes
+      )
+    else {
+      execution.fail(
+        .activeNetworkUnproven,
+        event: .activeNetworkUnproven,
+        state: .failed
+      )
+      return
+    }
+    let evidence = dependencies.assessActiveConnection(baseline, active)
+    execution.activeNetworkEvidence = evidence
+    if Task.isCancelled {
+      execution.fail(.cancelled, event: .cancelled, state: .failed)
+    } else if !evidence.connectionProven {
+      execution.fail(
+        .activeNetworkUnproven,
+        event: .activeNetworkUnproven,
+        state: .failed
+      )
+    }
   }
 
   private func proveFreshSSH(
@@ -94,7 +153,6 @@ extension ProductM2ConnectOnceCoordinator {
       execution.fail(.cancelled, event: .cancelled, state: .failed)
     } else if execution.sshProof == .proven {
       execution.outcome = .connectedAndCleanedUp
-      execution.lastGoodState = .connected
     } else {
       execution.fail(.sshProofRejected, event: .sshProofRejected, state: .failed)
     }

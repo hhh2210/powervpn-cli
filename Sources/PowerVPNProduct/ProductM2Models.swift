@@ -23,7 +23,7 @@ public enum ProductM2ConnectOutcome: String, Encodable, Equatable, Sendable {
   case preflightBlocked = "preflight_blocked"
   case networkBaselineUnavailable = "network_baseline_unavailable"
   case networkBaselineChanged = "network_baseline_changed"
-  case portalAcquisitionRejected = "portal_acquisition_rejected"
+  case authorizationAcquisitionRejected = "authorization_acquisition_rejected"
   case resourceCatalogRejected = "resource_catalog_rejected"
   case resourceNotFound = "resource_not_found"
   case resourceAmbiguous = "resource_ambiguous"
@@ -31,6 +31,8 @@ public enum ProductM2ConnectOutcome: String, Encodable, Equatable, Sendable {
   case generationFenceRejected = "generation_fence_rejected"
   case startSnapshotRejected = "start_snapshot_rejected"
   case startRejected = "start_rejected"
+  case vendorStatusUnproven = "vendor_status_unproven"
+  case activeNetworkUnproven = "active_network_unproven"
   case sshProofRejected = "ssh_proof_rejected"
   case cancelled
   case cleanupUnproven = "cleanup_unproven"
@@ -40,7 +42,7 @@ public enum ProductM2BadEvent: String, Encodable, Equatable, Sendable {
   case preflightRejected = "preflight_rejected"
   case networkBaselineUnavailable = "network_baseline_unavailable"
   case networkBaselineChanged = "network_baseline_changed"
-  case portalAcquisitionRejected = "portal_acquisition_rejected"
+  case authorizationAcquisitionRejected = "authorization_acquisition_rejected"
   case resourceCatalogRejected = "resource_catalog_rejected"
   case resourceNotFound = "resource_not_found"
   case resourceAmbiguous = "resource_ambiguous"
@@ -49,9 +51,11 @@ public enum ProductM2BadEvent: String, Encodable, Equatable, Sendable {
   case startSnapshotRejected = "start_snapshot_rejected"
   case startControlRejected = "start_control_rejected"
   case postStartGenerationRejected = "post_start_generation_rejected"
+  case vendorStatusUnproven = "vendor_status_unproven"
+  case activeNetworkUnproven = "active_network_unproven"
   case sshProofRejected = "ssh_proof_rejected"
   case cancelled
-  case portalLogoutRejected = "portal_logout_rejected"
+  case authorizationCloseRejected = "authorization_close_rejected"
   case cleanupVerificationRejected = "cleanup_verification_rejected"
 }
 
@@ -75,14 +79,14 @@ public enum ProductM2ControlOutcome: String, Encodable, Equatable, Sendable {
   case leaseClosed = "lease_closed"
 }
 
-public enum ProductM2PortalAcquisitionOutcome: String, Encodable, Equatable, Sendable {
+public enum ProductM2AuthorizationAcquisitionOutcome: String, Encodable, Equatable, Sendable {
   case notRequested = "not_requested"
   case acquired
   case rejected
   case cancelled
 }
 
-public enum ProductM2PortalLogoutOutcome: String, Encodable, Equatable, Sendable {
+public enum ProductM2AuthorizationCloseOutcome: String, Encodable, Equatable, Sendable {
   case notRequired = "not_required"
   case accepted
   case rejected
@@ -152,6 +156,7 @@ public struct ProductM2CleanupEvidence: Encodable, Equatable, Sendable {
   public let persistentRoutesRestored: Bool
   public let selectedRouteResidueCount: Int
   public let surgeStateRestored: Bool
+  public let vendorProcessesRestored: Bool
   public let helperGenerationRestored: Bool
   public let structuralRouteTablesEqual: Bool
   public let containsRawRoutes = false
@@ -166,6 +171,7 @@ public struct ProductM2CleanupEvidence: Encodable, Equatable, Sendable {
     persistentRoutesRestored: Bool = true,
     selectedRouteResidueCount: Int = 0,
     surgeStateRestored: Bool,
+    vendorProcessesRestored: Bool = true,
     helperGenerationRestored: Bool,
     structuralRouteTablesEqual: Bool = true
   ) {
@@ -177,6 +183,7 @@ public struct ProductM2CleanupEvidence: Encodable, Equatable, Sendable {
     self.persistentRoutesRestored = persistentRoutesRestored
     self.selectedRouteResidueCount = selectedRouteResidueCount
     self.surgeStateRestored = surgeStateRestored
+    self.vendorProcessesRestored = vendorProcessesRestored
     self.helperGenerationRestored = helperGenerationRestored
     self.structuralRouteTablesEqual = structuralRouteTablesEqual
   }
@@ -185,7 +192,7 @@ public struct ProductM2CleanupEvidence: Encodable, Equatable, Sendable {
     complete && defaultRouteRestored && dnsRestored && interfacesRestored
       && utunRestored && persistentRoutesRestored
       && selectedRouteResidueCount == 0 && surgeStateRestored
-      && helperGenerationRestored
+      && vendorProcessesRestored && helperGenerationRestored
   }
 
   package static let unavailable = Self(
@@ -196,6 +203,7 @@ public struct ProductM2CleanupEvidence: Encodable, Equatable, Sendable {
     utunRestored: false,
     persistentRoutesRestored: false,
     surgeStateRestored: false,
+    vendorProcessesRestored: false,
     helperGenerationRestored: false,
     structuralRouteTablesEqual: false
   )
@@ -210,6 +218,7 @@ public struct ProductM2CleanupEvidence: Encodable, Equatable, Sendable {
       persistentRoutesRestored: result.persistentRoutesRestored,
       selectedRouteResidueCount: result.selectedRouteResidueCount,
       surgeStateRestored: result.surgeStateRestored,
+      vendorProcessesRestored: result.vendorProcessesRestored,
       helperGenerationRestored: result.helperGenerationRestored,
       structuralRouteTablesEqual: result.structuralRouteTablesEqual
     )
@@ -227,21 +236,25 @@ public struct ProductM2ConnectRequest: Equatable, Sendable {
 }
 
 public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
-  public let schemaVersion = 2
+  public let schemaVersion = 4
   public let outcome: ProductM2ConnectOutcome
   public let finalState: ProductM2ConnectionState
   public let lastGoodState: ProductM2ConnectionState
   public let firstBadEvent: ProductM2BadEvent?
   public let resourceDisplayName: String
   public let sshTarget: ProductM2SSHTarget
-  public let portalAcquisition: ProductM2PortalAcquisitionOutcome
+  public let authorizationSource: ProductM2AuthorizationSource
+  public let authorizationAcquisition: ProductM2AuthorizationAcquisitionOutcome
+  public let authorizationFailure: ProductM2AuthorizationFailure?
   public let startOutcome: ProductM2ControlOutcome
+  public let vendorStatusEvidence: ProductM2VendorStatusEvidence
+  public let activeNetworkEvidence: ProductM2ActiveNetworkEvidence
   public let sshProof: ProductM2SSHProofOutcome
   public let sshProofEvidence: ProductM2FreshSSHProofEvidence?
   public let cleanupPath: ProductM2CleanupPath
   public let stopOutcome: ProductM2ControlOutcome
   public let emergencyStopOutcome: ProductM2ControlOutcome
-  public let portalLogout: ProductM2PortalLogoutOutcome
+  public let authorizationClose: ProductM2AuthorizationCloseOutcome
   public let cleanupEvidence: ProductM2CleanupEvidence
   public let cleanupVerified: Bool
   public let serverContactRequested: Bool

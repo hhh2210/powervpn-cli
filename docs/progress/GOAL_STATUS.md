@@ -1129,3 +1129,68 @@ report even after cancellation or failure.
 Approval required: yes. The authorization must name the exact resource display
 name and `thu21` or `thu52`, and must be given immediately before that single
 Portal/start/SSH/stop/cleanup transaction. This entry does not authorize it.
+
+## 2026-08-11 — M2 provider truth and active-path hard gate
+
+User-visible capability: the exact M2 CLI grammar remains present, but its
+default production composition now exits locally with
+`authorized_resource_provider_unavailable` before generating an approval code,
+opening `/dev/tty`, installing signal handlers, sampling the machine or
+constructing any live runtime. It no longer silently falls back to the native
+username/password Portal lane whose last authorized result was `tls_rejected`.
+
+Production code changed: Product now has a source-neutral, closed authorization
+model. The default source is `vendor_once`; the native Portal adapter requires
+explicit injection, and exact acquisition failures such as `tls_rejected` are
+preserved in the value-free report. Core cleanup snapshots now fail closed on
+PowerVPN GUI, charon, ipsec and shell-helper residue. A retained charon session
+must observe a bounded connected status, and stop submission atomically records
+the latest status from that same non-reconnecting session. The active network
+gate uses one capture window and the selected resource's locked route matcher:
+the effective route for the fixed numeric SSH target must uniquely resolve
+against the same route-table snapshot to a selected binding introduced after
+the cold baseline. A route-table delta alone cannot authorize SSH.
+
+Live result: no M2 live transaction ran. No official-GUI onboarding, Portal or
+server request, TTY credential read, helper launch, real XPC session, SSH
+connection or network mutation was attempted. One read-only local
+`/sbin/route -n get 127.0.0.1` invocation inspected the installed BSD host-route
+output shape; it sent no packet and changed no state. All other status, route,
+provider and cleanup verification used synthetic drivers and fixtures. The
+built CLI's default-provider gate was executed once and returned exit `69` with
+`outcome=provider_unavailable`, `runtimeInvoked=false` and
+`containsSecrets=false`; it exited before any live dependency. An independent
+integrated review found two P1 product gaps—stale connected status across SSH
+and route-table membership without effective-target routing—and both now have
+deterministic negative tests and fail-closed production gates.
+
+Current blocker: **live NO-GO**. The exact blocker is
+`authorized_resource_provider_unavailable`: there is no implemented,
+legally sourced production provider that turns the allowed official
+`vendor_once` onboarding result into a generation-bound, scoped authorized
+resource lease. The earlier statement that no demonstrated offline blocker
+remained, and its instruction to proceed directly to an M2 live attempt, are
+superseded by this entry. The Goal remains **ACTIVE**.
+
+Cleanup status: this slice created no installed helper or GUI process, opened
+no real XPC or SSH connection, changed no route, DNS, interface or utun state,
+and wrote no credential or secret-bearing runtime artifact. Synthetic cleanup
+can claim success only when default route, DNS, interface/utun inventory,
+persistent routes, Surge, helper generation and all tracked vendor processes
+return to the baseline and selected-route residue is zero.
+
+Deferred debt: the internal authorization lease still uses Portal-shaped
+borrowed material until a real `vendor_once` provider contract is implemented.
+Inactive XPC-session exceptional-path diagnostics and the frozen R2 TLS
+evidence backlog remain fail-closed debt; none authorizes M2 live use.
+
+Next end-to-end action: implement and offline-verify the legally sourced
+`vendor_once` authorized-resource provider. Only after it supplies one scoped,
+erasable, generation-bound resource may the team prepare the single bounded M2
+transaction and bind a fresh approval to its exact resource display name and
+SSH target.
+
+Approval required: no approval is needed for further offline provider code,
+synthetic tests or review. Fresh explicit approval is required immediately
+before any official-GUI onboarding, Portal/server contact, credential entry,
+helper/XPC start, SSH proof or network mutation. No earlier approval transfers.

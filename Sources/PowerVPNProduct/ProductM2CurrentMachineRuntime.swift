@@ -4,6 +4,7 @@ import PowerVPNCore
 /// inert; only `run` may trigger TTY, Portal, bounded inspection, SSH, or XPC.
 package struct ProductM2CurrentMachineRuntime: Sendable {
   private let coordinator: ProductM2ConnectOnceCoordinator
+  package let authorizationAvailabilityFailure: ProductM2AuthorizationFailure?
 
   package init() {
     self.init(
@@ -11,7 +12,6 @@ package struct ProductM2CurrentMachineRuntime: Sendable {
       generationObserver: InstalledBoundedVendorHelperGenerationObserver(),
       preflightChecker: InstalledBoundedVendorXPCPreflightChecker(),
       networkObserver: InstalledNetworkCleanupObserver(),
-      acquirePortal: ProductM2PortalAdapter.acquireCurrentMachine,
       control: ProductM2ControlAdapter(),
       freshSSHProver: ProductM2FreshSSHProver()
     )
@@ -22,17 +22,19 @@ package struct ProductM2CurrentMachineRuntime: Sendable {
     generationObserver: any BoundedVendorHelperGenerationObserving,
     preflightChecker: any BoundedVendorXPCPreflightChecking,
     networkObserver: any NetworkCleanupObserving,
-    acquirePortal: @escaping @Sendable () async -> ProductM2PortalAcquisition,
+    authorizationProvider: any ProductM2AuthorizedResourceProviding =
+      ProductM2UnavailableVendorOnceProvider(),
     control: ProductM2ControlAdapter,
     freshSSHProver: ProductM2FreshSSHProver
   ) {
+    authorizationAvailabilityFailure = authorizationProvider.availabilityFailure
     coordinator = ProductM2ConnectOnceCoordinator(
       dependencies: ProductM2ConnectOnceDependencies(
         controlRuntimePreflightAccepted: controlRuntimePreflightAccepted,
         generationObserver: generationObserver,
         preflightChecker: preflightChecker,
         networkObserver: networkObserver,
-        acquirePortal: acquirePortal,
+        authorizationProvider: authorizationProvider,
         control: control,
         freshSSHProver: freshSSHProver
       ))
