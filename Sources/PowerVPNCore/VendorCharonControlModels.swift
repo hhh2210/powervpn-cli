@@ -38,6 +38,7 @@ package struct VendorCharonControlReceipt: Equatable, Sendable {
   package let encodingError: VendorCharonStartEncodingError?
   package let statusEventCount: Int
   package let dispatcherTailEventCount: Int
+  package var statusAtSubmission: VendorCharonStatusClassification? = nil
 
   package var transportAcknowledged: Bool {
     outcome == .transportAcknowledged
@@ -86,4 +87,12 @@ package final class VendorCharonControlLease: @unchecked Sendable {
   ) async -> VendorCharonControlReceipt {
     await state.stop(timeoutMilliseconds: timeoutMilliseconds)
   }
+
+  package func waitForConnectedStatus(
+    timeoutMilliseconds: Int
+  ) async -> VendorCharonStatusWaitResult {
+    await state.waitForConnectedStatus(timeoutMilliseconds: timeoutMilliseconds)
+  }
+
+  var statusWaitPending: Bool { state.statusWaitPending }
 }

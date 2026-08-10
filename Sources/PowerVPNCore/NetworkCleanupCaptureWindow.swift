@@ -15,6 +15,18 @@ package final class NetworkCleanupCaptureWindow: @unchecked Sendable {
   }
 
   func interfaceToken(_ name: String) -> Data {
-    Data(HMAC<SHA256>.authenticationCode(for: Data(name.utf8), using: key))
+    token(domain: "interface", record: name)
+  }
+
+  func vendorProcessToken(_ record: String) -> Data {
+    token(domain: "vendor-process", record: record)
+  }
+
+  private func token(domain: String, record: String) -> Data {
+    Data(
+      HMAC<SHA256>.authenticationCode(
+        for: Data("powervpn.network-window.v1\0\(domain)\0\(record)".utf8),
+        using: key
+      ))
   }
 }

@@ -28,7 +28,8 @@ enum NetworkRouteCanonicalizer {
   static func canonicalize(
     _ data: Data,
     family: NetworkRouteFamily,
-    selectedRoutes: VendorCharonSelectedRouteMatcher? = nil
+    selectedRoutes: VendorCharonSelectedRouteMatcher? = nil,
+    effectiveSelectedRoute: NetworkCleanupEffectiveRouteSnapshot? = nil
   ) throws -> NetworkCleanupRouteSnapshot {
     let routes = try parse(data, family: family)
     let structuralRecords = routes.map(\.record).sorted()
@@ -38,7 +39,7 @@ enum NetworkRouteCanonicalizer {
     }
     let selectedTokens =
       family == .inet
-      ? selectedRoutes?.matches(routes.map(\.destination)) ?? [] : []
+      ? selectedRoutes?.matches(routes) ?? [] : []
     return NetworkCleanupRouteSnapshot(
       structural: .observed(
         count: structuralRecords.count,
@@ -55,7 +56,8 @@ enum NetworkRouteCanonicalizer {
         )
       ),
       selectedRouteMatchCount: selectedTokens.count,
-      selectedRouteTokens: selectedTokens
+      selectedRouteTokens: selectedTokens,
+      effectiveSelectedRoute: effectiveSelectedRoute
     )
   }
 
@@ -109,11 +111,11 @@ enum NetworkRouteCanonicalizer {
     return routes
   }
 
-  private static func visible(_ value: String) -> Bool {
+  static func visible(_ value: String) -> Bool {
     !value.isEmpty && value.utf8.allSatisfy { (0x21...0x7e).contains($0) }
   }
 
-  private static func validInterface(_ value: String) -> Bool {
+  static func validInterface(_ value: String) -> Bool {
     guard let first = value.utf8.first, (65...90).contains(first) || (97...122).contains(first)
     else { return false }
     return value.utf8.allSatisfy {

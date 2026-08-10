@@ -1,6 +1,6 @@
 import Foundation
 
-enum NetworkCleanupCommand: CaseIterable, Hashable, Sendable {
+enum NetworkCleanupCommand: Hashable, Sendable {
   case helperGeneration
   case surgeProcesses
   case defaultRoute
@@ -8,6 +8,7 @@ enum NetworkCleanupCommand: CaseIterable, Hashable, Sendable {
   case interfaces
   case ipv4Routes
   case ipv6Routes
+  case effectiveRoute(targetIPv4: UInt32)
 
   var request: BoundedCommandRequest {
     let executable: String
@@ -42,6 +43,10 @@ enum NetworkCleanupCommand: CaseIterable, Hashable, Sendable {
       executable = "/usr/sbin/netstat"
       arguments = ["-rn", "-f", "inet6"]
       stdoutLimit = 8_388_608
+    case .effectiveRoute(let targetIPv4):
+      executable = "/sbin/route"
+      arguments = ["-n", "get", Self.canonicalIPv4(targetIPv4)]
+      stdoutLimit = 65_536
     }
     return BoundedCommandRequest(
       executable: executable,
@@ -50,6 +55,12 @@ enum NetworkCleanupCommand: CaseIterable, Hashable, Sendable {
       stdoutLimitBytes: stdoutLimit,
       stderrLimitBytes: 65_536
     )
+  }
+
+  static func canonicalIPv4(_ value: UInt32) -> String {
+    [24, 16, 8, 0]
+      .map { String((value >> UInt32($0)) & 0xff) }
+      .joined(separator: ".")
   }
 }
 

@@ -23,7 +23,7 @@ package struct InstalledNetworkCleanupObserver: NetworkCleanupObserving {
     selectedRoutes: VendorCharonSelectedRouteMatcher? = nil
   ) async -> NetworkCleanupSnapshot {
     let helperBefore = await helper()
-    let surgeBefore = await surge()
+    let processesBefore = await processes(window: window)
     let defaultRoute = await fingerprint(.defaultRoute) {
       try NetworkDefaultRouteCanonicalizer.canonicalize($0)
     }
@@ -33,17 +33,27 @@ package struct InstalledNetworkCleanupObserver: NetworkCleanupObserving {
     let interfaces = await interfaceSnapshot(window: window)
     let ipv4 = await routeSnapshot(.ipv4Routes, family: .inet, selectedRoutes: selectedRoutes)
     let ipv6 = await routeSnapshot(.ipv6Routes, family: .inet6, selectedRoutes: nil)
-    let surgeAfter = await surge()
+    let processesAfter = await processes(window: window)
     let helperAfter = await helper()
 
     let stableSurge: NetworkCleanupSurgeSnapshot
-    switch (surgeBefore, surgeAfter) {
+    switch (processesBefore, processesAfter) {
     case (.success(let before), .success(let after)) where before == after:
-      stableSurge = before
+      stableSurge = before.surge
     case (.success, .success):
       stableSurge = .unavailable(.changedDuringCapture)
     case (.failure(let state), _), (_, .failure(let state)):
       stableSurge = .unavailable(state)
+    }
+
+    let stableVendorProcesses: NetworkCleanupVendorProcessSnapshot
+    switch (processesBefore, processesAfter) {
+    case (.success(let before), .success(let after)) where before == after:
+      stableVendorProcesses = before.vendor
+    case (.success, .success):
+      stableVendorProcesses = .unavailable(.changedDuringCapture)
+    case (.failure(let state), _), (_, .failure(let state)):
+      stableVendorProcesses = .unavailable(state)
     }
 
     let generation: VendorHelperGenerationSnapshot
@@ -73,6 +83,7 @@ package struct InstalledNetworkCleanupObserver: NetworkCleanupObserving {
       ipv4Routes: ipv4,
       ipv6Routes: ipv6,
       surge: stableSurge,
+      vendorProcesses: stableVendorProcesses,
       helperGeneration: generation,
       helperObservationState: helperState
     )
@@ -113,24 +124,55 @@ package struct InstalledNetworkCleanupObserver: NetworkCleanupObserving {
       return .unavailable(NetworkCleanupCommandOutput.state(result))
     }
     do {
+      let routes = try NetworkRouteCanonicalizer.parse(result.stdout, family: family)
+      let effectiveRoute = await effectiveRouteSnapshot(selectedRoutes, routes: routes)
       return try NetworkRouteCanonicalizer.canonicalize(
         result.stdout,
         family: family,
-        selectedRoutes: selectedRoutes
+        selectedRoutes: selectedRoutes,
+        effectiveSelectedRoute: effectiveRoute
       )
     } catch {
       return .unavailable(.invalidOutput)
     }
   }
 
-  private func surge() async -> Result<NetworkCleanupSurgeSnapshot, NetworkCleanupObservationState>
-  {
+  private func effectiveRouteSnapshot(
+    _ matcher: VendorCharonSelectedRouteMatcher?,
+    routes: [NetworkCanonicalRoute]
+  ) async -> NetworkCleanupEffectiveRouteSnapshot? {
+    guard let matcher else { return nil }
+    let result = await runner.run(matcher.effectiveRouteCommand)
+    guard result.succeeded else {
+      return .unavailable(NetworkCleanupCommandOutput.state(result))
+    }
+    do {
+      return try NetworkCleanupEffectiveRouteCanonicalizer.canonicalize(
+        result.stdout,
+        matcher: matcher,
+        routes: routes
+      )
+    } catch {
+      return .unavailable(.invalidOutput)
+    }
+  }
+
+  private func processes(
+    window: NetworkCleanupCaptureWindow
+  ) async -> Result<NetworkCleanupProcessInventory, NetworkCleanupObservationState> {
     let result = await runner.run(.surgeProcesses)
     guard result.succeeded else {
       return .failure(NetworkCleanupCommandOutput.state(result))
     }
     do {
-      return .success(try NetworkSurgeProcessCanonicalizer.canonicalize(result.stdout))
+      return .success(
+        NetworkCleanupProcessInventory(
+          surge: try NetworkSurgeProcessCanonicalizer.canonicalize(result.stdout),
+          vendor: try NetworkVendorProcessCanonicalizer.canonicalize(
+            result.stdout,
+            window: window
+          )
+        ))
     } catch {
       return .failure(.invalidOutput)
     }
@@ -152,4 +194,9 @@ package struct InstalledNetworkCleanupObserver: NetworkCleanupObserving {
     }
     return .success(snapshot)
   }
+}
+
+private struct NetworkCleanupProcessInventory: Equatable, Sendable {
+  let surge: NetworkCleanupSurgeSnapshot
+  let vendor: NetworkCleanupVendorProcessSnapshot
 }

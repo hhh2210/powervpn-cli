@@ -26,12 +26,17 @@ final class VendorCharonControlState: @unchecked Sendable {
   var completedStartResult: VendorCharonStartControlResult?
   var stopContinuation: CheckedContinuation<VendorCharonControlReceipt, Never>?
   var currentStopAttempt: StopAttempt?
+  var stopStatusAtSubmission: VendorCharonStatusClassification?
   var currentValidator: (@Sendable () async -> Bool)?
   var validation: VendorCharonAsyncValidation?
   var requestSent = false
   var emptyReplyObserved = false
   var statusEvents = 0
   var latestStatus: VendorCharonStatusSignal?
+  var latestTerminalStatus: VendorCharonStatusClassification?
+  var statusWaitContinuation: CheckedContinuation<VendorCharonStatusWaitResult, Never>?
+  var statusWaitTimer: DispatchSourceTimer?
+  var currentStatusWaitAttempt: VendorCharonStatusWaitAttempt?
   var dispatcherTailEvents = 0
   var unexpectedDictionaryEvents = 0
   var terminalConnectionOutcome: VendorCharonControlOutcome?
@@ -87,47 +92,10 @@ final class VendorCharonControlState: @unchecked Sendable {
     }
   }
 
-  func stop(
-    timeoutMilliseconds: Int
-  ) async -> VendorCharonControlReceipt {
-    guard RawVendorCharonControlTransport.validTimeoutMilliseconds.contains(timeoutMilliseconds)
-    else { return await immediateStop(.invalidTimeout) }
-    guard !Task.isCancelled else { return await immediateStop(.cancelled) }
-
-    let attempt = StopAttempt()
-    return await withTaskCancellationHandler {
-      await withCheckedContinuation { continuation in
-        queue.async { [self] in
-          guard phase == .active, stopContinuation == nil else {
-            continuation.resume(
-              returning: makeUnsentStopReceipt(
-                .leaseClosed,
-                connectionRetained: phase == .active || phase == .stopping
-              ))
-            return
-          }
-          guard !attempt.isCancelled else {
-            continuation.resume(
-              returning: makeUnsentStopReceipt(.cancelled, connectionRetained: true))
-            return
-          }
-          currentStopAttempt = attempt
-          stopContinuation = continuation
-          beginStop(timeoutMilliseconds: timeoutMilliseconds)
-        }
-      }
-    } onCancel: {
-      attempt.cancel()
-      self.queue.async { [self] in
-        guard currentStopAttempt === attempt else { return }
-        if phase == .stopping { finishStop(.cancelled, retainConnection: false) }
-      }
-    }
-  }
-
   func abandon() {
     queue.async { [self] in
       guard phase == .active else { return }
+      finishStatusWait(.leaseClosed)
       _ = cancelDriver()
       phase = .closed
     }
@@ -183,7 +151,7 @@ final class VendorCharonControlState: @unchecked Sendable {
     }
   }
 
-  private func beginStop(timeoutMilliseconds: Int) {
+  func beginStop(timeoutMilliseconds: Int) {
     guard phase == .active, let driver else {
       finishStop(.leaseClosed, retainConnection: false)
       return
@@ -260,6 +228,7 @@ final class VendorCharonControlState: @unchecked Sendable {
         if statusEvents < Int.max { statusEvents += 1 }
         latestStatus = signal
       }
+      handleStatusWait(signal.classification)
     case .emptyDispatcherTail:
       updateObservation {
         if dispatcherTailEvents < Int.max { dispatcherTailEvents += 1 }
@@ -279,6 +248,7 @@ final class VendorCharonControlState: @unchecked Sendable {
 
   private func finishPending(_ outcome: VendorCharonControlOutcome) {
     updateObservation { terminalConnectionOutcome = outcome }
+    finishStatusWait(.terminalError)
     if phase == .starting {
       finishStart(outcome)
     } else if phase == .stopping {

@@ -12,29 +12,104 @@ package enum VendorCharonSelectedRouteMatcherError: Error, Equatable, Sendable {
 
 package final class VendorCharonSelectedRouteMatcher: @unchecked Sendable {
   private let key: SymmetricKey
-  private let selectedTokens: Set<Data>
+  private let selectedDestinationTokens: Set<Data>
+  let requiredTargetIPv4: UInt32
   package let selectedRouteCount: Int
 
-  init(keyData: Data, routes: [(network: UInt32, prefix: UInt8)]) {
+  init(
+    keyData: Data,
+    routes: [(network: UInt32, prefix: UInt8)],
+    requiredTargetIPv4: UInt32
+  ) {
     let localKey = SymmetricKey(data: keyData)
-    let localTokens = Set(routes.map { Self.token($0, key: localKey) })
+    let localTokens = Set(routes.map { Self.destinationToken($0, key: localKey) })
     key = localKey
-    selectedTokens = localTokens
+    selectedDestinationTokens = localTokens
+    self.requiredTargetIPv4 = requiredTargetIPv4
     selectedRouteCount = localTokens.count
   }
 
-  package func matches(_ destinations: [String]) -> Set<Data> {
-    Set(destinations.compactMap(Self.parseDestination).map { Self.token($0, key: key) })
-      .intersection(selectedTokens)
+  var effectiveRouteCommand: NetworkCleanupCommand {
+    .effectiveRoute(targetIPv4: requiredTargetIPv4)
   }
 
-  private static func token(
+  func matches(_ routes: [NetworkCanonicalRoute]) -> Set<Data> {
+    Set(
+      routes.compactMap { route in
+        guard let destination = Self.parseDestination(route.destination),
+          selectedDestinationTokens.contains(Self.destinationToken(destination, key: key))
+        else { return nil }
+        return Self.bindingToken(
+          destination: destination,
+          family: route.family,
+          gateway: route.gateway,
+          interface: route.interface,
+          key: key
+        )
+      })
+  }
+
+  func effectiveRouteToken(
+    routes: [NetworkCanonicalRoute],
+    network: UInt32,
+    prefix: UInt8,
+    gateway: String?,
+    interface: String
+  ) throws -> Data? {
+    let destination = (Self.masked(network, prefix: prefix), prefix)
+    guard selectedDestinationTokens.contains(Self.destinationToken(destination, key: key)) else {
+      return nil
+    }
+    let candidates = routes.filter { route in
+      guard route.family == .inet,
+        let parsed = Self.parseDestination(route.destination),
+        parsed.network == destination.0,
+        parsed.prefix == destination.1,
+        route.interface == interface
+      else { return false }
+      return gateway.map { route.gateway == $0 } ?? true
+    }
+    guard candidates.count == 1, let route = candidates.first else {
+      throw NetworkCleanupCanonicalizationError.invalidShape
+    }
+    return Self.bindingToken(
+      destination: destination,
+      family: route.family,
+      gateway: route.gateway,
+      interface: route.interface,
+      key: key
+    )
+  }
+
+  private static func destinationToken(
     _ route: (network: UInt32, prefix: UInt8),
     key: SymmetricKey
   ) -> Data {
-    var bytes = withUnsafeBytes(of: route.network.bigEndian, Array.init)
+    var bytes = Array("powervpn.selected-destination.v1\0".utf8)
+    bytes.append(contentsOf: withUnsafeBytes(of: route.network.bigEndian, Array.init))
     bytes.append(route.prefix)
     return Data(HMAC<SHA256>.authenticationCode(for: Data(bytes), using: key))
+  }
+
+  private static func bindingToken(
+    destination: (network: UInt32, prefix: UInt8),
+    family: NetworkRouteFamily,
+    gateway: String,
+    interface: String,
+    key: SymmetricKey
+  ) -> Data {
+    var bytes = Array("powervpn.selected-route-binding.v1\0\(family.rawValue)\0".utf8)
+    bytes.append(contentsOf: withUnsafeBytes(of: destination.network.bigEndian, Array.init))
+    bytes.append(destination.prefix)
+    bytes.append(0)
+    bytes.append(contentsOf: gateway.utf8)
+    bytes.append(0)
+    bytes.append(contentsOf: interface.utf8)
+    return Data(
+      HMAC<SHA256>.authenticationCode(
+        for: Data(bytes),
+        using: key
+      ))
   }
 
   private static func parseDestination(_ text: String) -> (network: UInt32, prefix: UInt8)? {
@@ -110,7 +185,8 @@ extension VendorCharonStartSnapshot {
     }
     return VendorCharonSelectedRouteMatcher(
       keyData: Data((0..<32).map { _ in UInt8.random(in: .min ... .max) }),
-      routes: routes
+      routes: routes,
+      requiredTargetIPv4: requiredTargetIPv4
     )
   }
 

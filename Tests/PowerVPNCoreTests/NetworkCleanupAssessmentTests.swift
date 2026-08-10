@@ -18,6 +18,15 @@ import Testing
     #expect(NetworkCleanupAssessment.baselineStable(first, second))
   }
 
+  @Test func baselineRequiresColdInactiveHelperAndNoVendorProcess() {
+    let cold = snapshot(helperRuns: 10)
+    let active = activeSnapshot(from: cold, helperRuns: 11)
+
+    #expect(active.complete)
+    #expect(!NetworkCleanupAssessment.baselineStable(active, active))
+    #expect(!NetworkCleanupAssessment.baselineStable(cold, active))
+  }
+
   @Test func cleanupResidueIsDirectionalAndPreexistingRouteIsAllowed() {
     let existing = Data([1])
     let added = Data([2])
@@ -31,6 +40,7 @@ import Testing
     #expect(residue.complete)
     #expect(residue.selectedRouteResidueCount == 1)
     #expect(residue.helperGenerationRestored)
+    #expect(residue.vendorProcessesRestored)
     #expect(!residue.allDimensionsRestored)
 
     let restored = NetworkCleanupAssessment.assess(
@@ -40,6 +50,28 @@ import Testing
     )
     #expect(restored.selectedRouteResidueCount == 0)
     #expect(restored.allDimensionsRestored)
+  }
+
+  @Test func vendorProcessResidueCannotPassCleanup() {
+    let before = snapshot(helperRuns: 10)
+    let residueToken = Data([4])
+    let after = snapshot(
+      helperRuns: 11,
+      vendorProcesses: vendorSnapshot(
+        charon: 0,
+        ipsec: 1,
+        tokens: [residueToken]
+      )
+    )
+    let result = NetworkCleanupAssessment.assess(
+      before: before,
+      after: after,
+      startRequestSent: true
+    )
+
+    #expect(!after.complete)
+    #expect(!result.vendorProcessesRestored)
+    #expect(!result.allDimensionsRestored)
   }
 
   @Test func helperRelationDependsOnWhetherStartWasSent() {
@@ -72,6 +104,7 @@ import Testing
       ipv4Routes: unavailable.ipv4Routes,
       ipv6Routes: unavailable.ipv6Routes,
       surge: unavailable.surge,
+      vendorProcesses: unavailable.vendorProcesses,
       helperGeneration: unavailable.helperGeneration,
       helperObservationState: unavailable.helperObservationState
     )
@@ -108,7 +141,8 @@ import Testing
 private func snapshot(
   helperRuns: Int,
   structuralV4: NetworkCleanupFingerprint? = nil,
-  selected: Set<Data> = []
+  selected: Set<Data> = [],
+  vendorProcesses: NetworkCleanupVendorProcessSnapshot = vendorSnapshot()
 ) -> NetworkCleanupSnapshot {
   let common = fingerprint("a")
   return NetworkCleanupSnapshot(
@@ -141,12 +175,58 @@ private func snapshot(
       extensionProcessCount: 1,
       helperProcessCount: 1
     ),
+    vendorProcesses: vendorProcesses,
     helperGeneration: VendorHelperGenerationSnapshot(
       launchdObserved: true,
       running: false,
       inactiveConfirmed: true,
       activeCount: 0,
       pid: nil,
+      runs: helperRuns
+    ),
+    helperObservationState: .observed
+  )
+}
+
+private func vendorSnapshot(
+  charon: Int = 0,
+  ipsec: Int = 0,
+  tokens: Set<Data> = []
+) -> NetworkCleanupVendorProcessSnapshot {
+  NetworkCleanupVendorProcessSnapshot(
+    fingerprint: .observed(
+      count: tokens.count,
+      sha256: String(repeating: "2", count: 64)
+    ),
+    officialGUIProcessCount: 0,
+    charonProcessCount: charon,
+    ipsecProcessCount: ipsec,
+    shellProcessCount: 0,
+    identityTokens: tokens
+  )
+}
+
+private func activeSnapshot(
+  from source: NetworkCleanupSnapshot,
+  helperRuns: Int
+) -> NetworkCleanupSnapshot {
+  NetworkCleanupSnapshot(
+    defaultRoute: source.defaultRoute,
+    dns: source.dns,
+    interfaces: source.interfaces,
+    ipv4Routes: source.ipv4Routes,
+    ipv6Routes: source.ipv6Routes,
+    surge: source.surge,
+    vendorProcesses: vendorSnapshot(
+      charon: 1,
+      tokens: [Data([3])]
+    ),
+    helperGeneration: VendorHelperGenerationSnapshot(
+      launchdObserved: true,
+      running: true,
+      inactiveConfirmed: false,
+      activeCount: 1,
+      pid: 41,
       runs: helperRuns
     ),
     helperObservationState: .observed

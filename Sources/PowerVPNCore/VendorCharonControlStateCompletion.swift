@@ -85,12 +85,14 @@ extension VendorCharonControlState {
     currentStopAttempt = nil
     let cancelled = retainConnection ? false : cancelDriver()
     phase = retainConnection ? .active : .closed
-    let receipt = makeReceipt(
+    var receipt = makeReceipt(
       operation: .stopConnection,
       outcome: outcome,
       connectionRetained: retainConnection,
       cancelRequested: cancelled
     )
+    receipt.statusAtSubmission = stopStatusAtSubmission
+    stopStatusAtSubmission = nil
     stopContinuation = nil
     continuation.resume(returning: receipt)
   }

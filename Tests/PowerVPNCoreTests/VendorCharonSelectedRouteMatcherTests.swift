@@ -14,10 +14,10 @@ import Testing
     )
 
     #expect(matcher.selectedRouteCount == 2)
-    #expect(matcher.matches(["10.1.2/24"]).count == 1)
-    #expect(matcher.matches(["10.1.2.77/24"]).count == 1)
-    #expect(matcher.matches(["default"]).count == 1)
-    #expect(matcher.matches(["10.1.3/24"]).isEmpty)
+    #expect(try matchedCount(matcher, destination: "10.1.2/24") == 1)
+    #expect(try matchedCount(matcher, destination: "10.1.2.77/24") == 1)
+    #expect(try matchedCount(matcher, destination: "default") == 1)
+    #expect(try matchedCount(matcher, destination: "10.1.3/24") == 0)
   }
 
   @Test func routeCanonicalizerReportsOnlyMatchedCount() throws {
@@ -40,6 +40,36 @@ import Testing
     )
     #expect(result.selectedRouteMatchCount == 2)
     #expect(result.selectedRouteTokens.count == 2)
+  }
+
+  @Test func sameDestinationWithDifferentBindingProducesDifferentToken() throws {
+    let matcher = try selectedSnapshot(
+      family: 4,
+      routes: [("10.1.2.3", 24)]
+    ).makeSelectedRouteMatcher(requiredTargetIPv4: ipv4(10, 1, 2, 9))
+    let before = try canonicalRoute(
+      matcher,
+      rows: ["default 192.0.2.1 UGScg en0", "10.1.2/24 link#4 UGScI en0"]
+    )
+    let active = try canonicalRoute(
+      matcher,
+      rows: ["default 192.0.2.1 UGScg en0", "10.1.2/24 link#9 UGScI utun9"]
+    )
+    let flagsChanged = try canonicalRoute(
+      matcher,
+      rows: ["default 192.0.2.1 UGScg en0", "10.1.2/24 link#4 UGS en0"]
+    )
+    let hostForm = try canonicalRoute(
+      matcher,
+      rows: ["default 192.0.2.1 UGScg en0", "10.1.2.77/24 link#4 UGScI en0"]
+    )
+
+    #expect(before.selectedRouteMatchCount == 1)
+    #expect(active.selectedRouteMatchCount == 1)
+    #expect(before.selectedRouteTokens.isDisjoint(with: active.selectedRouteTokens))
+    #expect(active.selectedRouteTokens.subtracting(before.selectedRouteTokens).count == 1)
+    #expect(before.selectedRouteTokens == flagsChanged.selectedRouteTokens)
+    #expect(before.selectedRouteTokens == hostForm.selectedRouteTokens)
   }
 
   @Test func unsupportedFamilyAndInvalidMaterialFailWithoutEcho() throws {
@@ -74,6 +104,31 @@ import Testing
       try miss.makeSelectedRouteMatcher(requiredTargetIPv4: target)
     }
   }
+
+}
+
+private func matchedCount(
+  _ matcher: VendorCharonSelectedRouteMatcher,
+  destination: String
+) throws -> Int {
+  try canonicalRoute(
+    matcher,
+    rows: ["\(destination) link#9 UGScI utun9"]
+  ).selectedRouteMatchCount
+}
+
+private func canonicalRoute(
+  _ matcher: VendorCharonSelectedRouteMatcher,
+  rows: [String]
+) throws -> NetworkCleanupRouteSnapshot {
+  let table =
+    "Routing tables\nInternet:\nDestination Gateway Flags Netif Expire\n"
+    + rows.joined(separator: "\n") + "\n"
+  return try NetworkRouteCanonicalizer.canonicalize(
+    Data(table.utf8),
+    family: .inet,
+    selectedRoutes: matcher
+  )
 }
 
 private func ipv4(_ a: UInt32, _ b: UInt32, _ c: UInt32, _ d: UInt32) -> UInt32 {

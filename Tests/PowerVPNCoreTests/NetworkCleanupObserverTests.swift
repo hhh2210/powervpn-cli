@@ -5,7 +5,7 @@ import Testing
 
 @Suite struct NetworkCleanupObserverTests {
   @Test func boundedGenerationObserverUsesOnlyFixedHelperCommand() async {
-    let helper = success(helperFixture(running: false, pid: nil, runs: 10))
+    let helper = networkCleanupSuccess(helperFixture(running: false, pid: nil, runs: 10))
     let runner = FixtureNetworkCleanupRunner([.helperGeneration: [helper]])
     let generation = await InstalledBoundedVendorHelperGenerationObserver(
       runner: runner
@@ -37,7 +37,7 @@ import Testing
   }
 
   @Test func fixtureCaptureUsesOnlyFixedCommandsAndProducesCompleteSnapshot() async {
-    let runner = FixtureNetworkCleanupRunner(successfulResponses())
+    let runner = FixtureNetworkCleanupRunner(networkCleanupSuccessfulResponses())
     let snapshot = await InstalledNetworkCleanupObserver(runner: runner).capture(
       window: NetworkCleanupCaptureWindow(keyData: Data(repeating: 3, count: 32))
     )
@@ -49,6 +49,8 @@ import Testing
     #expect(snapshot.ipv4Routes.persistent.itemCount == 2)
     #expect(snapshot.ipv6Routes.persistent.itemCount == 2)
     #expect(snapshot.surge.mainProcessCount == 1)
+    #expect(snapshot.vendorProcesses.isObserved)
+    #expect(snapshot.vendorProcesses.charonProcessCount == 0)
     #expect(snapshot.helperGeneration.exactInactive)
     #expect(
       runner.observedCommands == [
@@ -59,7 +61,11 @@ import Testing
 
   @Test func commandCatalogIsAbsoluteBoundedAndContainsNoNetworkClientOrShell() {
     let forbidden = ["curl", "nc", "ssh", "surge-cli", "sh", "zsh", "bash"]
-    for command in NetworkCleanupCommand.allCases {
+    let commands: [NetworkCleanupCommand] = [
+      .helperGeneration, .surgeProcesses, .defaultRoute, .dns, .interfaces,
+      .ipv4Routes, .ipv6Routes, .effectiveRoute(targetIPv4: 0x0B0B_1E15),
+    ]
+    for command in commands {
       let request = command.request
       #expect(request.isValid)
       #expect(request.executable.hasPrefix("/"))
@@ -72,7 +78,7 @@ import Testing
 
   @Test func failedAndOversizedCommandsCollapseWithoutRawOutput() async {
     let marker = "sensitive-command-output"
-    var responses = successfulResponses()
+    var responses = networkCleanupSuccessfulResponses()
     responses[.defaultRoute] = [
       BoundedCommandResult(
         outcome: .stdoutLimitExceeded,
@@ -96,9 +102,10 @@ import Testing
   }
 
   @Test func surgeOrHelperChangeInsideCaptureFailsClosed() async {
-    var surgeResponses = successfulResponses()
+    var surgeResponses = networkCleanupSuccessfulResponses()
     surgeResponses[.surgeProcesses] = [
-      success(surgeFixture(pid: 100)), success(surgeFixture(pid: 200)),
+      networkCleanupSuccess(surgeFixture(pid: 100)),
+      networkCleanupSuccess(surgeFixture(pid: 200)),
     ]
     let surge = await InstalledNetworkCleanupObserver(
       runner: FixtureNetworkCleanupRunner(surgeResponses)
@@ -106,10 +113,10 @@ import Testing
     #expect(!surge.complete)
     #expect(surge.surge.fingerprint.state == .changedDuringCapture)
 
-    var helperResponses = successfulResponses()
+    var helperResponses = networkCleanupSuccessfulResponses()
     helperResponses[.helperGeneration] = [
-      success(helperFixture(running: false, pid: nil, runs: 10)),
-      success(helperFixture(running: true, pid: 400, runs: 11)),
+      networkCleanupSuccess(helperFixture(running: false, pid: nil, runs: 10)),
+      networkCleanupSuccess(helperFixture(running: true, pid: 400, runs: 11)),
     ]
     let helper = await InstalledNetworkCleanupObserver(
       runner: FixtureNetworkCleanupRunner(helperResponses)
@@ -117,9 +124,26 @@ import Testing
     #expect(!helper.complete)
     #expect(helper.helperObservationState == .changedDuringCapture)
   }
+
+  @Test func vendorProcessChangeInsideCaptureFailsClosed() async {
+    var responses = networkCleanupSuccessfulResponses()
+    responses[.surgeProcesses] = [
+      networkCleanupSuccess(surgeFixture(pid: 100)),
+      networkCleanupSuccess(
+        surgeFixture(pid: 100)
+          + "400 Tue Aug 11 12:35:00 2026 /Library/PrivilegedHelperTools/com.leadsec.ipsec-xpc\n"
+      ),
+    ]
+    let snapshot = await InstalledNetworkCleanupObserver(
+      runner: FixtureNetworkCleanupRunner(responses)
+    ).capture(window: NetworkCleanupCaptureWindow())
+
+    #expect(!snapshot.complete)
+    #expect(snapshot.vendorProcesses.fingerprint.state == .changedDuringCapture)
+  }
 }
 
-private final class FixtureNetworkCleanupRunner: @unchecked Sendable,
+final class FixtureNetworkCleanupRunner: @unchecked Sendable,
   NetworkCleanupCommandRunning
 {
   private let lock = NSLock()
@@ -145,31 +169,34 @@ private final class FixtureNetworkCleanupRunner: @unchecked Sendable,
   var observedCommands: [NetworkCleanupCommand] { lock.withLock { calls } }
 }
 
-private func successfulResponses() -> [NetworkCleanupCommand: [BoundedCommandResult]] {
-  let helper = success(helperFixture(running: false, pid: nil, runs: 10))
-  let surge = success(surgeFixture(pid: 100))
+func networkCleanupSuccessfulResponses() -> [NetworkCleanupCommand: [BoundedCommandResult]] {
+  let helper = networkCleanupSuccess(helperFixture(running: false, pid: nil, runs: 10))
+  let surge = networkCleanupSuccess(surgeFixture(pid: 100))
   return [
     .helperGeneration: [helper, helper],
     .surgeProcesses: [surge, surge],
     .defaultRoute: [
-      success(
+      networkCleanupSuccess(
         "destination: default\ngateway: 192.0.2.1\ninterface: utun8\nflags: <UP,GATEWAY>\n")
     ],
-    .dns: [success("DNS configuration\nresolver #1\nnameserver[0] : 192.0.2.53\n")],
+    .dns: [
+      networkCleanupSuccess(
+        "DNS configuration\nresolver #1\nnameserver[0] : 192.0.2.53\n")
+    ],
     .interfaces: [
-      success(
+      networkCleanupSuccess(
         "en0: flags=1<UP> mtu 1500\n  status: active\nutun8: flags=1<UP> mtu 1380\n  status: active\n"
       )
     ],
     .ipv4Routes: [
-      success(
+      networkCleanupSuccess(
         routeFixture(
           banner: "Internet:",
           rows: ["default 192.0.2.1 UGScg en0", "10.0.0/8 link#9 UGScI utun8"]
         ))
     ],
     .ipv6Routes: [
-      success(
+      networkCleanupSuccess(
         routeFixture(
           banner: "Internet6:",
           rows: ["default fe80::1%en0 UGcg en0", "2001:db8::/32 link#9 UCS utun8"]
@@ -178,7 +205,7 @@ private func successfulResponses() -> [NetworkCleanupCommand: [BoundedCommandRes
   ]
 }
 
-private func success(_ text: String) -> BoundedCommandResult {
+func networkCleanupSuccess(_ text: String) -> BoundedCommandResult {
   BoundedCommandResult(
     outcome: .exited,
     started: true,

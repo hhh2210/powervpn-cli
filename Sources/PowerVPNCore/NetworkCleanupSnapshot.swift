@@ -53,6 +53,21 @@ package struct NetworkCleanupRouteSnapshot: Equatable, Sendable {
   package let persistent: NetworkCleanupFingerprint
   package let selectedRouteMatchCount: Int
   let selectedRouteTokens: Set<Data>
+  let effectiveSelectedRoute: NetworkCleanupEffectiveRouteSnapshot?
+
+  package init(
+    structural: NetworkCleanupFingerprint,
+    persistent: NetworkCleanupFingerprint,
+    selectedRouteMatchCount: Int,
+    selectedRouteTokens: Set<Data>,
+    effectiveSelectedRoute: NetworkCleanupEffectiveRouteSnapshot? = nil
+  ) {
+    self.structural = structural
+    self.persistent = persistent
+    self.selectedRouteMatchCount = selectedRouteMatchCount
+    self.selectedRouteTokens = selectedRouteTokens
+    self.effectiveSelectedRoute = effectiveSelectedRoute
+  }
 
   package static func unavailable(_ state: NetworkCleanupObservationState) -> Self {
     Self(
@@ -66,6 +81,7 @@ package struct NetworkCleanupRouteSnapshot: Equatable, Sendable {
   package var isObserved: Bool {
     structural.isObserved && persistent.isObserved
       && selectedRouteMatchCount == selectedRouteTokens.count
+      && (effectiveSelectedRoute?.isObserved ?? true)
   }
 }
 
@@ -100,6 +116,7 @@ package struct NetworkCleanupSnapshot: Equatable, Sendable {
   package let ipv4Routes: NetworkCleanupRouteSnapshot
   package let ipv6Routes: NetworkCleanupRouteSnapshot
   package let surge: NetworkCleanupSurgeSnapshot
+  package let vendorProcesses: NetworkCleanupVendorProcessSnapshot
   package let helperGeneration: VendorHelperGenerationSnapshot
   package let helperObservationState: NetworkCleanupObservationState
 
@@ -108,6 +125,7 @@ package struct NetworkCleanupSnapshot: Equatable, Sendable {
       && ipv4Routes.isObserved && ipv6Routes.isObserved && surge.isObserved
       && helperObservationState == .observed
       && (helperGeneration.exactInactive || helperGeneration.exactRunning)
+      && vendorProcesses.isConsistent(with: helperGeneration)
   }
 }
 
@@ -120,6 +138,7 @@ package struct NetworkCleanupResult: Encodable, Equatable, Sendable {
   package let persistentRoutesRestored: Bool
   package let selectedRouteResidueCount: Int
   package let surgeStateRestored: Bool
+  package let vendorProcessesRestored: Bool
   package let helperGenerationRestored: Bool
   package let structuralRouteTablesEqual: Bool
   package let containsSecrets = false
@@ -130,7 +149,7 @@ package struct NetworkCleanupResult: Encodable, Equatable, Sendable {
     complete && defaultRouteRestored && dnsRestored && interfacesRestored
       && utunRestored && persistentRoutesRestored
       && selectedRouteResidueCount == 0 && surgeStateRestored
-      && helperGenerationRestored
+      && vendorProcessesRestored && helperGenerationRestored
   }
 }
 
@@ -139,13 +158,17 @@ package enum NetworkCleanupAssessment {
     _ first: NetworkCleanupSnapshot,
     _ second: NetworkCleanupSnapshot
   ) -> Bool {
-    guard first.complete, second.complete else { return false }
+    guard first.complete, second.complete,
+      first.helperGeneration.exactInactive,
+      second.helperGeneration.exactInactive
+    else { return false }
     return first.defaultRoute == second.defaultRoute
       && first.dns == second.dns
       && first.interfaces == second.interfaces
       && first.ipv4Routes.persistent == second.ipv4Routes.persistent
       && first.ipv6Routes.persistent == second.ipv6Routes.persistent
       && first.surge == second.surge
+      && first.vendorProcesses == second.vendorProcesses
       && first.helperGeneration == second.helperGeneration
   }
 
@@ -177,6 +200,7 @@ package enum NetworkCleanupAssessment {
         && before.ipv6Routes.persistent == after.ipv6Routes.persistent,
       selectedRouteResidueCount: complete ? selectedResidue : 0,
       surgeStateRestored: complete && before.surge == after.surge,
+      vendorProcessesRestored: complete && before.vendorProcesses == after.vendorProcesses,
       helperGenerationRestored: complete && helperRestored,
       structuralRouteTablesEqual: complete
         && before.ipv4Routes.structural == after.ipv4Routes.structural
