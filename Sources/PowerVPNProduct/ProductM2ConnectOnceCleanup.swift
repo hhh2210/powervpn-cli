@@ -20,11 +20,13 @@ package struct ProductM2CleanupRunner: Sendable {
     authorizationLease: ProductM2AuthorizedResourceLease?,
     selectedRoutes: VendorCharonSelectedRouteMatcher?,
     controlLease: ProductM2ControlLease?,
+    provisionalStopCapability: ProductM2ProvisionalStopCapability?,
     startReceipt: ProductM2ControlReceipt
   ) async -> ProductM2CleanupResult {
     let control = await closeControl(
       coldGeneration: coldGeneration,
       controlLease: controlLease,
+      provisionalStopCapability: provisionalStopCapability,
       startReceipt: startReceipt
     )
     let authorizationClose = await closeAuthorization(authorizationLease)
@@ -55,6 +57,7 @@ package struct ProductM2CleanupRunner: Sendable {
   private func closeControl(
     coldGeneration: VendorHelperGenerationSnapshot,
     controlLease: ProductM2ControlLease?,
+    provisionalStopCapability: ProductM2ProvisionalStopCapability?,
     startReceipt: ProductM2ControlReceipt
   ) async -> ControlCleanup {
     if let controlLease {
@@ -62,6 +65,21 @@ package struct ProductM2CleanupRunner: Sendable {
       guard !stop.requestSent else {
         return ControlCleanup(
           path: .sameLeaseStop,
+          stop: stop,
+          emergencyStop: .unsent(.notAttempted)
+        )
+      }
+      return await classifyPostStartGeneration(
+        coldGeneration: coldGeneration,
+        stop: stop
+      )
+    }
+
+    if let provisionalStopCapability {
+      let stop = await Task.detached { await provisionalStopCapability.stop() }.value
+      guard !stop.requestSent else {
+        return ControlCleanup(
+          path: .sameSessionProvisionalStop,
           stop: stop,
           emergencyStop: .unsent(.notAttempted)
         )

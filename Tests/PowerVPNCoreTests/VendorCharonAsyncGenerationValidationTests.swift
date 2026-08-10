@@ -21,13 +21,14 @@ import Testing
     #expect(result.receipt.outcome == .timeout)
     #expect(!result.receipt.transportAcknowledged)
     #expect(result.lease == nil)
+    let capability = try #require(result.provisionalStopCapability)
     #expect(factory.driver.submitCount == 1)
-    #expect(factory.driver.cancelCount == 1)
+    #expect(factory.driver.cancelCount == 0)
 
     gate.resolve(true)
     await Task.yield()
     #expect(factory.driver.submitCount == 1)
-    #expect(factory.driver.cancelCount == 1)
+    try await stopProvisional(capability, factory: factory)
   }
 
   @Test func cancellationDuringStartValidationIsTerminal() async throws {
@@ -50,10 +51,12 @@ import Testing
     #expect(result.receipt.outcome == .cancelled)
     #expect(!result.receipt.transportAcknowledged)
     #expect(result.lease == nil)
+    let capability = try #require(result.provisionalStopCapability)
     gate.resolve(true)
     await Task.yield()
     #expect(factory.driver.submitCount == 1)
-    #expect(factory.driver.cancelCount == 1)
+    #expect(factory.driver.cancelCount == 0)
+    try await stopProvisional(capability, factory: factory)
   }
 
   @Test func suspendedStartValidatorResumesWithoutQueueDeadlock() async throws {
@@ -135,6 +138,17 @@ import Testing
     #expect(factory.callCount == 0)
     #expect(factory.driver.stopCount == 0)
     gate.resolve(true)
+  }
+
+  private func stopProvisional(
+    _ capability: VendorCharonProvisionalStopCapability,
+    factory: CharonControlDriverFactory
+  ) async throws {
+    let stop = Task { await capability.stop(timeoutMilliseconds: 500) }
+    #expect(await waitForControl { factory.driver.submitCount == 2 })
+    factory.driver.emitReply(.emptyAcknowledgement, at: 1)
+    #expect((await stop.value).transportAcknowledged)
+    #expect(factory.driver.cancelCount == 1)
   }
 }
 

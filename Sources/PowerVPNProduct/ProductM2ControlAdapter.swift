@@ -73,6 +73,17 @@ package struct ProductM2ControlLease: Sendable {
 package struct ProductM2StartResult: Sendable {
   package let receipt: ProductM2ControlReceipt
   package let lease: ProductM2ControlLease?
+  package let provisionalStopCapability: ProductM2ProvisionalStopCapability?
+
+  init(
+    receipt: ProductM2ControlReceipt,
+    lease: ProductM2ControlLease?,
+    provisionalStopCapability: ProductM2ProvisionalStopCapability? = nil
+  ) {
+    self.receipt = receipt
+    self.lease = lease
+    self.provisionalStopCapability = provisionalStopCapability
+  }
 }
 
 package struct ProductM2PendingStart: Sendable {
@@ -124,6 +135,15 @@ package struct ProductM2ControlAdapter: Sendable {
                   ))
               }
             )
+          },
+          provisionalStopCapability: result.provisionalStopCapability.map { capability in
+            ProductM2ProvisionalStopCapability {
+              ProductM2ControlReceipt(
+                await capability.stop(
+                  timeoutMilliseconds: RawVendorCharonControlTransport
+                    .defaultTimeoutMilliseconds
+                ))
+            }
           }
         )
       }

@@ -45,3 +45,55 @@
   start submission linearization point, test every submitted failure path for
   an exact-one stop attempt, then reassess whether the read-only helper probe is
   eligible to run on the installed machine.
+
+## 2026-08-11 05:34 +0800 — one installed helper reachability probe passed
+
+- Pre-state: official GUI and vendor-helper process counts were zero; the
+  product reported `launchdObserved=true`, `inactiveConfirmed=true`,
+  `activeCount=0`, `runs=19`, `probeAvailable=true`, and
+  `preflightSafe=true`. Aggregate checks found no other VPN process.
+- Action: ran exactly one arm64 product command,
+  `powervpn helper status --probe --json`. It issued only the fixed read-only
+  `get_version` request; it did not invoke Portal, SSH, or `start_connection`.
+- Result: exit 0 in 1.70 seconds; `directXPCStatus=current_reachable`,
+  `productState=ready`, `liveProbePerformed=true`, and
+  `helperMutationRequested=false`.
+- Post-state: launchd was again exactly inactive with `activeCount=0` and
+  `runs=20`; vendor-helper and other-VPN process counts were zero. Default-route,
+  DNS, and interface aggregate hashes matched the pre-state. The raw full route
+  table hash changed once (an informational projection containing expiring
+  entries); two subsequent canonical structural and persistent IPv4/IPv6
+  projections were byte-stable one second apart. No retry was performed.
+- Product conclusion: M1 now has a truthful current-helper reachability result,
+  while the overall doctor remains blocked by
+  `authorized_resource_provider_unavailable`. This probe does not make M2
+  connection-changing execution eligible.
+
+## 2026-08-11 05:54 +0800 — submitted-start cleanup P0 closed offline
+
+- Core now transfers an opaque cleanup-only capability for the exact original
+  XPC session when a submitted start ends in cancellation, timeout, generation
+  mismatch or another non-acknowledged result. The capability can only submit
+  fixed `stop_connection`, is exact-once, and cancels its session when
+  abandoned.
+- Product attempts that capability from cancellation-shielded cleanup before
+  considering authenticated emergency cleanup. Reports distinguish
+  `same_session_provisional_stop` from `same_lease_stop`; schema is now 6.
+- Terminal/invalid sessions are sealed first. Their provisional attempt is
+  truthfully unsent and the existing generation classifier decides whether one
+  authenticated emergency stop is still safe; changed or unavailable state
+  remains `cleanup_unproven` rather than targeting an uncertain helper.
+- Independent review found no remaining P0/P1-product in this slice. Integrated
+  targeted tests, the full package test run, strict Swift formatting, arm64
+  product build, diff check and secret scan passed.
+- Product operability: `scripts/build_and_run.sh` now provides one deterministic
+  arm64 build-and-exec entry, defaulting to usage rather than a live command.
+- Remaining supervisor blocker: the CLI's 120-second timer is a cooperative
+  cancellation request, not an absolute end-to-end budget. A concrete next
+  contract is locked: monotonic T0 after approval, mutation cutoff at 65s,
+  control cleanup by 73s, authorization close by 94s, after-state by 118s and
+  report by 120s. It must be threaded through every stage and through a future
+  cancellable provider attempt; no partial scaffolding was added.
+- Exact next action: implement that coherent absolute-budget/provider-attempt
+  contract. The independent installed-state blocker remains the absence of a
+  lawful current-generation `vendor_once` resource provider.

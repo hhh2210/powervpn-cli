@@ -95,9 +95,10 @@ public enum ProductM2AuthorizationCloseOutcome: String, Encodable, Equatable, Se
   case alreadyClosed = "already_closed"
 }
 
-public enum ProductM2CleanupPath: String, Encodable, Equatable, Sendable {
+public enum ProductM2CleanupPath: String, CaseIterable, Encodable, Equatable, Sendable {
   case notRequired = "not_required"
   case sameLeaseStop = "same_lease_stop"
+  case sameSessionProvisionalStop = "same_session_provisional_stop"
   case naturalHelperExit = "natural_helper_exit"
   case authenticatedEmergencyStop = "authenticated_emergency_stop"
   case cleanupUnproven = "cleanup_unproven"
@@ -236,7 +237,7 @@ public struct ProductM2ConnectRequest: Equatable, Sendable {
 }
 
 public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
-  public let schemaVersion = 5
+  public let schemaVersion = 6
   public let outcome: ProductM2ConnectOutcome
   public let finalState: ProductM2ConnectionState
   public let lastGoodState: ProductM2ConnectionState

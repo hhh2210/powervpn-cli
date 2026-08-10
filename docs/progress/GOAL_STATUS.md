@@ -1255,3 +1255,57 @@ Approval required: no approval is needed for continued offline provider
 contract work, synthetic tests or review. Fresh explicit approval remains
 mandatory immediately before official-GUI onboarding, Portal/server contact,
 credential input, helper/XPC start, SSH proof or any network mutation.
+
+## 2026-08-11 — Explicit helper reachability and submitted-start cleanup authority
+
+User-visible capability: `powervpn helper status --probe --json` is now the one
+explicit Product M1 reachability action. The passive helper status command
+still performs no probe. The explicit form is fixed to the installed charon
+service and exact `get_version` request, has no caller-controlled payload, and
+reports only value-free final generation and reachability state. The new
+`scripts/build_and_run.sh` wrapper builds the arm64 product before executing the
+exact CLI arguments supplied by the user; with no arguments it only prints
+usage.
+
+Installed result: one authorized, credential-free Product probe ran. Before it,
+the official GUI and vendor-helper process counts were zero and launchd showed
+charon exactly inactive at run 19. The command returned exit 0 in 1.70 seconds
+with `current_reachable`; the helper returned to exact inactive at run 20 with
+zero vendor-helper processes. Default-route, DNS and interface aggregates
+matched the pre-state. No retry, Portal request, credential read,
+`start_connection`, SSH connection or network mutation ran.
+
+Production code changed: Core now preserves a cleanup-only capability at the
+successful start-submission linearization point when the start later ends in
+cancel, timeout, generation mismatch or another non-acknowledged result. The
+capability owns only the original non-reconnecting XPC session and can send
+only fixed `stop_connection`; it cannot expose status or encode arbitrary
+requests. Product consumes it from a non-cancelled cleanup task before falling
+back to the existing authenticated emergency classifier. Active starts still
+use the normal retained lease. Report schema 6 distinguishes
+`same_session_provisional_stop` from `same_lease_stop`, and terminal sessions
+truthfully produce an unsent stop receipt rather than a false cleanup claim.
+
+Verification: the provisional-stop Core/Product suites cover cancel, timeout,
+generation mismatch, terminal session, rejected submission, duplicate stop and
+active-lease separation. The full package test run, strict Swift formatting,
+arm64 `powervpn` build, shell wrapper tests, diff check and secret scan pass.
+
+Current blockers: the default M2 runtime remains locally blocked by
+`authorized_resource_provider_unavailable`; no installed artifact has become a
+lawful current-generation `vendor_once` handoff. In addition, the current CLI
+120-second timer is only a cooperative cancellation trigger. There is not yet
+one monotonic absolute budget spanning acquisition, mutation, same-session or
+emergency stop, authorization close, after-state capture and report. Therefore
+no M2 live connection attempt is eligible and the Goal remains **ACTIVE**.
+
+Next end-to-end action: implement `ProductM2AbsoluteBudget` with a 65-second
+mutation cutoff and 55-second cleanup reserve, thread absolute remaining time
+through every Product/Core stage, and require a cancellable bounded provider
+attempt contract. A lawful authorized-resource provider is still required
+before the first connection-changing experiment.
+
+Approval required: no approval is needed for that offline budget/provider
+contract work or synthetic verification. Fresh explicit approval remains
+mandatory immediately before any future Portal/server contact, credential
+entry, `start_connection`, SSH proof or network mutation.

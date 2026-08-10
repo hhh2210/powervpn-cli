@@ -2,7 +2,7 @@ import Dispatch
 import Foundation
 
 final class VendorCharonControlState: @unchecked Sendable {
-  enum Phase { case idle, starting, active, stopping, closed }
+  enum Phase { case idle, starting, provisional, active, stopping, closed }
 
   final class StopAttempt: @unchecked Sendable {
     private let lock = NSLock()
@@ -101,6 +101,14 @@ final class VendorCharonControlState: @unchecked Sendable {
     }
   }
 
+  func abandonProvisionalStop() {
+    queue.async { [self] in
+      guard phase == .provisional else { return }
+      _ = cancelDriver()
+      phase = .closed
+    }
+  }
+
   func discardPendingStart() {
     queue.async { [self] in
       if phase == .starting { finishStart(.cancelled) }
@@ -152,7 +160,7 @@ final class VendorCharonControlState: @unchecked Sendable {
   }
 
   func beginStop(timeoutMilliseconds: Int) {
-    guard phase == .active, let driver else {
+    guard phase == .active || phase == .provisional, let driver else {
       finishStop(.leaseClosed, retainConnection: false)
       return
     }
@@ -215,7 +223,10 @@ final class VendorCharonControlState: @unchecked Sendable {
     _ operation: VendorCharonControlOperation
   ) {
     if operation == .startConnection {
-      finishStart(outcome)
+      finishStart(
+        outcome,
+        sealSubmittedSession: outcome != .unexpectedReplyPayload
+      )
     } else {
       finishStop(outcome, retainConnection: false)
     }
@@ -250,10 +261,13 @@ final class VendorCharonControlState: @unchecked Sendable {
     updateObservation { terminalConnectionOutcome = outcome }
     finishStatusWait(.terminalError)
     if phase == .starting {
-      finishStart(outcome)
+      finishStart(outcome, sealSubmittedSession: true)
     } else if phase == .stopping {
       finishStop(outcome, retainConnection: false)
     } else if phase == .active {
+      _ = cancelDriver()
+      phase = .closed
+    } else if phase == .provisional {
       _ = cancelDriver()
       phase = .closed
     }

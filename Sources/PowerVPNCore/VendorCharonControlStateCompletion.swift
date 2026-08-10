@@ -43,6 +43,7 @@ extension VendorCharonControlState {
 
   func finishStart(
     _ outcome: VendorCharonControlOutcome,
+    sealSubmittedSession: Bool = false,
     encodingError: VendorCharonStartEncodingError? = nil
   ) {
     guard phase == .starting else { return }
@@ -52,8 +53,10 @@ extension VendorCharonControlState {
     currentValidator = nil
     snapshot = nil
     let acknowledged = outcome == .transportAcknowledged
-    let cancelled = acknowledged ? false : cancelDriver()
-    phase = acknowledged ? .active : .closed
+    let cleanupCapable = !acknowledged && requestSent && driver != nil
+    let provisional = cleanupCapable && !sealSubmittedSession
+    let cancelled = acknowledged || provisional ? false : cancelDriver()
+    phase = acknowledged ? .active : provisional ? .provisional : .closed
     let receipt = makeReceipt(
       operation: .startConnection,
       outcome: outcome,
@@ -63,7 +66,9 @@ extension VendorCharonControlState {
     )
     let result = VendorCharonStartControlResult(
       receipt: receipt,
-      lease: acknowledged ? VendorCharonControlLease(state: self) : nil
+      lease: acknowledged ? VendorCharonControlLease(state: self) : nil,
+      provisionalStopCapability:
+        cleanupCapable ? VendorCharonProvisionalStopCapability(state: self) : nil
     )
     if let continuation = startContinuation {
       startContinuation = nil
@@ -98,14 +103,15 @@ extension VendorCharonControlState {
   }
 
   func immediateStop(
-    _ outcome: VendorCharonControlOutcome
+    _ outcome: VendorCharonControlOutcome,
+    allowedPhase: Phase = .active
   ) async -> VendorCharonControlReceipt {
     await withCheckedContinuation { continuation in
       queue.async { [self] in
         continuation.resume(
           returning: makeUnsentStopReceipt(
-            phase == .active ? outcome : .leaseClosed,
-            connectionRetained: phase == .active
+            phase == allowedPhase ? outcome : .leaseClosed,
+            connectionRetained: allowedPhase == .active && phase == .active
           ))
       }
     }

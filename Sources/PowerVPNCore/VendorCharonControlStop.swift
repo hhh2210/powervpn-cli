@@ -2,25 +2,50 @@ extension VendorCharonControlState {
   func stop(
     timeoutMilliseconds: Int
   ) async -> VendorCharonControlReceipt {
+    await stop(
+      timeoutMilliseconds: timeoutMilliseconds,
+      allowedPhase: .active
+    )
+  }
+
+  func stopProvisional(
+    timeoutMilliseconds: Int
+  ) async -> VendorCharonControlReceipt {
+    await stop(
+      timeoutMilliseconds: timeoutMilliseconds,
+      allowedPhase: .provisional
+    )
+  }
+
+  private func stop(
+    timeoutMilliseconds: Int,
+    allowedPhase: Phase
+  ) async -> VendorCharonControlReceipt {
     guard RawVendorCharonControlTransport.validTimeoutMilliseconds.contains(timeoutMilliseconds)
-    else { return await immediateStop(.invalidTimeout) }
-    guard !Task.isCancelled else { return await immediateStop(.cancelled) }
+    else { return await immediateStop(.invalidTimeout, allowedPhase: allowedPhase) }
+    guard !Task.isCancelled else {
+      return await immediateStop(.cancelled, allowedPhase: allowedPhase)
+    }
 
     let attempt = StopAttempt()
     return await withTaskCancellationHandler {
       await withCheckedContinuation { continuation in
         queue.async { [self] in
-          guard phase == .active, stopContinuation == nil else {
+          guard phase == allowedPhase, stopContinuation == nil else {
             continuation.resume(
               returning: makeUnsentStopReceipt(
                 .leaseClosed,
-                connectionRetained: phase == .active || phase == .stopping
+                connectionRetained:
+                  allowedPhase == .active && (phase == .active || phase == .stopping)
               ))
             return
           }
           guard !attempt.isCancelled else {
             continuation.resume(
-              returning: makeUnsentStopReceipt(.cancelled, connectionRetained: true))
+              returning: makeUnsentStopReceipt(
+                .cancelled,
+                connectionRetained: allowedPhase == .active
+              ))
             return
           }
           finishStatusWait(.leaseClosed)

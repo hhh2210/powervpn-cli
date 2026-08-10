@@ -65,6 +65,37 @@ package struct VendorCharonControlObservation: Equatable, Sendable {
 package struct VendorCharonStartControlResult: Sendable {
   package let receipt: VendorCharonControlReceipt
   package let lease: VendorCharonControlLease?
+  package let provisionalStopCapability: VendorCharonProvisionalStopCapability?
+
+  package init(
+    receipt: VendorCharonControlReceipt,
+    lease: VendorCharonControlLease?,
+    provisionalStopCapability: VendorCharonProvisionalStopCapability? = nil
+  ) {
+    self.receipt = receipt
+    self.lease = lease
+    self.provisionalStopCapability = provisionalStopCapability
+  }
+}
+
+/// Opaque cleanup-only authority over the exact XPC session used to submit a
+/// start request. It cannot observe status or construct arbitrary requests.
+package final class VendorCharonProvisionalStopCapability: @unchecked Sendable {
+  private let state: VendorCharonControlState
+
+  init(state: VendorCharonControlState) {
+    self.state = state
+  }
+
+  deinit {
+    state.abandonProvisionalStop()
+  }
+
+  package func stop(
+    timeoutMilliseconds: Int
+  ) async -> VendorCharonControlReceipt {
+    await state.stopProvisional(timeoutMilliseconds: timeoutMilliseconds)
+  }
 }
 
 package final class VendorCharonControlLease: @unchecked Sendable {

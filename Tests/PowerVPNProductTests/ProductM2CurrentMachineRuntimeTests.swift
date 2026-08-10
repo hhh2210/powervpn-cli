@@ -72,7 +72,7 @@ import Testing
       ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
     )
 
-    #expect(report.schemaVersion == 5)
+    #expect(report.schemaVersion == 6)
     #expect(report.outcome == .authorizationAcquisitionRejected)
     #expect(report.firstBadEvent == .authorizationAcquisitionRejected)
     #expect(report.authorizationSource == .vendorOnce)

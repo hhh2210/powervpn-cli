@@ -25,6 +25,7 @@ import Testing
     #expect(report.emergencyStopOutcome == .notAttempted)
     #expect(report.cleanupVerified)
     #expect(trace.count("emergency_stop") == 0)
+    #expect(trace.count("stop") == 1)
     #expect(trace.count("ssh") == 0)
     #expect(trace.count("logout") == 1)
   }
@@ -50,11 +51,11 @@ import Testing
     #expect(report.emergencyStopOutcome == .transportAcknowledged)
     #expect(report.cleanupVerified)
     #expect(trace.count("emergency_stop") == 1)
-    #expect(trace.count("stop") == 0)
+    #expect(trace.count("stop") == 1)
     #expect(trace.count("ssh") == 0)
   }
 
-  @Test func changedPostStartGenerationIsUnprovenAndNeverStops() async throws {
+  @Test func changedPostStartGenerationIsUnprovenAfterOneStopAttempt() async throws {
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
     defer { fixture.erase() }
     let trace = ProductM2TestTrace()
@@ -74,7 +75,7 @@ import Testing
     #expect(report.cleanupPath == .cleanupUnproven)
     #expect(!report.cleanupVerified)
     #expect(trace.count("emergency_stop") == 0)
-    #expect(trace.count("stop") == 0)
+    #expect(trace.count("stop") == 1)
     #expect(trace.count("logout") == 1)
   }
 

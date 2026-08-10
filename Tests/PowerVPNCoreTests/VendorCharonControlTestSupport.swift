@@ -171,6 +171,10 @@ final class ScriptedCharonControlDriver: @unchecked Sendable,
     handler?(.connectionInvalid)
   }
 
+  func rejectFutureSubmissions() {
+    lock.withLock { sessionValid = false }
+  }
+
   func emitConnection(_ event: VendorCharonControlConnectionEvent) {
     let handler = lock.withLock { connectionHandler }
     handler?(event)

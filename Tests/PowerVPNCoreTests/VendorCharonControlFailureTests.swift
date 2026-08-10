@@ -18,11 +18,12 @@ import Testing
     #expect(!result.receipt.emptyReplyObserved)
     #expect(result.receipt.connectionCancelRequested)
     #expect(result.lease == nil)
+    #expect(result.provisionalStopCapability == nil)
     #expect(factory.driver.submitCount == 0)
     #expect(factory.driver.cancelCount == 1)
   }
 
-  @Test func generationMismatchRejectsEmptyReplyAndCancelsOnce() async throws {
+  @Test func generationMismatchRejectsEmptyReplyAndRetainsCleanupCapability() async throws {
     let factory = CharonControlDriverFactory()
     let snapshot = try ControlSnapshotFixture().snapshot()
     let task = Task {
@@ -42,12 +43,13 @@ import Testing
     #expect(!result.receipt.peerGenerationValidated)
     #expect(!result.receipt.transportAcknowledged)
     #expect(result.receipt.helperMayHaveMutated)
-    #expect(result.receipt.connectionCancelRequested)
+    #expect(!result.receipt.connectionCancelRequested)
     #expect(result.lease == nil)
-    #expect(factory.driver.cancelCount == 1)
+    #expect(result.provisionalStopCapability != nil)
+    #expect(factory.driver.cancelCount == 0)
   }
 
-  @Test func timeoutCancelsOnceAndLateReplyCannotCreateLease() async throws {
+  @Test func timeoutRetainsCleanupCapabilityAndLateReplyCannotCreateLease() async throws {
     let factory = CharonControlDriverFactory()
     let result = await controlTransport(factory).start(
       snapshot: try ControlSnapshotFixture().snapshot(),
@@ -58,15 +60,16 @@ import Testing
     #expect(result.receipt.outcome == .timeout)
     #expect(result.receipt.requestSent)
     #expect(result.receipt.helperMayHaveMutated)
-    #expect(result.receipt.connectionCancelRequested)
+    #expect(!result.receipt.connectionCancelRequested)
     #expect(result.lease == nil)
-    #expect(factory.driver.cancelCount == 1)
+    #expect(result.provisionalStopCapability != nil)
+    #expect(factory.driver.cancelCount == 0)
     factory.driver.emitReply(.emptyAcknowledgement, at: 0)
     await Task.yield()
-    #expect(factory.driver.cancelCount == 1)
+    #expect(factory.driver.cancelCount == 0)
   }
 
-  @Test func taskCancellationAfterSubmissionCancelsOnceAndKeepsTruthfulReceipt() async throws {
+  @Test func taskCancellationAfterSubmissionKeepsTruthfulCleanupCapability() async throws {
     let factory = CharonControlDriverFactory()
     let snapshot = try ControlSnapshotFixture().snapshot()
     let task = Task {
@@ -83,23 +86,26 @@ import Testing
     #expect(result.receipt.outcome == .cancelled)
     #expect(result.receipt.requestSent)
     #expect(result.receipt.helperMayHaveMutated)
-    #expect(result.receipt.connectionCancelRequested)
+    #expect(!result.receipt.connectionCancelRequested)
     #expect(result.lease == nil)
-    #expect(factory.driver.cancelCount == 1)
+    #expect(result.provisionalStopCapability != nil)
+    #expect(factory.driver.cancelCount == 0)
     factory.driver.emitConnection(.connectionInvalid)
-    await Task.yield()
-    #expect(factory.driver.cancelCount == 1)
+    #expect(await waitForControl { factory.driver.cancelCount == 1 })
   }
 
   @Test func replyAndConnectionErrorsAreClosedAndNeverAcknowledged() async throws {
-    let replyCases: [(VendorCharonControlReplyEvent, VendorCharonControlOutcome)] = [
-      (.connectionInterrupted, .connectionInterrupted),
-      (.connectionInvalid, .connectionInvalid),
-      (.peerCodeSigningRequirement, .peerCodeSigningRequirement),
-      (.unexpectedXPCError, .unexpectedXPCError),
-      (.unexpectedPayload, .unexpectedReplyPayload),
-    ]
-    for (event, expected) in replyCases {
+    let replyCases:
+      [(
+        VendorCharonControlReplyEvent, VendorCharonControlOutcome, Bool
+      )] = [
+        (.connectionInterrupted, .connectionInterrupted, true),
+        (.connectionInvalid, .connectionInvalid, true),
+        (.peerCodeSigningRequirement, .peerCodeSigningRequirement, true),
+        (.unexpectedXPCError, .unexpectedXPCError, true),
+        (.unexpectedPayload, .unexpectedReplyPayload, false),
+      ]
+    for (event, expected, sessionSealed) in replyCases {
       let factory = CharonControlDriverFactory()
       let task = try startTask(factory)
       #expect(await waitForControl { factory.driver.submitCount == 1 })
@@ -108,7 +114,9 @@ import Testing
       #expect(result.receipt.outcome == expected)
       #expect(!result.receipt.transportAcknowledged)
       #expect(result.receipt.requestSent)
-      #expect(factory.driver.cancelCount == 1)
+      #expect(result.provisionalStopCapability != nil)
+      #expect(result.receipt.connectionCancelRequested == sessionSealed)
+      #expect(factory.driver.cancelCount == (sessionSealed ? 1 : 0))
     }
 
     let connectionCases: [(VendorCharonControlConnectionEvent, VendorCharonControlOutcome)] = [
@@ -128,6 +136,8 @@ import Testing
       #expect(result.receipt.outcome == expected)
       #expect(!result.receipt.transportAcknowledged)
       #expect(result.receipt.requestSent)
+      #expect(result.provisionalStopCapability != nil)
+      #expect(result.receipt.connectionCancelRequested)
       #expect(factory.driver.cancelCount == 1)
     }
   }

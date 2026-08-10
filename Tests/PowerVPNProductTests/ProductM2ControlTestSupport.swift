@@ -63,10 +63,39 @@ struct ProductM2TestControlPlan: Sendable {
       generationAfterBegin: generation,
       statusEvidence: .notAttempted,
       stopStatusAtSubmission: nil,
-      stopOutcome: .notAttempted,
+      stopOutcome: .connectionInvalid,
       stopRequestSent: false
     )
   }
+
+  static func submittedFailure(
+    _ outcome: ProductM2ControlOutcome,
+    generation: VendorHelperGenerationSnapshot = m2RunningGeneration,
+    stopOutcome: ProductM2ControlOutcome = .transportAcknowledged,
+    stopRequestSent: Bool = true
+  ) -> Self {
+    Self(
+      startOutcome: outcome,
+      startRequestSent: true,
+      retainLease: false,
+      generationAfterBegin: generation,
+      statusEvidence: .notAttempted,
+      stopStatusAtSubmission: nil,
+      stopOutcome: stopOutcome,
+      stopRequestSent: stopRequestSent
+    )
+  }
+
+  static let preSubmissionFailure = Self(
+    startOutcome: .connectionInvalid,
+    startRequestSent: false,
+    retainLease: false,
+    generationAfterBegin: m2ColdGeneration,
+    statusEvidence: .notAttempted,
+    stopStatusAtSubmission: nil,
+    stopOutcome: .notAttempted,
+    stopRequestSent: false
+  )
 
   static func acknowledgedStop(
     outcome: ProductM2ControlOutcome,
@@ -95,6 +124,7 @@ func productM2TestControl(
       trace.setGeneration(plan.generationAfterBegin)
       return ProductM2PendingStart {
         trace.record("await_start")
+        if plan.startOutcome == .cancelled { withUnsafeCurrentTask { $0?.cancel() } }
         let validatorAccepted =
           plan.startOutcome == .transportAcknowledged
           ? await validator() : false
@@ -108,24 +138,34 @@ func productM2TestControl(
               ? .peerGenerationMismatch : plan.startOutcome,
           requestSent: plan.startRequestSent
         )
+        let stopOperation: @Sendable () async -> ProductM2ControlReceipt = {
+          trace.record("stop")
+          if Task.isCancelled { return .unsent(.cancelled) }
+          return m2Receipt(
+            plan.stopOutcome,
+            requestSent: plan.stopRequestSent,
+            statusEventCount: plan.statusEvidence.statusEventCount,
+            statusAtSubmission: plan.stopStatusAtSubmission
+          )
+        }
         let lease: ProductM2ControlLease? =
           acknowledged && plan.retainLease
           ? ProductM2ControlLease(
-            stopOperation: {
-              trace.record("stop")
-              return m2Receipt(
-                plan.stopOutcome,
-                requestSent: plan.stopRequestSent,
-                statusEventCount: plan.statusEvidence.statusEventCount,
-                statusAtSubmission: plan.stopStatusAtSubmission
-              )
-            },
+            stopOperation: stopOperation,
             statusOperation: {
               trace.record("status_wait")
               return plan.statusEvidence
             }
           ) : nil
-        return ProductM2StartResult(receipt: receipt, lease: lease)
+        let provisionalStopCapability =
+          !acknowledged && receipt.requestSent
+          ? ProductM2ProvisionalStopCapability(stopOperation: stopOperation)
+          : nil
+        return ProductM2StartResult(
+          receipt: receipt,
+          lease: lease,
+          provisionalStopCapability: provisionalStopCapability
+        )
       }
     },
     emergencyStop: { predicate, validator in

@@ -16,7 +16,7 @@ public enum VendorXPCGetVersionOutcome: String, Codable, Equatable, Sendable {
   case unexpectedConnectionEvent = "unexpected_connection_event"
 }
 
-/// Value-free transport evidence. The peer PID never escapes the synchronous
+/// Value-free transport evidence. The peer PID never escapes the bounded
 /// validator used at the business-reply boundary.
 public struct VendorXPCGetVersionEvidence: Equatable, Sendable {
   public let outcome: VendorXPCGetVersionOutcome

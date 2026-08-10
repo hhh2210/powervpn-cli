@@ -69,6 +69,7 @@ extension ProductM2ConnectOnceCoordinator {
       authorizationLease: authorizationLease,
       selectedRoutes: selection.selectedRoutes,
       controlLease: start.lease,
+      provisionalStopCapability: start.provisionalStopCapability,
       startReceipt: start.receipt
     )
   }

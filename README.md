@@ -7,7 +7,7 @@ installation.
 
 ## Current product status — 2026-08-11
 
-The active branch is `rescue-mvp`. M1 now exposes four strict, value-free
+The active branch is `rescue-mvp`. M1 exposes four passive, value-free
 product-readiness commands:
 
 ```sh
@@ -17,14 +17,22 @@ powervpn resources --json
 powervpn snapshot --dry-run --json
 ```
 
+One separate explicit command performs the bounded local helper probe:
+
+```sh
+powervpn helper status --probe --json
+```
+
 On this Mac they currently establish:
 
 - PowerVPN 3.2.1 build 24572 is installed as x86_64;
 - the root-owned x86_64 charon helper is installed, launchd-observed, inactive,
-  and at generation run 19;
+  and at generation run 20;
 - the sealed installed portal profile is available;
-- a bounded direct-XPC probe is safe to perform, but these observation commands
-  do not launch the helper and therefore report `directXPCStatus=not_probed`;
+- the four passive commands do not launch the helper and therefore report
+  `directXPCStatus=not_probed`. One explicit arm64 product probe issued only the
+  fixed `get_version` request, returned `current_reachable`, and observed the
+  helper inactive again at run 20;
 - the default observation path has no authenticated resource lease, so it
   exposes no production resource catalog and its first missing required value
   remains `common.sessionid`;
@@ -50,11 +58,18 @@ On this Mac they currently establish:
 - Core also has a bounded begin/pending control primitive. A start transport
   acknowledgement retains the same connection for lease-bound stop, but an
   exact empty acknowledgement proves transport only and
-  `helperSuccessEstablished` remains false.
+  `helperSuccessEstablished` remains false. If a submitted start instead ends
+  in cancellation, timeout or generation mismatch, Core now transfers an
+  opaque cleanup-only capability over that same non-reconnecting XPC session.
+  Product attempts its fixed `stop_connection` exactly once before considering
+  authenticated emergency cleanup; report schema 6 distinguishes this as
+  `same_session_provisional_stop` rather than claiming an active lease.
 
-The four M1 observation commands still contact no server, read no TTY
-credential and send no XPC. The bounded M2 transaction is exposed behind one
-strict, single-process command:
+The four passive M1 commands contact no server, read no TTY credential and send
+no XPC. The explicit helper probe also contacts no server and cannot encode
+`start_connection`; it performs one bounded local XPC `get_version`
+transaction. The bounded M2 transaction is exposed behind one strict,
+single-process command:
 
 ```sh
 powervpn m2 connect-once \
@@ -95,15 +110,18 @@ status is still connected. It has no retry and does not implement cross-process
 `connect`/`disconnect` state.
 
 All M2 verification so far is offline and synthetic. The real binary was run
-for `help`, strict rejection of a `--yes` bypass, the historical
+for one bounded helper `get_version` probe, `help`, strict rejection of a `--yes` bypass, the historical
 no-controlling-TTY gate (`exit 77`, `runtimeInvoked=false`), and the current
 default-provider gate (`exit 69`, `outcome=provider_unavailable`,
-`runtimeInvoked=false`). No Portal request, helper/XPC request, SSH connection
+`runtimeInvoked=false`). No Portal request, `start_connection`, SSH connection
 or network mutation ran. The product is therefore not yet a usable VPN and the
-Goal remains **ACTIVE**. The immediate blocker is the missing
-authorized-resource provider; fresh explicit approval will be required only
-after that offline blocker is closed and immediately before the first bounded
-M2 live transaction.
+Goal remains **ACTIVE**. The first blocker is the missing authorized-resource
+provider. A second supervisor blocker is the lack of one monotonic absolute
+budget spanning acquisition, mutation, cleanup and report: the current
+120-second cancellation trigger is cooperative and is not claimed as a hard
+wall-clock guarantee. Fresh explicit approval will be required only after both
+offline blockers are closed and immediately before the first bounded M2 live
+transaction.
 
 ## Development
 
@@ -111,6 +129,15 @@ M2 live transaction.
 swift build --product powervpn --arch arm64
 swift test --filter 'ProductReadinessRuntimeTests|ProductCommandTests'
 ```
+
+For a one-command arm64 build followed by an exact CLI invocation:
+
+```sh
+scripts/build_and_run.sh doctor --json
+```
+
+With no arguments the wrapper builds the product and prints CLI usage; it does
+not choose or run a live operation by default.
 
 Product JSON commands use exit `0` when ready, `2` for a completed degraded
 observation, `64` for invalid product-command grammar, and `69` when a required
