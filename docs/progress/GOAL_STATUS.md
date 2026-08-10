@@ -1075,3 +1075,57 @@ that first live action.
 Approval required: yes, immediately before any official-GUI onboarding,
 portal request, direct XPC probe, `start_connection`, SSH proof, or network
 mutation. No approval is needed for further offline implementation and tests.
+
+## 2026-08-11 — M2 production composition and approval-gated connect-once CLI
+
+User-visible capability: the arm64 CLI now exposes exactly one M2 transaction:
+`powervpn m2 connect-once --resource-display-name <exact> --ssh-target
+<thu21|thu52> --json`. It deliberately returns only after Portal acquisition,
+start, fresh SSH proof, stop/logout and cleanup verification have all reached a
+terminal result. It is not an M3 background connection or a pair of
+cross-process connect/disconnect commands.
+
+Production code changed: Core now provides a no-reconnect XPC-session boundary,
+bounded async helper-generation validation, bounded fixed-command process and
+network observation, value-free cleanup assessment and a selected-route matcher
+that proves the locked SSH target is covered without retaining raw routes.
+Product composes the current-machine Portal lease, scoped snapshot, synchronous
+start submission, retained same-session stop, authenticated emergency-stop
+fallback, fresh strict SSH challenge proof and the same capture window across
+the A/B/after network snapshots. CLI parsing is an exact seven-token grammar.
+A random eight-hex confirmation code is exchanged only through `/dev/tty`
+before the production runtime is constructed; `SIGINT` and `SIGTERM` only
+cancel the task and the command waits for the cleanup report before exiting.
+
+Live result: no M2 live transaction ran. Offline full `swift test`, arm64
+`powervpn` build, strict formatting of changed files, diff checks and the secret
+scan pass. The real binary was exercised only for `help` (`0`), rejection of a
+`--yes` bypass (`64`) and a no-controlling-TTY attempt (`77`) whose sorted JSON
+states `runtimeInvoked=false`. No credential was read and no Portal, SSH,
+helper/XPC or network action was started.
+
+Current blocker: there is no remaining demonstrated offline architecture
+blocker for the bounded M2 attempt. Product usability is still unproven because
+the first authorized resource has not been started, no fresh SSH proof has been
+observed through it, and cleanup has not been measured against the real machine.
+The Goal remains **ACTIVE**.
+
+Cleanup status: the offline slice started no installed helper or GUI, opened no
+real XPC session or SSH connection, changed no route/DNS/interface/utun state,
+and wrote no credential or runtime evidence artifact. HEAD and
+`origin/rescue-mvp` were equal at `daebe856366ab134458f7e4934dc9af7889420cf`
+before this documentation update.
+
+Deferred debt: M3 long-lived `connect/status/disconnect` remains intentionally
+out of scope. Existing fail-closed diagnostic compression and the frozen R2 TLS
+evidence backlog do not authorize or substitute for the M2 live result.
+
+Next end-to-end action: after a fresh explicit authorization, run one exact M2
+command for the user-selected resource and one locked SSH target. The user
+enters the Portal credential and the random approval code through the
+controlling TTY; the command performs zero retry and must return a cleanup
+report even after cancellation or failure.
+
+Approval required: yes. The authorization must name the exact resource display
+name and `thu21` or `thu52`, and must be given immediately before that single
+Portal/start/SSH/stop/cleanup transaction. This entry does not authorize it.

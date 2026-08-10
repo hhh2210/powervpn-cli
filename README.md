@@ -52,16 +52,30 @@ On this Mac they currently establish:
   exact empty acknowledgement proves transport only and
   `helperSuccessEstablished` remains false.
 
-The four commands contact no server, read no TTY credential, send no XPC,
-and contain no credential, cookie, PSK, route value, or session value. This
-slice used synthetic drivers and documents only: no real XPC connection,
-helper request, network request or live action ran, and no connected state was
-claimed. The M1 code path is now material-complete for a synthetic authenticated
-snapshot, but the production commands still have no authenticated snapshot
-provider. The product is not a usable VPN yet and the Goal remains **ACTIVE**.
-The next slice is the Product M2 coordinator and CLI wiring; fresh explicit
-approval is required immediately before the first live request or helper/XPC
-action.
+The four M1 observation commands still contact no server, read no TTY
+credential and send no XPC. The production M2 path is now composed behind one
+strict, single-process command:
+
+```sh
+powervpn m2 connect-once \
+  --resource-display-name "<exact>" \
+  --ssh-target <thu21|thu52> \
+  --json
+```
+
+That command requires a fresh random confirmation code through `/dev/tty`
+before constructing the current-machine runtime. One approved transaction then
+owns Portal login, scoped snapshot construction, `start_connection`, a fresh
+strict SSH proof, same-session stop or authenticated emergency cleanup, Portal
+logout and value-free network restoration evidence. It has no retry and does
+not implement cross-process `connect`/`disconnect` state.
+
+All M2 verification so far is offline and synthetic. The real binary was run
+only for `help`, strict rejection of a `--yes` bypass, and the no-controlling-TTY
+gate (`exit 77`, `runtimeInvoked=false`). No Portal request, helper/XPC request,
+SSH connection or network mutation ran. The product is therefore not yet a
+usable VPN and the Goal remains **ACTIVE**. Fresh explicit approval is required
+immediately before the first bounded M2 live transaction.
 
 ## Development
 
