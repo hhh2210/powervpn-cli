@@ -157,8 +157,8 @@ func emergencyTransport(
 
 func emergencyStopTask(
   _ factory: EmergencyConnectionDriverFactory,
-  gate: @escaping @Sendable () -> Bool = { true },
-  peerGenerationValidator: @escaping @Sendable () -> Bool = { true }
+  gate: @escaping @Sendable () async -> Bool = { true },
+  peerGenerationValidator: @escaping @Sendable () async -> Bool = { true }
 ) -> Task<VendorCharonControlReceipt, Never> {
   Task {
     await emergencyTransport(factory).emergencyStop(

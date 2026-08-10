@@ -20,7 +20,7 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
       execution.fail(.preflightBlocked, event: .preflightRejected, state: .blocked)
       return execution.report()
     }
-    let coldGeneration = dependencies.observeGeneration()
+    let coldGeneration = await dependencies.observeGeneration()
     guard coldGeneration.exactInactive,
       dependencies.preflightAccepted(coldGeneration)
     else {
@@ -36,6 +36,19 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
       execution.fail(
         .networkBaselineUnavailable,
         event: .networkBaselineUnavailable,
+        state: .blocked
+      )
+      return execution.report()
+    }
+    if let capturedGeneration = baseline.helperGeneration,
+      !ProductM2GenerationFence.sameColdGeneration(
+        coldGeneration,
+        capturedGeneration
+      )
+    {
+      execution.fail(
+        .generationFenceRejected,
+        event: .generationFenceRejected,
         state: .blocked
       )
       return execution.report()
@@ -203,7 +216,7 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
         selectedRoutes: selectedRoutes
       )
     }
-    let recheckedGeneration = dependencies.observeGeneration()
+    let recheckedGeneration = await dependencies.observeGeneration()
     guard
       ProductM2GenerationFence.sameColdGeneration(
         coldGeneration,

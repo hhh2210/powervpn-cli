@@ -62,7 +62,7 @@ package struct RawVendorCharonControlTransport: Sendable {
   package func beginStart(
     snapshot: VendorCharonStartSnapshot,
     timeoutMilliseconds: Int = Self.defaultTimeoutMilliseconds,
-    peerGenerationValidator: @escaping @Sendable () -> Bool
+    peerGenerationValidator: @escaping @Sendable () async -> Bool
   ) -> VendorCharonPendingStart {
     guard Self.validTimeoutMilliseconds.contains(timeoutMilliseconds) else {
       return VendorCharonPendingStart(immediate: immediateStartResult(.invalidTimeout))
@@ -85,7 +85,7 @@ package struct RawVendorCharonControlTransport: Sendable {
   package func start(
     snapshot: VendorCharonStartSnapshot,
     timeoutMilliseconds: Int = Self.defaultTimeoutMilliseconds,
-    peerGenerationValidator: @escaping @Sendable () -> Bool
+    peerGenerationValidator: @escaping @Sendable () async -> Bool
   ) async -> VendorCharonStartControlResult {
     await beginStart(
       snapshot: snapshot,

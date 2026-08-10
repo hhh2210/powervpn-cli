@@ -2,7 +2,7 @@ import PowerVPNCore
 
 package struct ProductM2ConnectOnceDependencies: Sendable {
   package let controlRuntimePreflightAccepted: @Sendable () -> Bool
-  package let observeGeneration: @Sendable () -> VendorHelperGenerationSnapshot
+  package let observeGeneration: @Sendable () async -> VendorHelperGenerationSnapshot
   package let preflightAccepted: @Sendable (VendorHelperGenerationSnapshot) -> Bool
   package let captureNetworkBaseline:
     @Sendable (
@@ -23,7 +23,7 @@ package struct ProductM2ConnectOnceDependencies: Sendable {
 
   package init(
     controlRuntimePreflightAccepted: @escaping @Sendable () -> Bool,
-    observeGeneration: @escaping @Sendable () -> VendorHelperGenerationSnapshot,
+    observeGeneration: @escaping @Sendable () async -> VendorHelperGenerationSnapshot,
     preflightAccepted:
       @escaping @Sendable (
         VendorHelperGenerationSnapshot
@@ -68,7 +68,7 @@ package struct ProductM2ConnectOnceDependencies: Sendable {
   /// commands, SSH, Portal, or XPC.
   package init(
     controlRuntimePreflightAccepted: @escaping @Sendable () -> Bool,
-    observeGeneration: @escaping @Sendable () -> VendorHelperGenerationSnapshot,
+    generationObserver: any BoundedVendorHelperGenerationObserving,
     preflightAccepted:
       @escaping @Sendable (VendorHelperGenerationSnapshot) -> Bool,
     networkObserver: any NetworkCleanupObserving,
@@ -78,7 +78,7 @@ package struct ProductM2ConnectOnceDependencies: Sendable {
   ) {
     self.init(
       controlRuntimePreflightAccepted: controlRuntimePreflightAccepted,
-      observeGeneration: observeGeneration,
+      observeGeneration: generationObserver.observe,
       preflightAccepted: preflightAccepted,
       captureNetworkBaseline: { window, selectedRoutes in
         let snapshot = await networkObserver.capture(

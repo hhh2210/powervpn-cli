@@ -183,11 +183,15 @@ import Testing
 
   @Test func probeTimeoutCancelsOnceAndNeverSendsStop() async {
     let factory = EmergencyConnectionDriverFactory()
-    let receipt = await emergencyTransport(factory).emergencyStop(
-      timeoutMilliseconds: 5,
-      expectedRunningPredicate: { true },
-      peerGenerationValidator: { true }
-    )
+    let task = Task {
+      await emergencyTransport(factory).emergencyStop(
+        timeoutMilliseconds: 100,
+        expectedRunningPredicate: { true },
+        peerGenerationValidator: { true }
+      )
+    }
+    #expect(await waitForControl { factory.driver.probeCount == 1 })
+    let receipt = await task.value
 
     #expect(receipt.outcome == .timeout)
     #expect(!receipt.requestSent)
@@ -204,7 +208,7 @@ import Testing
       let factory = EmergencyConnectionDriverFactory()
       let task = Task {
         await emergencyTransport(factory).emergencyStop(
-          timeoutMilliseconds: 5,
+          timeoutMilliseconds: 100,
           expectedRunningPredicate: { true },
           peerGenerationValidator: { true }
         )

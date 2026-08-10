@@ -133,6 +133,10 @@ package struct ProductM2NetworkBaseline: Equatable, Sendable {
     return snapshot
   }
 
+  package var helperGeneration: VendorHelperGenerationSnapshot? {
+    snapshot?.helperGeneration
+  }
+
   package static func stable(_ first: Self, _ second: Self) -> Bool {
     guard let first = first.snapshot, let second = second.snapshot else { return false }
     return NetworkCleanupAssessment.baselineStable(first, second)

@@ -3,14 +3,12 @@ import PowerVPNCore
 extension ProductM2ConnectOnceCoordinator {
   func replyValidator(
     before: VendorHelperGenerationSnapshot
-  ) -> @Sendable () -> Bool {
-    // This executes synchronously on Core's transaction queue. Production CLI
-    // wiring remains blocked until its generation observer has a hard deadline.
+  ) -> @Sendable () async -> Bool {
     let observe = dependencies.observeGeneration
     return {
       ProductM2GenerationFence.validatesReply(
         before: before,
-        current: observe()
+        current: await observe()
       )
     }
   }

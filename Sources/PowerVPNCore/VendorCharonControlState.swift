@@ -26,7 +26,8 @@ final class VendorCharonControlState: @unchecked Sendable {
   var completedStartResult: VendorCharonStartControlResult?
   var stopContinuation: CheckedContinuation<VendorCharonControlReceipt, Never>?
   var currentStopAttempt: StopAttempt?
-  var currentValidator: (@Sendable () -> Bool)?
+  var currentValidator: (@Sendable () async -> Bool)?
+  var validation: VendorCharonAsyncValidation?
   var requestSent = false
   var emptyReplyObserved = false
   var statusEvents = 0
@@ -58,7 +59,7 @@ final class VendorCharonControlState: @unchecked Sendable {
 
   func beginStartSynchronously(
     timeoutMilliseconds: Int,
-    peerGenerationValidator: @escaping @Sendable () -> Bool
+    peerGenerationValidator: @escaping @Sendable () async -> Bool
   ) {
     queue.sync {
       beginStart(
@@ -152,7 +153,7 @@ final class VendorCharonControlState: @unchecked Sendable {
 
   private func beginStart(
     timeoutMilliseconds: Int,
-    peerGenerationValidator: @escaping @Sendable () -> Bool
+    peerGenerationValidator: @escaping @Sendable () async -> Bool
   ) {
     guard phase == .idle, let snapshot else {
       finishStart(.leaseClosed)
@@ -224,22 +225,27 @@ final class VendorCharonControlState: @unchecked Sendable {
       (operation == .startConnection && phase == .starting)
         || (operation == .stopConnection && phase == .stopping)
     else { return }
-    let outcome: VendorCharonControlOutcome
     switch event {
     case .emptyAcknowledgement:
       emptyReplyObserved = true
       if operation == .startConnection {
-        let accepted = currentValidator?() == true
-        outcome = accepted ? .transportAcknowledged : .peerGenerationMismatch
+        beginPeerGenerationValidation()
+        return
       } else {
-        outcome = .transportAcknowledged
+        finishStop(.transportAcknowledged, retainConnection: false)
       }
-    case .connectionInterrupted: outcome = .connectionInterrupted
-    case .connectionInvalid: outcome = .connectionInvalid
-    case .peerCodeSigningRequirement: outcome = .peerCodeSigningRequirement
-    case .unexpectedXPCError: outcome = .unexpectedXPCError
-    case .unexpectedPayload: outcome = .unexpectedReplyPayload
+    case .connectionInterrupted: finishReply(.connectionInterrupted, operation)
+    case .connectionInvalid: finishReply(.connectionInvalid, operation)
+    case .peerCodeSigningRequirement: finishReply(.peerCodeSigningRequirement, operation)
+    case .unexpectedXPCError: finishReply(.unexpectedXPCError, operation)
+    case .unexpectedPayload: finishReply(.unexpectedReplyPayload, operation)
     }
+  }
+
+  private func finishReply(
+    _ outcome: VendorCharonControlOutcome,
+    _ operation: VendorCharonControlOperation
+  ) {
     if operation == .startConnection {
       finishStart(outcome)
     } else {

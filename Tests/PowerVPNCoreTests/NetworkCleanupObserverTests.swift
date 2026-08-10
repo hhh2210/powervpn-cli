@@ -4,6 +4,38 @@ import Testing
 @testable import PowerVPNCore
 
 @Suite struct NetworkCleanupObserverTests {
+  @Test func boundedGenerationObserverUsesOnlyFixedHelperCommand() async {
+    let helper = success(helperFixture(running: false, pid: nil, runs: 10))
+    let runner = FixtureNetworkCleanupRunner([.helperGeneration: [helper]])
+    let generation = await InstalledBoundedVendorHelperGenerationObserver(
+      runner: runner
+    ).observe()
+
+    #expect(generation.exactInactive)
+    #expect(runner.observedCommands == [.helperGeneration])
+  }
+
+  @Test func boundedGenerationObserverFailsClosedWithoutOutput() async {
+    let marker = "sensitive-generation-output"
+    let failed = BoundedCommandResult(
+      outcome: .timedOut,
+      started: true,
+      exitStatus: nil,
+      stdout: Data(marker.utf8),
+      stderr: Data(marker.utf8),
+      terminationRequested: true,
+      killRequested: false,
+      reaped: true
+    )
+    let observer = InstalledBoundedVendorHelperGenerationObserver(
+      runner: FixtureNetworkCleanupRunner([.helperGeneration: [failed]])
+    )
+    let generation = await observer.observe()
+
+    #expect(!generation.launchdObserved)
+    #expect(!String(describing: generation).contains(marker))
+  }
+
   @Test func fixtureCaptureUsesOnlyFixedCommandsAndProducesCompleteSnapshot() async {
     let runner = FixtureNetworkCleanupRunner(successfulResponses())
     let snapshot = await InstalledNetworkCleanupObserver(runner: runner).capture(

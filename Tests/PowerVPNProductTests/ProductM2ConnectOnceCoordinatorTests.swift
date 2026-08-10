@@ -69,6 +69,30 @@ import Testing
     #expect(m2EventIndex("logout", in: events) < m2EventIndex("verify", in: events))
   }
 
+  @Test func coldToFirstObservedBaselineGenerationDriftNeverAcquiresPortal() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace(
+      baselines: [m2ObservedNetworkBaseline(generation: m2RunningGeneration)]
+    )
+    let coordinator = ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace
+      ))
+
+    let report = await coordinator.run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(report.outcome == .generationFenceRejected)
+    #expect(report.firstBadEvent == .generationFenceRejected)
+    #expect(report.finalState == .blocked)
+    #expect(trace.count("baseline") == 1)
+    #expect(trace.count("acquire") == 0)
+    #expect(trace.count("begin_start") == 0)
+  }
+
   @Test func baselineDriftAfterPortalAcquisitionSendsNoStart() async throws {
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
     defer { fixture.erase() }

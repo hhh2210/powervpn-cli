@@ -1,4 +1,29 @@
 extension VendorCharonControlState {
+  func beginPeerGenerationValidation() {
+    guard phase == .starting, validation == nil,
+      let validator = currentValidator
+    else { return }
+    validation = VendorCharonAsyncValidation(operation: validator) { [weak self] accepted in
+      guard let self else { return }
+      self.queue.async { [weak self] in
+        self?.completePeerGenerationValidation(accepted)
+      }
+    }
+  }
+
+  private func completePeerGenerationValidation(
+    _ accepted: Bool
+  ) {
+    guard phase == .starting else { return }
+    validation = nil
+    finishStart(accepted ? .transportAcknowledged : .peerGenerationMismatch)
+  }
+
+  private func cancelPeerGenerationValidation() {
+    validation?.cancel()
+    validation = nil
+  }
+
   func handleSubmission(
     _ submission: VendorXPCSessionSubmission,
     operation: VendorCharonControlOperation
@@ -23,6 +48,7 @@ extension VendorCharonControlState {
     guard phase == .starting else { return }
     timer?.cancel()
     timer = nil
+    cancelPeerGenerationValidation()
     currentValidator = nil
     snapshot = nil
     let acknowledged = outcome == .transportAcknowledged
@@ -54,6 +80,7 @@ extension VendorCharonControlState {
     guard let continuation = stopContinuation else { return }
     timer?.cancel()
     timer = nil
+    cancelPeerGenerationValidation()
     currentValidator = nil
     currentStopAttempt = nil
     let cancelled = retainConnection ? false : cancelDriver()

@@ -31,7 +31,7 @@ final class ProductM2TestTrace: @unchecked Sendable {
     lock.withLock { storedEvents.append(event) }
   }
 
-  func observeGeneration() -> VendorHelperGenerationSnapshot {
+  func observeGeneration() async -> VendorHelperGenerationSnapshot {
     lock.withLock {
       storedEvents.append("observe_generation")
       return storedGeneration
@@ -161,34 +161,34 @@ func productM2TestControl(
     beginStart: { _, validator in
       trace.record("begin_start")
       trace.setGeneration(plan.generationAfterBegin)
-      let validatorAccepted =
-        plan.startOutcome == .transportAcknowledged
-        ? validator() : false
-      let acknowledged =
-        plan.startOutcome == .transportAcknowledged
-        && validatorAccepted
-      let receipt = m2Receipt(
-        acknowledged
-          ? .transportAcknowledged
-          : plan.startOutcome == .transportAcknowledged
-            ? .peerGenerationMismatch : plan.startOutcome,
-        requestSent: plan.startRequestSent
-      )
-      let lease: ProductM2ControlLease? =
-        acknowledged && plan.retainLease
-        ? ProductM2ControlLease {
-          trace.record("stop")
-          return m2Receipt(plan.stopOutcome, requestSent: plan.stopRequestSent)
-        } : nil
       return ProductM2PendingStart {
         trace.record("await_start")
+        let validatorAccepted =
+          plan.startOutcome == .transportAcknowledged
+          ? await validator() : false
+        let acknowledged =
+          plan.startOutcome == .transportAcknowledged
+          && validatorAccepted
+        let receipt = m2Receipt(
+          acknowledged
+            ? .transportAcknowledged
+            : plan.startOutcome == .transportAcknowledged
+              ? .peerGenerationMismatch : plan.startOutcome,
+          requestSent: plan.startRequestSent
+        )
+        let lease: ProductM2ControlLease? =
+          acknowledged && plan.retainLease
+          ? ProductM2ControlLease {
+            trace.record("stop")
+            return m2Receipt(plan.stopOutcome, requestSent: plan.stopRequestSent)
+          } : nil
         return ProductM2StartResult(receipt: receipt, lease: lease)
       }
     },
     emergencyStop: { predicate, validator in
       trace.record("emergency_stop")
-      guard predicate() else { return .unsent(.preflightBlocked) }
-      let accepted = validator()
+      guard await predicate() else { return .unsent(.preflightBlocked) }
+      let accepted = await validator()
       return m2Receipt(
         accepted ? .transportAcknowledged : .peerGenerationMismatch,
         requestSent: accepted

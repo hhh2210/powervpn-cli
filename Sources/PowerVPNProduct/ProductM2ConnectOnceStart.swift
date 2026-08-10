@@ -46,7 +46,7 @@ extension ProductM2ConnectOnceCoordinator {
     execution.startOutcome = start.receipt.outcome
     execution.helperMutationRequested = start.receipt.requestSent
     if start.receipt.transportAcknowledged, start.lease != nil {
-      let postStart = dependencies.observeGeneration()
+      let postStart = await dependencies.observeGeneration()
       if !ProductM2GenerationFence.singleRunningGeneration(
         coldGeneration,
         postStart

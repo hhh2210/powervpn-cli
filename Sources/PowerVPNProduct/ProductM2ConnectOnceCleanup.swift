@@ -80,7 +80,7 @@ package struct ProductM2CleanupRunner: Sendable {
     coldGeneration: VendorHelperGenerationSnapshot,
     stop: ProductM2ControlReceipt
   ) async -> ControlCleanup {
-    let post = dependencies.observeGeneration()
+    let post = await dependencies.observeGeneration()
     if ProductM2GenerationFence.singleExitedGeneration(coldGeneration, post) {
       return ControlCleanup(
         path: .naturalHelperExit,
@@ -103,13 +103,13 @@ package struct ProductM2CleanupRunner: Sendable {
         expectedRunningPredicate: {
           ProductM2GenerationFence.singleRunningGeneration(
             coldGeneration,
-            observe()
+            await observe()
           )
         },
         peerGenerationValidator: {
           ProductM2GenerationFence.validatesReply(
             before: coldGeneration,
-            current: observe()
+            current: await observe()
           )
         }
       )

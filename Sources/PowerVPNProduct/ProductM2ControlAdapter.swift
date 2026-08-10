@@ -103,12 +103,12 @@ package struct ProductM2ControlAdapter: Sendable {
   private let beginOperation:
     @Sendable (
       VendorCharonStartSnapshot,
-      @escaping @Sendable () -> Bool
+      @escaping @Sendable () async -> Bool
     ) -> ProductM2PendingStart
   private let emergencyOperation:
     @Sendable (
-      @escaping @Sendable () -> Bool,
-      @escaping @Sendable () -> Bool
+      @escaping @Sendable () async -> Bool,
+      @escaping @Sendable () async -> Bool
     ) async -> ProductM2ControlReceipt
 
   package init(transport: RawVendorCharonControlTransport) {
@@ -156,12 +156,12 @@ package struct ProductM2ControlAdapter: Sendable {
     beginStart:
       @escaping @Sendable (
         VendorCharonStartSnapshot,
-        @escaping @Sendable () -> Bool
+        @escaping @Sendable () async -> Bool
       ) -> ProductM2PendingStart,
     emergencyStop:
       @escaping @Sendable (
-        @escaping @Sendable () -> Bool,
-        @escaping @Sendable () -> Bool
+        @escaping @Sendable () async -> Bool,
+        @escaping @Sendable () async -> Bool
       ) async -> ProductM2ControlReceipt
   ) {
     beginOperation = beginStart
@@ -170,14 +170,14 @@ package struct ProductM2ControlAdapter: Sendable {
 
   package func beginStart(
     snapshot: VendorCharonStartSnapshot,
-    peerGenerationValidator: @escaping @Sendable () -> Bool
+    peerGenerationValidator: @escaping @Sendable () async -> Bool
   ) -> ProductM2PendingStart {
     beginOperation(snapshot, peerGenerationValidator)
   }
 
   package func emergencyStop(
-    expectedRunningPredicate: @escaping @Sendable () -> Bool,
-    peerGenerationValidator: @escaping @Sendable () -> Bool
+    expectedRunningPredicate: @escaping @Sendable () async -> Bool,
+    peerGenerationValidator: @escaping @Sendable () async -> Bool
   ) async -> ProductM2ControlReceipt {
     await emergencyOperation(expectedRunningPredicate, peerGenerationValidator)
   }
