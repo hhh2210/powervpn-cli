@@ -49,6 +49,7 @@ package struct VendorCharonControlReceipt: Equatable, Sendable {
 
 package struct VendorCharonControlObservation: Equatable, Sendable {
   package let statusEventCount: Int
+  package let latestStatus: VendorCharonStatusSignal?
   package let dispatcherTailEventCount: Int
   package let unexpectedDictionaryEventCount: Int
   package let terminalConnectionOutcome: VendorCharonControlOutcome?

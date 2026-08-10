@@ -66,8 +66,13 @@ import Testing
       ])
 
     let lease = try #require(start.lease)
-    factory.driver.emitConnection(.status)
-    #expect(await waitForControl { lease.observation.statusEventCount == 1 })
+    let connected = VendorCharonStatusSignal(type: 1, phase: 2, state: 5)
+    factory.driver.emitConnection(.status(connected))
+    #expect(
+      await waitForControl {
+        lease.observation.statusEventCount == 1
+          && lease.observation.latestStatus == connected
+      })
 
     let stopTask = Task {
       await lease.stop(

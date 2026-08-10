@@ -2,7 +2,7 @@ import Dispatch
 @preconcurrency import XPC
 
 enum VendorCharonControlConnectionEvent: Equatable, Sendable {
-  case status
+  case status(VendorCharonStatusSignal)
   case emptyDispatcherTail
   case unexpectedDictionary
   case connectionInterrupted
@@ -112,7 +112,13 @@ enum VendorCharonControlWireCodec {
     if type == XPC_TYPE_ERROR { return .unexpectedXPCError }
     guard type == XPC_TYPE_DICTIONARY else { return .unexpectedConnectionEvent }
     if xpc_dictionary_get_count(object) == 0 { return .emptyDispatcherTail }
-    return hasExactStatusShape(object) ? .status : .unexpectedDictionary
+    guard hasExactStatusShape(object) else { return .unexpectedDictionary }
+    return .status(
+      VendorCharonStatusSignal(
+        type: xpc_dictionary_get_int64(object, "type"),
+        phase: xpc_dictionary_get_int64(object, "phase"),
+        state: xpc_dictionary_get_int64(object, "state")
+      ))
   }
 
   static func replyEvent(

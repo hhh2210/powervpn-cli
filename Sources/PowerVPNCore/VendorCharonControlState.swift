@@ -30,6 +30,7 @@ final class VendorCharonControlState: @unchecked Sendable {
   var requestSent = false
   var emptyReplyObserved = false
   var statusEvents = 0
+  var latestStatus: VendorCharonStatusSignal?
   var dispatcherTailEvents = 0
   var unexpectedDictionaryEvents = 0
   var terminalConnectionOutcome: VendorCharonControlOutcome?
@@ -47,6 +48,7 @@ final class VendorCharonControlState: @unchecked Sendable {
     observationLock.withLock {
       VendorCharonControlObservation(
         statusEventCount: statusEvents,
+        latestStatus: latestStatus,
         dispatcherTailEventCount: dispatcherTailEvents,
         unexpectedDictionaryEventCount: unexpectedDictionaryEvents,
         terminalConnectionOutcome: terminalConnectionOutcome
@@ -250,9 +252,10 @@ final class VendorCharonControlState: @unchecked Sendable {
 
   private func handle(_ event: VendorCharonControlConnectionEvent) {
     switch event {
-    case .status:
+    case .status(let signal):
       updateObservation {
         if statusEvents < Int.max { statusEvents += 1 }
+        latestStatus = signal
       }
     case .emptyDispatcherTail:
       updateObservation {
