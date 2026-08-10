@@ -42,7 +42,8 @@ for file in $changed_files; do
 		Tests/PowerVPNPortalTests/CurlPasswordPortalTransportTests.swift | \
 		Tests/PowerVPNPortalTests/LeadSecPortalTransportTests.swift | \
 		Tests/PowerVPNPortalTests/PortalRequestFactoryTests.swift | \
-		scripts/lib/r2_portal_runtime.sh | scripts/verify/checkpoint_r2.sh | \
+		scripts/lib/r2_portal_runtime.sh | scripts/run_r2_portal_login.sh | \
+		scripts/verify/r2_live_harness_tests.sh | scripts/verify/checkpoint_r2.sh | \
 		scripts/verify/checkpoint_r2_raw_headers.sh | scripts/verify_checkpoint.sh)
 		;;
 	*)

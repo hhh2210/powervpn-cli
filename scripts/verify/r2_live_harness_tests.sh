@@ -43,6 +43,8 @@ shellcheck -x "$harness" "$runtime" "$0"
 grep -Fq 'R2_CLI="$R2_REPO_ROOT/.build/debug/powervpn"' "$runtime"
 grep -Fq 'R2_PORTAL_ENDPOINT=166.111.143.19:4443' "$runtime"
 grep -Fq 'POWERVPN_R2_APPROVED_MANIFEST_SHA256' "$harness"
+grep -Fq 'POWERVPN_R2_EXPOSED_CREDENTIAL_RISK_ACCEPTED' "$harness"
+grep -Fq 'reviewed-nonsecret-exposed-credential-risk-accepted-v1' "$runtime"
 grep -Fq 'r2_candidate_manifest_exact' "$runtime"
 grep -Fq '"$R2_CLI" login </dev/null >"$fifo" 2>/dev/tty' "$harness"
 grep -Fq 'exec /usr/bin/env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin' "$harness"
@@ -87,7 +89,7 @@ assert_system_unchanged
 scratch_before=$(scratch_identity)
 set +e
 env -u POWERVPN_R2_APPROVED_MANIFEST_SHA256 \
-	-u POWERVPN_R2_ROTATED_CREDENTIAL_CONFIRMATION "$harness" >/dev/null 2>&1
+	-u POWERVPN_R2_EXPOSED_CREDENTIAL_RISK_ACCEPTED "$harness" >/dev/null 2>&1
 default_live_rc=$?
 set -e
 if [ "$expected_review" = true ]; then
@@ -97,6 +99,19 @@ else
 fi
 [ "$(scratch_identity)" = "$scratch_before" ]
 assert_system_unchanged
+
+if [ "$expected_review" = true ]; then
+	scratch_before=$(scratch_identity)
+	set +e
+	env -u POWERVPN_R2_EXPOSED_CREDENTIAL_RISK_ACCEPTED \
+		POWERVPN_R2_APPROVED_MANIFEST_SHA256="$manifest_sha" \
+		"$harness" >/dev/null 2>&1
+	missing_risk_rc=$?
+	set -e
+	[ "$missing_risk_rc" -eq 5 ]
+	[ "$(scratch_identity)" = "$scratch_before" ]
+	assert_system_unchanged
+fi
 
 valid_fixture='p123
 f10

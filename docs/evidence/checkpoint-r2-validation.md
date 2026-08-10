@@ -121,12 +121,12 @@ Any future live harness would require all of these before a request could leave
 the machine:
 
 - reviewed candidate manifest SHA-256
-  `00411979105d9023916af3eef5bda0f3886231a5ad74714c0e47d5197bf9e084`
+  `bde4de003e1c5bd2128f5e4b147f05ae3149f2b639126e783585bfb6a1b6302b`
   and a fresh authorization bound to that exact hash;
 - exact manifest-bound network snapshot script;
 - PowerVPN GUI, all vendor helpers and native charon absent;
 - exact inactive launchd generation;
-- a new-password rotation confirmation;
+- explicit non-secret exposed-credential risk acceptance;
 - direct controlling TTY;
 - before/after network-state equality.
 
@@ -135,12 +135,15 @@ UDP descriptor, helper/native-charon process, other remote TCP endpoint,
 route/DNS/interface/utun drift, invalid report, or cleanup residue fails the
 checkpoint.
 
-One password was pasted into the Codex task text during R2 development. It is
-treated as compromised, was not used by code or tests, and remains forbidden
-from every future live window. The next action is for the user to rotate it
-outside PowerVPN. After rotation, a fresh explicit approval must bind the exact
-manifest hash above. The new username/password may be entered only through the
-no-echo controlling TTY; credentials must never be sent through chat.
+One password was pasted into the Codex task text during R2 development. It was
+not used by code or tests. The user states that it cannot be rotated and has
+explicitly accepted the risk of continuing with the same credential. Chat/task
+text remains an invalid runtime source: the value must never be read or copied
+from it. A live window requires fresh approval bound to the exact manifest and
+the non-secret risk-acceptance gate; the user must personally re-enter the
+credential through the no-echo controlling TTY. The retained schema records
+`credentialPath.exposedCredentialRiskAccepted=true` and makes no rotation
+claim.
 
 ## Integrated review closure and offline acceptance
 
@@ -160,11 +163,11 @@ classification is limited to peer/issuer verification while handshake and
 cipher failures are `unavailable`. No second raw-header review ran.
 
 The fixed cumulative candidate is bound by reviewed manifest SHA-256
-`00411979105d9023916af3eef5bda0f3886231a5ad74714c0e47d5197bf9e084`
+`bde4de003e1c5bd2128f5e4b147f05ae3149f2b639126e783585bfb6a1b6302b`
 and runtime source aggregate SHA-256
 `83c590c8ebb3c15b8e32d125bfbdef6c4b39aabd94ca9235c35aef140b67eee2`.
 The same manifest binds runtime-library SHA-256
-`d6c3f1696e18beac31ffd425e177febce5ec523a0f6a05c2f8bf6c9e8cf56152`
+`b57c969c986f46c58913c5e5d27bace5131771ff9e343c111e86389d97a12047`
 and raw-header-test aggregate SHA-256
 `a6d98b928a9c0a63ded37b7b60120e9483fabddf8dea6a895a160276a4acab05`.
 Its full offline verifier passed 120 Portal tests in 19 suites and 109 Core tests
@@ -179,6 +182,11 @@ VICI, IKE, UDP, route, policy, SA or utun action occurred. Server compatibility
 and the R2 live workflow remain **NOT TESTED**; R2 is **HARD NO-GO** for live
 login and the Goal remains active.
 
-Next: the user rotates the compromised password outside PowerVPN, then provides
-fresh approval bound to the exact manifest. Only the no-echo controlling TTY
-may receive the new credentials; they must never be sent through chat.
+The synthetic missing-risk case exits with status 5 before creating live
+evidence or changing system state; scratch identity and network/process state
+remain unchanged, proving zero residue at that gate.
+
+Next: provide fresh approval bound to the exact manifest and the non-secret
+exposed-credential risk acceptance. Only the no-echo controlling TTY may
+receive the user-reentered credential; it must never be read or copied from
+chat.

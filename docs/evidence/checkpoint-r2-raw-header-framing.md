@@ -143,21 +143,23 @@ interaction or credential read occurred. Therefore:
 - credential use in the offline evidence: **none**.
 
 The raw-header implementation is incorporated into reviewed manifest SHA-256
-`00411979105d9023916af3eef5bda0f3886231a5ad74714c0e47d5197bf9e084`,
+`bde4de003e1c5bd2128f5e4b147f05ae3149f2b639126e783585bfb6a1b6302b`,
 which binds runtime source aggregate SHA-256
 `83c590c8ebb3c15b8e32d125bfbdef6c4b39aabd94ca9235c35aef140b67eee2`.
 The manifest independently binds the raw-header test-source aggregate as
 SHA-256
 `a6d98b928a9c0a63ded37b7b60120e9483fabddf8dea6a895a160276a4acab05`
 and the runtime library as SHA-256
-`d6c3f1696e18beac31ffd425e177febce5ec523a0f6a05c2f8bf6c9e8cf56152`.
+`b57c969c986f46c58913c5e5d27bace5131771ff9e343c111e86389d97a12047`.
 The full offline R2 verifier passes with 120 Portal tests in 19 suites and 109
 Core tests in 10 suites (229 tests in 29 suites), including 16 raw Swift cases
 across 3 suites and the separate Foundation fail-closed regression; the direct
 C gates pass 11 parser and 5 status cases.
 
-Next: the user rotates the exposed password outside PowerVPN, then provides
-fresh approval bound to the exact manifest before any R2B window. New
-credentials may be entered only through the no-echo controlling TTY, never
-chat. Do not interpret the raw-header or full offline PASS as live/server/TLS
-compatibility evidence.
+Next: obtain fresh approval bound to the exact manifest and its non-secret
+exposed-credential risk acceptance before any R2B window. The user must
+personally re-enter the credential through the no-echo controlling TTY; it must
+never be read or copied from chat. Evidence records
+`exposedCredentialRiskAccepted=true` and does not claim rotation. Do not
+interpret the raw-header or full offline PASS as live/server/TLS compatibility
+evidence.

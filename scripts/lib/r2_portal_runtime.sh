@@ -9,7 +9,7 @@ R2_MANIFEST="$R2_REPO_ROOT/fixtures/redacted/r2-reviewed-candidate-manifest-v1.j
 R2_SCRATCH_ROOT="$HOME/scratch-data/powervpn-r2"
 R2_PORTAL_ENDPOINT=166.111.143.19:4443
 R2_EXPECTED_LAUNCHD_RUNS=19
-R2_CONFIRMATION_TOKEN=reviewed-nonsecret-rotated-credential-confirmation-v1
+R2_EXPOSED_CREDENTIAL_RISK_TOKEN=reviewed-nonsecret-exposed-credential-risk-accepted-v1
 R2_CP7A_CHARON="$HOME/scratch-data/powervpn-strongswan/install-6.0.7-cp7a-arm64/libexec/ipsec/charon"
 R2_CP7B_CHARON="$HOME/scratch-data/powervpn-strongswan/runtime-6.0.7-cp7b/closure/libexec/ipsec/charon"
 

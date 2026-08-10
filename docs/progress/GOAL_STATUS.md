@@ -677,10 +677,11 @@ LeadSec profile, fresh isolated Cookie handling, resource fetch, exact
 logout. `powervpn login` rejects every option/extra argument before constructing
 the runtime and emits only a closed value-free JSON report.
 
-User input required next: rotate the exposed password outside PowerVPN. After
-rotation, provide fresh approval bound to the exact reviewed manifest. Do not
-send either credential through chat; the new username/password may be entered
-only through the no-echo controlling TTY after approval.
+User input required next: fresh approval bound to the exact reviewed manifest
+and its non-secret exposed-credential risk acceptance. The user states that
+rotation is impossible and has accepted continued use of the same credential.
+The value must never be read or copied from chat; the user must personally
+re-enter it through the no-echo controlling TTY after approval.
 
 Derived automatically: current origin/version/address-selection/language state,
 raw platform serial, Cookie/session state, operation timing and logout. The
@@ -690,11 +691,11 @@ queried and no database passphrase was retained.
 
 Evidence: `docs/evidence/checkpoint-r2-validation.md`; the corrected CP5
 password-field fixture; reviewed manifest SHA-256
-`00411979105d9023916af3eef5bda0f3886231a5ad74714c0e47d5197bf9e084`;
+`bde4de003e1c5bd2128f5e4b147f05ae3149f2b639126e783585bfb6a1b6302b`;
 and runtime source aggregate SHA-256
 `83c590c8ebb3c15b8e32d125bfbdef6c4b39aabd94ca9235c35aef140b67eee2`.
 The manifest also binds runtime-library SHA-256
-`d6c3f1696e18beac31ffd425e177febce5ec523a0f6a05c2f8bf6c9e8cf56152`
+`b57c969c986f46c58913c5e5d27bace5131771ff9e343c111e86389d97a12047`
 and raw-header-test aggregate SHA-256
 `a6d98b928a9c0a63ded37b7b60120e9483fabddf8dea6a895a160276a4acab05`.
 The live value-free fixture does not exist because R2B has not run.
@@ -705,7 +706,9 @@ CP5 password-profile test, arm64 build, strict Swift formatting, shell syntax
 and ShellCheck, closed-schema bounded signal-cleanup harness tests, secret scan,
 exact manifest and diff checks. Raw sub-gates passed 11 C parser cases, 5 C
 status cases, 16 Swift cases in 3 suites and the separate Foundation fail-closed
-regression. This does not claim an R2 live/server/TLS acceptance run.
+regression. The synthetic missing-risk case exits 5 before live evidence or
+system change and leaves scratch/network/process state unchanged with zero
+residue. This does not claim an R2 live/server/TLS acceptance run.
 
 Safety/cleanup: the synthetic production path failed closed before
 `session.open`; no real credential, portal connection, PowerVPN GUI, helper,
@@ -725,7 +728,8 @@ Offline remaining: none. The reviewed cumulative R2 manifest is resealed and
 the full offline verifier passes. Foundation's projected Set-Cookie value
 remains fail closed, and the reviewed raw-header seam remains implementation
 evidence rather than server acceptance. Live R2B remains hard NO-GO / not
-tested until external password rotation and fresh manifest-bound approval.
+tested until fresh exact-manifest approval includes the non-secret
+exposed-credential risk acceptance.
 
 Raw-header subcheckpoint status: **OFFLINE PASS — INTEGRATED REVIEW COMPLETE;
 FINDINGS APPLIED.** Its synthetic-only acceptance matrix and architecture
@@ -745,14 +749,15 @@ handshake and cipher failures are `unavailable`. No second review ran. No
 successful TLS transfer, portal/server interaction, credential read or
 server-compatibility claim occurred; R2 remains hard NO-GO.
 
-Next action: the user rotates the exposed password outside PowerVPN. Then a
-fresh explicit approval must bind manifest SHA-256
-`00411979105d9023916af3eef5bda0f3886231a5ad74714c0e47d5197bf9e084`
-before one R2B window. Do not run `powervpn login` before that approval.
+Next action: fresh explicit approval must bind manifest SHA-256
+`bde4de003e1c5bd2128f5e4b147f05ae3149f2b639126e783585bfb6a1b6302b`
+and non-secret exposed-credential risk acceptance before one R2B window. Do not
+run `powervpn login` before that approval.
 
-Approval required: **yes, fresh and manifest-bound, after rotation**. The new
-username/password must be entered only through the no-echo controlling TTY;
-the old password and all chat/task text are invalid credential sources.
+Approval required: **yes, fresh, exact-manifest-bound and risk-accepting**.
+The user must personally re-enter the credential only through the no-echo
+controlling TTY; chat/task text is an invalid credential source. Evidence must
+record `exposedCredentialRiskAccepted=true` and must not claim rotation.
 
 Canonical commit: pending successful live evidence and final checkpoint
 validation.

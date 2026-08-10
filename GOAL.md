@@ -9,7 +9,7 @@ supersedes_for_active_execution: Native Goal V3
 native_v3_role: frozen fallback
 native_fallback_baseline_commit: 8d2e026c1f5db15f5b1e1e0ca81c72d2ae5f2073
 current_checkpoint: R2-username-password-portal-login
-immediate_next: external-password-rotation-then-fresh-manifest-bound-r2b-approval
+immediate_next: fresh-exact-manifest-r2b-risk-acceptance-approval
 user_input_contract: username-and-password-only
 review_policy: one integrated review per checkpoint
 ---
@@ -296,11 +296,11 @@ credentials, portal traffic, and any weakening of the existing Foundation
 fail-closed path are outside the subcheckpoint.
 
 The cumulative R2 reviewed manifest has been resealed as SHA-256
-`00411979105d9023916af3eef5bda0f3886231a5ad74714c0e47d5197bf9e084`,
+`bde4de003e1c5bd2128f5e4b147f05ae3149f2b639126e783585bfb6a1b6302b`,
 binding runtime source aggregate SHA-256
 `83c590c8ebb3c15b8e32d125bfbdef6c4b39aabd94ca9235c35aef140b67eee2`.
 It also binds runtime-library SHA-256
-`d6c3f1696e18beac31ffd425e177febce5ec523a0f6a05c2f8bf6c9e8cf56152`
+`b57c969c986f46c58913c5e5d27bace5131771ff9e343c111e86389d97a12047`
 and raw-header-test aggregate SHA-256
 `a6d98b928a9c0a63ded37b7b60120e9483fabddf8dea6a895a160276a4acab05`.
 The full offline R2 verifier passes. This closes the offline implementation
@@ -323,14 +323,18 @@ helper tunnel.
 PASS only if the user enters no other material and no secret is persisted or
 printed.
 
-One password was exposed in the Codex task text during R2 implementation. It
-is compromised and MUST NOT be used for any future live run. The next action is
-for the user to rotate that password outside PowerVPN. After rotation, any R2B
-window requires a fresh explicit approval bound to manifest SHA-256
-`00411979105d9023916af3eef5bda0f3886231a5ad74714c0e47d5197bf9e084`.
-Only then may the new username/password be entered through the no-echo
-controlling TTY; neither the old nor new credential may appear in chat, Goal
-text, argv, environment, files, fixtures, logs or retained evidence.
+One password was exposed in the Codex task text during R2 implementation. The
+user has stated that it cannot be rotated and has explicitly accepted the risk
+of continuing with the same credential. Chat/task text is never an approved
+credential source: the implementation must not read or copy the exposed value.
+Any R2B window still requires fresh explicit approval bound to manifest
+SHA-256
+`bde4de003e1c5bd2128f5e4b147f05ae3149f2b639126e783585bfb6a1b6302b`
+and the non-secret exposed-credential risk-acceptance gate. The user must then
+personally re-enter the credential through the no-echo controlling TTY. The
+evidence records `exposedCredentialRiskAccepted=true`; it does not claim that
+the credential was rotated. No credential may appear in chat, Goal text, argv,
+environment, files, fixtures, logs or retained evidence.
 
 ### R3 — Portal response to vendor XPC snapshot
 

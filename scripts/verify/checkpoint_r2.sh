@@ -175,7 +175,7 @@ if [ -f "$runtime_fixture" ]; then
     .monitor.nativeCharonObserved == false and .networkStable == true and
     .launchd.inactiveAndRunsStable == true and .cleanupSafe == true and
     .credentialPath == {argumentUsed:false,directControllingTTY:true,
-      environmentUsed:false,fileUsed:false,rotatedCredentialConfirmed:true,
+      environmentUsed:false,exposedCredentialRiskAccepted:true,fileUsed:false,
       stdinUsed:false} and
     .containsSecrets == false and .containsRawPortal == false
   ' "$runtime_fixture" >/dev/null

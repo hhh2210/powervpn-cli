@@ -63,8 +63,8 @@ if [ "$mode" = live ]; then
 		echo 'error: reviewed R2 candidate manifest approval is absent or stale' >&2
 		exit 4
 	}
-	[ "${POWERVPN_R2_ROTATED_CREDENTIAL_CONFIRMATION:-}" = "$R2_CONFIRMATION_TOKEN" ] || {
-		echo 'error: reviewed rotated-credential confirmation is absent' >&2
+	[ "${POWERVPN_R2_EXPOSED_CREDENTIAL_RISK_ACCEPTED:-}" = "$R2_EXPOSED_CREDENTIAL_RISK_TOKEN" ] || {
+		echo 'error: explicit exposed-credential risk acceptance is absent' >&2
 		exit 5
 	}
 	(: </dev/tty >/dev/tty) 2>/dev/null || {
@@ -262,7 +262,7 @@ jq -n --argjson pass "$checkpoint" --argjson cliRC "$cli_rc" \
 	--argjson network "$network_stable" --argjson launchd "$launchd_stable" \
 	--argjson runsBefore "$launchd_runs_before" --argjson runsAfter "$launchd_runs_after" \
 	--argjson artifact "$artifact_stable" --argjson cleanup "$cleanup_safe" \
-	'{schemaVersion:1,evidenceClass:"r2_portal_login_live_window",candidateManifestSHA256:$manifest,manifestExact:true,checkpointPass:$pass,complete:true,cliExitStatus:$cliRC,cliReportExact:$reportValid,cliReport:$report,monitorExact:$monitorValid,monitor:$monitor,networkStable:$network,launchd:{inactiveAndRunsStable:$launchd,runsBefore:$runsBefore,runsAfter:$runsAfter},artifactIdentityStable:$artifact,cleanupSafe:$cleanup,credentialPath:{directControllingTTY:true,stdinUsed:false,argumentUsed:false,environmentUsed:false,fileUsed:false,rotatedCredentialConfirmed:true},harnessKillSent:false,containsSecrets:false,containsRawPortal:false}' >"$result"
+	'{schemaVersion:1,evidenceClass:"r2_portal_login_live_window",candidateManifestSHA256:$manifest,manifestExact:true,checkpointPass:$pass,complete:true,cliExitStatus:$cliRC,cliReportExact:$reportValid,cliReport:$report,monitorExact:$monitorValid,monitor:$monitor,networkStable:$network,launchd:{inactiveAndRunsStable:$launchd,runsBefore:$runsBefore,runsAfter:$runsAfter},artifactIdentityStable:$artifact,cleanupSafe:$cleanup,credentialPath:{directControllingTTY:true,stdinUsed:false,argumentUsed:false,environmentUsed:false,fileUsed:false,exposedCredentialRiskAccepted:true},harnessKillSent:false,containsSecrets:false,containsRawPortal:false}' >"$result"
 chmod 600 "$result"
 trap - EXIT HUP INT TERM
 cleanup_runtime

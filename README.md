@@ -42,19 +42,22 @@ upstream strongSwan 6.0.7.
   occurred, so this is implementation evidence, not server compatibility or
   authorization to contact the portal. The reviewed R2 candidate is now
   resealed by manifest SHA-256
-  `00411979105d9023916af3eef5bda0f3886231a5ad74714c0e47d5197bf9e084`
+  `bde4de003e1c5bd2128f5e4b147f05ae3149f2b639126e783585bfb6a1b6302b`
   and runtime source aggregate SHA-256
   `83c590c8ebb3c15b8e32d125bfbdef6c4b39aabd94ca9235c35aef140b67eee2`.
   The manifest separately binds runtime-library SHA-256
-  `d6c3f1696e18beac31ffd425e177febce5ec523a0f6a05c2f8bf6c9e8cf56152`
+  `b57c969c986f46c58913c5e5d27bace5131771ff9e343c111e86389d97a12047`
   and raw-header-test aggregate SHA-256
   `a6d98b928a9c0a63ded37b7b60120e9483fabddf8dea6a895a160276a4acab05`.
   Its full offline verifier passes with 120 Portal tests in 19 suites and 109
   Core tests in 10 suites (229 tests in 29 suites), plus the direct raw C
   parser/status gates. R2 live login remains **HARD NO-GO / NOT TESTED**. The
-  next action is external rotation of the password exposed in task text,
-  followed by fresh approval bound to the exact manifest. New credentials may
-  be entered only through the no-echo controlling TTY, never chat. The frozen
+  exposed credential cannot be rotated; the user has explicitly accepted that
+  risk. A live window still requires fresh exact-manifest approval plus the
+  non-secret exposed-credential risk-acceptance gate. The credential must be
+  personally re-entered through the no-echo controlling TTY, never read or
+  copied from chat. The evidence records
+  `exposedCredentialRiskAccepted=true` and makes no rotation claim. The frozen
   raw-header contract is documented in
   `docs/evidence/checkpoint-r2-raw-header-framing.md`.
 
@@ -202,10 +205,10 @@ the raw command, for checkpoint evidence.
 `powervpn login` accepts no options or positional material and emits only a
 closed value-free JSON report. Do not run it directly for checkpoint evidence.
 The R2 harness requires exact manifest SHA-256
-`00411979105d9023916af3eef5bda0f3886231a5ad74714c0e47d5197bf9e084`,
-a separate external password-rotation confirmation, fresh manifest-bound
-approval and a direct no-echo controlling TTY. Only the TTY may receive the new
-credentials; they must never be sent through chat. The authorized harness then
+`bde4de003e1c5bd2128f5e4b147f05ae3149f2b639126e783585bfb6a1b6302b`,
+fresh manifest-bound approval, explicit non-secret exposed-credential risk
+acceptance and a direct no-echo controlling TTY. Only the TTY may receive the
+credential; it must never be read or copied from chat. The authorized harness then
 permits TCP only to the sealed portal while rejecting all helper, native-charon
 and UDP activity.
 
@@ -251,8 +254,10 @@ library targets, `PowerVPNCore` and `PowerVPNPortal`.
 
 - No credential, session ID, PSK, cookie, raw log, or raw packet capture may be
   committed or printed by the CLI.
-- A credential pasted into chat or task text is considered compromised. It is
-  never an approved runtime source and must be rotated before live use.
+- A credential pasted into chat or task text is exposed and is never an
+  approved runtime source. If rotation is impossible, live reuse requires
+  explicit manifest-bound risk acceptance and personal re-entry through the
+  no-echo controlling TTY; evidence must not claim it was rotated.
 - Raw evidence belongs under a mode-700 directory in `~/scratch-data`, not in
   this repository.
 - `/Applications/PowerVPN.app`, its helpers, and code signature are never
