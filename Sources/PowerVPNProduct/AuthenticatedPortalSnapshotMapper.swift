@@ -15,29 +15,18 @@ enum AuthenticatedPortalSnapshotMappingError: Error, Equatable, Sendable {
 /// `common.sessionid` comes from `TUNNEL.IKE.CLIENT.id`; the Portal cookie is
 /// deliberately inaccessible here. Every returned candidate belongs to one
 /// `NC_RESOURCE` and sibling resources are never unioned.
-enum AuthenticatedPortalSnapshotMapper {
+package enum AuthenticatedPortalSnapshotMapper {
   static func map(
     _ snapshot: AuthenticatedPortalSnapshot
   ) throws -> [ProductResourceCandidate] {
-    try snapshot.withPortalContext { context in
-      try context.withMajorVersionBytes { majorBytes in
-        let majorVersion = try PortalSP2Value.strictInt32(
-          majorBytes,
-          path: "common.majorVersion"
+    try withAuthenticatedPortalSP2MappingScope(snapshot) { gateway, majorVersion, resources in
+      try resources.enumerated().map { index, resource in
+        try AuthenticatedPortalSP2Mapper.candidate(
+          resource,
+          handle: authenticatedPortalResourceHandle(snapshot, index: index),
+          majorVersion: majorVersion,
+          gateway: gateway
         )
-        return try snapshot.withResourceTree { resourceList in
-          try resourceList.childElements
-            .filter { $0.name == AuthenticatedPortalResourceCategory.networkConnect.rawValue }
-            .enumerated()
-            .map { index, resource in
-              try AuthenticatedPortalSP2Mapper.candidate(
-                resource,
-                handle:
-                  "portal:\(snapshot.selectionGenerationID.uuidString.lowercased()):nc:\(index)",
-                majorVersion: majorVersion
-              )
-            }
-        }
       }
     }
   }

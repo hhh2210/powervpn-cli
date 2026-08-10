@@ -13,7 +13,7 @@ import Testing
       AuthenticatedPortalSnapshotMapper.map(fixture.snapshot).first
     )
     let available: [VendorCharonStartField] = [
-      .sessionID, .vip, .ikePort, .majorVersion, .ike, .esp, .psk,
+      .sessionID, .vip, .gateway, .ikePort, .majorVersion, .ike, .esp, .psk,
       .ikeLifetime, .ipsecLifetime, .authority, .status, .tunnelName,
       .family, .resourceFlag, .name, .routes, .mapID, .negotiateMode,
       .routeNetwork, .routePrefix,
@@ -21,7 +21,9 @@ import Testing
     for field in available {
       #expect(availability(of: field, in: candidate) == .available)
     }
-    #expect(availability(of: .gateway, in: candidate) == .missingRequired)
+    #expect(candidate.snapshotComplete)
+    #expect(candidate.firstMissingField == nil)
+    #expect(sources(of: .gateway, in: candidate) == [.authenticatedPortalOrigin])
     #expect(sources(of: .majorVersion, in: candidate) == [.authenticatedPortalMetadata])
     #expect(sources(of: .resourceFlag, in: candidate) == [.generatedConstant])
     #expect(sources(of: .routes, in: candidate) == [.generatedContainer])
@@ -113,7 +115,7 @@ import Testing
     }
   }
 
-  @Test func unsupportedHyphenRangeLeavesWholeRoutesMissing() throws {
+  @Test func supportedHyphenRangeProducesMaterializedRoutes() throws {
     let fixture = try authenticatedSnapshot(
       resourceXML: tunnelXML(
         extensions: """
@@ -126,7 +128,9 @@ import Testing
 
     #expect(availability(of: .resourceFlag, in: candidate) == .available)
     #expect(sources(of: .resourceFlag, in: candidate) == [.authenticatedPortalResource])
-    #expect(availability(of: .routes, in: candidate) == .missingRequired)
+    #expect(availability(of: .routes, in: candidate) == .available)
+    #expect(availability(of: .routeNetwork, in: candidate) == .available)
+    #expect(availability(of: .routePrefix, in: candidate) == .available)
   }
 }
 

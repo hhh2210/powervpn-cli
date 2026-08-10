@@ -1008,14 +1008,36 @@ nodes and never unions sibling resources.
 The same-resource SP2 mapper now promotes the proven session ID, VIP, IKE port,
 major version, IKE/ESP proposals, PSK and lifetimes; tunnel status/name and
 direct-or-vendor-default authority/family; route flag/name, map ID and negotiate
-mode; direct IPv4/CIDR routes; and the exact empty-route shape. A hyphenated
-range leaves the whole routes field missing rather than emitting a partial
-candidate. Core also has a scoped exact XPC encoder for a complete snapshot: it
-constructs only the in-memory `start_connection` object, permits the proven
-empty `tunnels[].name`, creates no XPC connection and sends nothing. CLI parsing
-continues to accept only the four exact M1 argument sequences, and
-`doctor=ready` still additionally requires GUI absence, observable helper
-generation, safe preflight and current direct-XPC reachability.
+mode; direct IPv4/CIDR routes; and the exact empty-route shape. Ascending IPv4
+ranges are converted to an ordered minimal CIDR cover. Malformed and reversed
+ranges make the whole tunnel routes field missing; rejecting reversed endpoints
+is an intentional safe divergence from the vendor loop rather than a claim of
+byte-for-byte behavior.
+
+Gateway provenance is now statically closed for the sealed current-machine
+profile: the selected `VSGAddressModel` address flows through `VSGService` and
+its `vpnAddress`, numeric-IPv4 `getaddrinfo` preserves that address identity,
+and the SP2 builder consumes it as `common.gateway`. Runtime admits only the
+sealed literal IPv4. A hostname, IPv6 address or different IPv4 literal fails
+closed instead of being treated as an equivalent gateway.
+
+Product's package-scoped `withValidatedStartSnapshot` constructs and consumes
+the Core snapshot inside the same context/resource borrow. A complete synthetic
+candidate can call the exact in-memory encoder inside that body; retaining the
+snapshot past the body leaves its borrowed material unavailable and encoding
+fails. The encoder permits the proven empty `tunnels[].name` and itself creates
+no connection or send.
+
+Core also contains a bounded control seam: synchronous `beginStart` submits
+while the borrow is valid, returns a single-consumption pending result, and an
+acknowledged start retains that same connection behind a lease for exact
+`stop_connection`. Timeout, cancellation, peer-generation mismatch and
+unexpected payloads fail closed. An exact empty acknowledgement establishes
+only `transportAcknowledged`; `helperSuccessEstablished` is always false and no
+connected/tunnel state is inferred. CLI parsing continues to accept only the
+four exact M1 argument sequences, and `doctor=ready` still additionally requires
+GUI absence, observable helper generation, safe preflight and current
+direct-XPC reachability.
 
 Live result: all four M1 observation commands ran locally. No live action,
 network request, TTY input, direct XPC probe, helper launch, login, SSH probe,
@@ -1023,16 +1045,20 @@ network request, TTY input, direct XPC probe, helper launch, login, SSH probe,
 and `helper status` returned completed degraded state; `resources` and
 `snapshot --dry-run` returned the expected unavailable-provider result.
 
+This third offline slice itself used only synthetic documents and drivers. It
+did not rerun a portal request, open a real XPC connection, contact the helper,
+read a TTY credential or perform any live/network action.
+
 Current blocker: the default commands have no authenticated snapshot provider,
-so their first missing field remains `common.sessionid`. In the offline
-authenticated synthetic path, Product derives that field only from
-`NC_RESOURCE.TUNNEL.IKE.CLIENT.id` in the same resource generation; the Portal
-`VSG_SESSIONID` cookie is neither exposed nor used as helper material. That
-dry-run now maps the other proven SP2 fields above and still advances to the
-next exact missing field, `common.gateway`. The installed GUI supplies the
-builder with resolved `VSGResourceRule.vpnAddress`; the resource-request URL
-host is not an exact substitute, so no complete vendor snapshot can yet be
-constructed. M1 is blocked on this product mapping and the Goal remains ACTIVE.
+so their first missing field remains `common.sessionid` and production still
+has no selectable resource snapshot. In the offline authenticated synthetic
+path, Product derives that field only from `NC_RESOURCE.TUNNEL.IKE.CLIENT.id`
+in the same resource generation; the Portal `VSG_SESSIONID` cookie is neither
+exposed nor used as helper material. With the sealed gateway provenance above,
+that synthetic M1 path now produces a materially complete snapshot and encodes
+it only inside the active borrow. This is offline implementation completeness,
+not a login, helper acceptance, tunnel connection or production readiness
+claim. The Goal remains ACTIVE.
 
 Cleanup status: no helper process was started, launchd remained inactive, and
 the commands wrote no runtime artifact or secret-bearing file.
@@ -1040,12 +1066,11 @@ the commands wrote no runtime artifact or secret-bearing file.
 Deferred debt: remaining R2 TLS evidence findings are frozen in
 `docs/debt/R2_TLS_EVIDENCE_BACKLOG.md`; they are not M1 product gates.
 
-Next end-to-end action: extend the same-resource Portal-to-Core mapper only for
-newly proven raw sources, beginning with `common.gateway`, until Core returns
-one complete in-memory snapshot. If the owned response cannot prove those
-sources, use one explicitly approved `onboardingMode=vendor_once` observation
-instead of guessing. Do not send a server request or start a helper until that
-action is separately approved.
+Next end-to-end action: implement the Product M2 coordinator and CLI around the
+scoped snapshot plus bounded start/lease/stop contracts. Keep synthetic drivers
+as the default verification lane. Do not send a portal request, create a real
+XPC connection or start a helper until a fresh explicit approval is bound to
+that first live action.
 
 Approval required: yes, immediately before any official-GUI onboarding,
 portal request, direct XPC probe, `start_connection`, SSH proof, or network

@@ -160,9 +160,17 @@ struct PortalRequestFactory: Sendable {
     else {
       throw LeadSecPortalCookieJarError.generationMismatch
     }
+    guard Self.isExactOrigin(profile.origin),
+      let host = profile.origin.host,
+      host == "166.111.143.19"
+    else {
+      throw PortalRequestFactoryError.invalidProfile
+    }
+    let vendorGateway = try SecureBytes(copying: Array(host.utf8))
     return try AuthenticatedPortalSnapshot(
       resourceDocument: resourceDocument,
-      authenticationGeneration: requestGeneration
+      authenticationGeneration: requestGeneration,
+      vendorGateway: vendorGateway
     )
   }
 

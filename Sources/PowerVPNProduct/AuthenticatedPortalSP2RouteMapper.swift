@@ -59,11 +59,11 @@ enum AuthenticatedPortalSP2RouteMapper {
       if routes.count == 1 { sourceElements.append(routes[0]) }
     }
 
-    var routes: [VendorCharonStartRouteCandidate] = []
+    var outputRoutes: [VendorCharonStartRouteCandidate] = []
     for element in sourceElements {
       guard
         let address = try PortalSP2Tree.attribute(named: "addr", of: element),
-        let route = try directRoute(address, lineage: lineage)
+        let mappedRoutes = try mapAddress(address, lineage: lineage)
       else {
         return PortalSP2RouteMapping(
           resourceFlag: resourceFlag,
@@ -71,12 +71,12 @@ enum AuthenticatedPortalSP2RouteMapper {
           routes: nil
         )
       }
-      routes.append(route)
+      outputRoutes.append(contentsOf: mappedRoutes)
     }
     return PortalSP2RouteMapping(
       resourceFlag: resourceFlag,
       name: name,
-      routes: routes
+      routes: outputRoutes
     )
   }
 
@@ -100,25 +100,35 @@ enum AuthenticatedPortalSP2RouteMapper {
     )
   }
 
-  /// This slice intentionally excludes `start-end` expansion. A hyphen or any
-  /// malformed IPv4/CIDR leaves the tunnel's whole routes field missing so no
-  /// partial route set can pass readiness.
+  private static func mapAddress(
+    _ address: PortalSP2Scalar,
+    lineage: VendorCharonStartLineage
+  ) throws -> [VendorCharonStartRouteCandidate]? {
+    if try address.withBytes({ $0.contains(0x2d) }) {
+      return try PortalSP2IPv4RangeMapper.routes(address, lineage: lineage)
+    }
+    return try directRoute(address, lineage: lineage).map { [$0] }
+  }
+
   private static func directRoute(
     _ address: PortalSP2Scalar,
     lineage: VendorCharonStartLineage
   ) throws -> VendorCharonStartRouteCandidate? {
     try address.withBytes { bytes in
-      guard !bytes.isEmpty, !bytes.contains(0), !bytes.contains(0x2d) else {
+      guard !bytes.isEmpty, !bytes.contains(0) else {
         return nil
       }
       let slashIndices = bytes.indices.filter { bytes[$0] == 0x2f }
       guard slashIndices.count <= 1 else { return nil }
       let addressEnd = slashIndices.first ?? bytes.count
-      guard validIPv4(bytes, range: 0..<addressEnd) else { return nil }
+      guard PortalSP2IPv4.parse(bytes, range: 0..<addressEnd) != nil else { return nil }
 
       let prefix: Int32
       if let slash = slashIndices.first {
-        guard let parsed = decimal(bytes, range: (slash + 1)..<bytes.count), parsed <= 32 else {
+        guard
+          let parsed = PortalSP2IPv4.decimal(bytes, range: (slash + 1)..<bytes.count),
+          parsed <= 32
+        else {
           return nil
         }
         prefix = parsed
@@ -137,43 +147,5 @@ enum AuthenticatedPortalSP2RouteMapper {
       )
       return VendorCharonStartRouteCandidate(network: network, prefix: routePrefix)
     }
-  }
-
-  private static func validIPv4(
-    _ bytes: UnsafeRawBufferPointer,
-    range: Range<Int>
-  ) -> Bool {
-    guard !range.isEmpty else { return false }
-    var octetStart = range.lowerBound
-    var octets = 0
-    for index in range.lowerBound...range.upperBound {
-      if index == range.upperBound || bytes[index] == 0x2e {
-        let part = octetStart..<index
-        guard !part.isEmpty, part.count <= 3,
-          !(part.count > 1 && bytes[part.lowerBound] == 0x30),
-          let value = decimal(bytes, range: part), value <= 255
-        else { return false }
-        octets += 1
-        octetStart = index + 1
-      }
-    }
-    return octets == 4
-  }
-
-  private static func decimal(
-    _ bytes: UnsafeRawBufferPointer,
-    range: Range<Int>
-  ) -> Int32? {
-    guard !range.isEmpty else { return nil }
-    var value: Int32 = 0
-    for index in range {
-      let byte = bytes[index]
-      guard (0x30...0x39).contains(byte) else { return nil }
-      let (scaled, overflow1) = value.multipliedReportingOverflow(by: 10)
-      let (next, overflow2) = scaled.addingReportingOverflow(Int32(byte - 0x30))
-      guard !overflow1, !overflow2 else { return nil }
-      value = next
-    }
-    return value
   }
 }

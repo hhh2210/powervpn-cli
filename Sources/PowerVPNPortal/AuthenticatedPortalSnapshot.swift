@@ -132,34 +132,41 @@ package final class AuthenticatedPortalSnapshot: @unchecked Sendable {
   private let lock = NSRecursiveLock()
   private let authenticationGeneration: PortalAuthenticationGeneration
   private var resourceDocument: PortalXMLDocument?
+  private var vendorGateway: SecureBytes?
   package let descriptor: AuthenticatedPortalSnapshotDescriptor
   /// Non-secret package identity for selecting one resource from this snapshot.
   package let selectionGenerationID = UUID()
 
   init(
     resourceDocument: PortalXMLDocument,
-    authenticationGeneration: PortalAuthenticationGeneration
+    authenticationGeneration: PortalAuthenticationGeneration,
+    vendorGateway: SecureBytes
   ) throws {
     guard authenticationGeneration.isActive else {
       resourceDocument.erase()
+      vendorGateway.erase()
       throw AuthenticatedPortalSnapshotError.inactiveAuthenticationGeneration
     }
     do {
-      descriptor = try Self.describe(resourceDocument)
+      descriptor = try describeAuthenticatedPortalSnapshot(resourceDocument)
       self.authenticationGeneration = authenticationGeneration
       self.resourceDocument = resourceDocument
+      self.vendorGateway = vendorGateway
     } catch {
       resourceDocument.erase()
+      vendorGateway.erase()
       throw error
     }
   }
 
   package var isErased: Bool {
-    lock.withLock { resourceDocument == nil }
+    lock.withLock { resourceDocument == nil && vendorGateway == nil }
   }
 
   package var isAccessible: Bool {
-    lock.withLock { resourceDocument != nil && authenticationGeneration.isActive }
+    lock.withLock {
+      resourceDocument != nil && vendorGateway != nil && authenticationGeneration.isActive
+    }
   }
 
   func withResourceDocument<Result>(
@@ -167,6 +174,7 @@ package final class AuthenticatedPortalSnapshot: @unchecked Sendable {
   ) throws -> Result {
     try lock.withLock {
       guard let resourceDocument else { throw AuthenticatedPortalSnapshotError.erased }
+      guard vendorGateway != nil else { throw AuthenticatedPortalSnapshotError.erased }
       guard authenticationGeneration.isActive else {
         throw AuthenticatedPortalSnapshotError.inaccessible
       }
@@ -181,6 +189,7 @@ package final class AuthenticatedPortalSnapshot: @unchecked Sendable {
   ) throws -> Result {
     try lock.withLock {
       guard let resourceDocument else { throw AuthenticatedPortalSnapshotError.erased }
+      guard vendorGateway != nil else { throw AuthenticatedPortalSnapshotError.erased }
       guard authenticationGeneration.isActive else {
         throw AuthenticatedPortalSnapshotError.inaccessible
       }
@@ -210,6 +219,7 @@ package final class AuthenticatedPortalSnapshot: @unchecked Sendable {
   ) throws -> Result {
     try lock.withLock {
       guard let resourceDocument else { throw AuthenticatedPortalSnapshotError.erased }
+      guard let vendorGateway else { throw AuthenticatedPortalSnapshotError.erased }
       guard authenticationGeneration.isActive else {
         throw AuthenticatedPortalSnapshotError.inaccessible
       }
@@ -220,42 +230,26 @@ package final class AuthenticatedPortalSnapshot: @unchecked Sendable {
         authenticationGeneration: authenticationGeneration
       )
       defer { scope.invalidate() }
-      return try operation(AuthenticatedPortalContext(integrationInfo: integration, scope: scope))
+      return try operation(
+        AuthenticatedPortalContext(
+          integrationInfo: integration,
+          vendorGateway: vendorGateway,
+          scope: scope
+        ))
     }
   }
 
   package func erase() {
     lock.withLock {
       resourceDocument?.erase()
+      vendorGateway?.erase()
       resourceDocument = nil
+      vendorGateway = nil
     }
   }
 
   deinit {
     erase()
-  }
-
-  private static func describe(
-    _ document: PortalXMLDocument
-  ) throws -> AuthenticatedPortalSnapshotDescriptor {
-    let integration = try LeadSecPortalProfile.integrationInfo(document)
-    let resourceLists = integration?.childElements.filter { $0.name == "RESOURCE_LIST" } ?? []
-    guard resourceLists.count <= 1 else {
-      throw AuthenticatedPortalSnapshotError.duplicateResourceList
-    }
-    let children = resourceLists.first?.childElements ?? []
-    let observations = AuthenticatedPortalResourceCategory.allCases.map { category in
-      AuthenticatedPortalCategoryObservation(
-        category: category,
-        nodeCount: children.count { $0.name == category.rawValue }
-      )
-    }
-    return AuthenticatedPortalSnapshotDescriptor(
-      authenticatedPortalSessionPresent: true,
-      integrationInfoPresent: integration != nil,
-      resourceListPresent: resourceLists.count == 1,
-      categoryObservations: observations
-    )
   }
 }
 

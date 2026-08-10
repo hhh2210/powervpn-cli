@@ -37,22 +37,31 @@ On this Mac they currently establish:
 - the same-resource SP2 mapper now covers session ID (only `CLIENT@id`, never
   the Portal cookie), VIP, IKE port/version, IKE/ESP proposals, PSK/lifetimes,
   tunnel direct/default fields, map ID, negotiate mode, direct IPv4/CIDR routes
-  and the exact empty-route shape. Hyphenated address ranges fail closed instead
-  of producing a partial route;
-- Core can encode a complete validated snapshot into the exact scoped,
-  in-memory charon XPC object, including the vendor-valid empty
-  `tunnels[].name`. The encoder creates no connection and sends nothing.
+  and the exact empty-route shape. Ascending IPv4 ranges become a minimal CIDR
+  cover; malformed or reversed ranges fail closed, with reversed-range rejection
+  an intentional safety divergence from the vendor loop;
+- sealed gateway provenance is now closed from the selected `VSGAddressModel`
+  row through `VSGService.vpnAddress`, numeric-IPv4 `getaddrinfo` identity and
+  the builder's `common.gateway`. Hostnames, IPv6 and any different literal
+  still fail closed;
+- Product's `withValidatedStartSnapshot` keeps gateway, resource leaves and the
+  Core snapshot inside one borrow. A complete synthetic snapshot encodes inside
+  that callback, while an escaped snapshot can no longer borrow its material;
+- Core also has a bounded begin/pending control primitive. A start transport
+  acknowledgement retains the same connection for lease-bound stop, but an
+  exact empty acknowledgement proves transport only and
+  `helperSuccessEstablished` remains false.
 
 The four commands contact no server, read no TTY credential, send no XPC,
-serialize no complete helper snapshot, and contain no credential, cookie, PSK,
-route value, or session value. The current product state is therefore **blocked
-at M1**, not a usable VPN yet, and the Goal remains **ACTIVE**.
-The first authenticated dry-run blocker remains `common.gateway`: the installed
-GUI resolves `VSGResourceRule.vpnAddress` before building helper input, and the
-resource-request URL host is not an exact substitute. No complete helper
-snapshot exists. The next product slice must obtain that resolved value from
-the same lawful resource generation; `vendor_once` remains the declared
-fallback if the owned Portal response cannot supply it.
+and contain no credential, cookie, PSK, route value, or session value. This
+slice used synthetic drivers and documents only: no real XPC connection,
+helper request, network request or live action ran, and no connected state was
+claimed. The M1 code path is now material-complete for a synthetic authenticated
+snapshot, but the production commands still have no authenticated snapshot
+provider. The product is not a usable VPN yet and the Goal remains **ACTIVE**.
+The next slice is the Product M2 coordinator and CLI wiring; fresh explicit
+approval is required immediately before the first live request or helper/XPC
+action.
 
 ## Development
 

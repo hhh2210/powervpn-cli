@@ -9,22 +9,33 @@ package enum AuthenticatedPortalContextBorrowError: Error, Equatable, Sendable {
   case malformedMajorVersion
 }
 
-/// A scoped view over version context in the authenticated resource document.
+/// A scoped view over context bound to one authenticated resource generation.
 ///
 /// `majorVersion` is borrowed from app-owned, explicitly erasable XML storage.
-/// Gateway is deliberately absent: the installed client resolves `vpnAddress`
-/// before helper configuration, so the resource request host is not an exact
-/// offline substitute for that value.
+/// Gateway is app-owned storage minted only from the sealed literal-IPv4
+/// profile whose vendor resolution path is statically identity-preserving.
 package struct AuthenticatedPortalContext: @unchecked Sendable {
   private let integrationInfo: PortalXMLElement
+  private let vendorGateway: SecureBytes
   private let scope: AuthenticatedPortalContextBorrowScope
 
   init(
     integrationInfo: PortalXMLElement,
+    vendorGateway: SecureBytes,
     scope: AuthenticatedPortalContextBorrowScope
   ) {
     self.integrationInfo = integrationInfo
+    self.vendorGateway = vendorGateway
     self.scope = scope
+  }
+
+  package func withVendorGatewayBytes<Result>(
+    _ operation: (UnsafeRawBufferPointer) throws -> Result
+  ) throws -> Result {
+    guard scope.isActive else {
+      throw AuthenticatedPortalContextBorrowError.expired
+    }
+    return try vendorGateway.withUnsafeBytes(operation)
   }
 
   package func withMajorVersionBytes<Result>(

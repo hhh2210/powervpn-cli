@@ -129,6 +129,22 @@ at `0x100068210` narrows this boundary without reading any values:
 - `common.gateway` comes from the builder's `VSGResourceRule.vpnAddress`
   argument, while DNS and major version arrive as separate arguments.
 
+The gateway producer chain is now closed for the sealed installation:
+
+```text
+selected VSGAddressModel.address
+  -> VSGService vpnAddress path
+  -> numeric-IPv4 getaddrinfo (same address identity)
+  -> VSGResourceRule.vpnAddress builder argument
+  -> parseSp2SourceWithGeteway(...)
+  -> charon common.gateway
+```
+
+Because the selected sealed address is already a numeric IPv4 literal, the
+vendor resolver step preserves its address identity. The owned runtime accepts
+only that exact literal; hostname, IPv6 and a different IPv4 literal are not
+generalized into this proof and fail closed.
+
 The owned Product mapper now builds each candidate from one `NC_RESOURCE` and
 adds only `VERSION@major` metadata borrowed from that same authenticated
 document generation. It promotes `CLIENT@id`, `PRIVATE-IP@addr`, `SERVER@port`,
@@ -136,15 +152,14 @@ IKE/ESP transform attributes, `PSK@key`, both lifetimes, tunnel direct
 attributes and authority/family defaults, route flag/name, resource-or-tunnel
 map ID, negotiate mode, direct IPv4/CIDR routes and the vendor empty-route
 defaults. A direct IPv4 address becomes `/32`; CIDR retains its literal network
-text and integer prefix. Hyphenated ranges are deliberately unsupported and
-leave the whole routes field missing, so partial expansion cannot pass
-readiness.
+text and integer prefix. An ascending IPv4 range is expanded to the ordered
+minimal CIDR cover. Malformed or reversed endpoints leave the whole tunnel
+routes field missing. Reversed-range rejection is an intentional safety
+divergence from the vendor loop, not a claim that the vendor rejected it.
 
-The first missing field in that offline authenticated candidate remains
-`common.gateway`. The installed GUI passes the builder a resolved
-`VSGResourceRule.vpnAddress`; the resource-request URL host does not prove that
-resolved value and is not substituted. This static narrowing does not prove or
-authorize a live `start_connection`.
+With the sealed gateway origin above, the synthetic authenticated candidate is
+materially complete. This static/offline result does not prove or authorize a
+live `start_connection`, helper acceptance or a connected tunnel.
 
 ## Charon helper consumer schema
 
@@ -189,11 +204,30 @@ tunnels[]
 A later status path also reads `common.hostItem`; its exact class remains
 unknown.
 
-Core now has a scoped encoder for a complete validated charon snapshot. It
+Core has a scoped encoder for a complete validated charon snapshot. It
 constructs the exact root/common/tunnel/route key and type tree in memory only,
 allows the statically recovered empty default for `tunnels[].name`, and exposes
-the object only for the duration of a closure. It creates no XPC connection and
-sends no message; the M1/Goal state therefore remains ACTIVE.
+the object only for the duration of a closure. Product's
+`withValidatedStartSnapshot` holds the gateway/context and resource tree in one
+borrow: a complete synthetic snapshot encodes inside the body, while an escaped
+snapshot fails when its materials are borrowed again.
+
+The offline control seam uses a synchronous `beginStart` to encode and submit
+before those borrows expire, then returns a single-consumption pending result.
+An exact empty reply with the expected peer generation is classified only as
+`transportAcknowledged`; it retains the same connection behind a lease so
+`stop_connection` uses that same driver. Bounded timeout/cancellation and
+unexpected reply paths close and cancel the lease. The receipt deliberately
+keeps `helperSuccessEstablished=false`: no empty acknowledgement establishes
+helper business success, SA creation or connectivity.
+
+All gateway, range, scoped-snapshot and control results in this slice came from
+static correlation or synthetic documents/drivers. No real XPC connection,
+helper request, portal/network request, TTY input or live action ran. M1's code
+path is materially complete, but production still has no authenticated
+snapshot provider; the Goal remains ACTIVE. The next implementation boundary
+is the Product M2 coordinator/CLI, with fresh explicit approval required before
+the first live request or XPC/helper action.
 
 ## IPsec helper consumer schema
 

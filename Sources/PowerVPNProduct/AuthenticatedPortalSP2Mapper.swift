@@ -5,8 +5,24 @@ enum AuthenticatedPortalSP2Mapper {
   static func candidate(
     _ resource: AuthenticatedPortalResourceElement,
     handle: String,
-    majorVersion: Int32
+    majorVersion: Int32,
+    gateway: any VendorCharonStartTextMaterial
   ) throws -> ProductResourceCandidate {
+    let (summary, validation) = try validatedCandidate(
+      resource,
+      handle: handle,
+      majorVersion: majorVersion,
+      gateway: gateway
+    )
+    return ProductResourceCandidate(summary: summary, validation: validation)
+  }
+
+  static func validatedCandidate(
+    _ resource: AuthenticatedPortalResourceElement,
+    handle: String,
+    majorVersion: Int32,
+    gateway: any VendorCharonStartTextMaterial
+  ) throws -> (ProductResourceSummary, VendorCharonStartValidation) {
     let tunnelElements = try PortalSP2Tree.children(named: "TUNNEL", of: resource)
     guard let firstTunnel = tunnelElements.first else {
       throw AuthenticatedPortalSnapshotMappingError.invalidDisplayName
@@ -19,6 +35,7 @@ enum AuthenticatedPortalSP2Mapper {
       common: try common(
         from: commonIKE,
         majorVersion: majorVersion,
+        gateway: gateway,
         lineage: lineage
       ),
       tunnels: try tunnels(
@@ -27,9 +44,9 @@ enum AuthenticatedPortalSP2Mapper {
         lineage: lineage
       )
     )
-    return ProductResourceCandidate(
-      summary: ProductResourceSummary(handle: handle, displayName: displayName),
-      validation: VendorCharonStartValidator.validate(coreCandidate)
+    return (
+      ProductResourceSummary(handle: handle, displayName: displayName),
+      VendorCharonStartValidator.validate(coreCandidate)
     )
   }
 
@@ -48,10 +65,17 @@ enum AuthenticatedPortalSP2Mapper {
   private static func common(
     from ike: AuthenticatedPortalResourceElement?,
     majorVersion: Int32,
+    gateway: any VendorCharonStartTextMaterial,
     lineage: VendorCharonStartLineage
   ) throws -> VendorCharonStartCommonCandidate {
+    let gateway = VendorCharonStartTextValue(
+      value: gateway,
+      source: .authenticatedPortalOrigin,
+      lineage: lineage
+    )
     guard let ike else {
       return VendorCharonStartCommonCandidate(
+        gateway: gateway,
         majorVersion: PortalSP2Value.metadataInteger(majorVersion, lineage: lineage)
       )
     }
@@ -85,7 +109,7 @@ enum AuthenticatedPortalSP2Mapper {
         try privateIP.flatMap { try PortalSP2Tree.attribute(named: "addr", of: $0) },
         lineage: lineage
       ),
-      gateway: nil,
+      gateway: gateway,
       ikePort: try PortalSP2Value.integer(
         try server.flatMap { try PortalSP2Tree.attribute(named: "port", of: $0) },
         path: "common.ike_port",

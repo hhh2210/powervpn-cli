@@ -1,5 +1,22 @@
 import Darwin
 import PowerVPNCore
+import PowerVPNPortal
+
+struct PortalSP2ContextTextMaterial: VendorCharonStartTextMaterial {
+  let byteCount: Int
+  private let context: AuthenticatedPortalContext
+
+  init(_ context: AuthenticatedPortalContext) throws {
+    self.context = context
+    byteCount = try context.withVendorGatewayBytes(\.count)
+  }
+
+  func withUnsafeUTF8Bytes<Result>(
+    _ body: (UnsafeRawBufferPointer) throws -> Result
+  ) throws -> Result {
+    try context.withVendorGatewayBytes(body)
+  }
+}
 
 struct PortalSP2BorrowedTextMaterial: VendorCharonStartTextMaterial {
   let byteCount: Int

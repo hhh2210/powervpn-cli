@@ -39,8 +39,11 @@ import Testing
     #expect(session.sources == [.authenticatedPortalResource])
     #expect(report.schemaVersion == 3)
     #expect(report.selectedResource == resource)
-    #expect(report.firstMissingField == .gateway)
+    #expect(report.firstMissingField == .ikePort)
     #expect(report.blocker == .authorizedResourceSnapshotIncomplete)
+    let gateway = try #require(report.fields.first { $0.field == .gateway })
+    #expect(gateway.availability == .available)
+    #expect(gateway.sources == [.authenticatedPortalOrigin])
 
     let resourcesJSON = String(
       decoding: try JSONEncoder().encode(resources),
@@ -72,6 +75,7 @@ import Testing
     #expect(!json.contains("helper-session-material"))
     #expect(!json.contains("cookie-session-material"))
     #expect(!json.contains("gateway-material"))
+    #expect(!json.contains("166.111.143.19"))
     #expect(!json.contains("psk-material"))
   }
 
