@@ -20,13 +20,16 @@ extension ProductM2ConnectOnceCoordinator {
     baseline: ProductM2NetworkBaseline,
     coldGeneration: VendorHelperGenerationSnapshot,
     portalLease: (any ProductM2PortalLeasing)? = nil,
+    selectedRoutes: VendorCharonSelectedRouteMatcher? = nil,
     controlLease: ProductM2ControlLease? = nil,
     startReceipt: ProductM2ControlReceipt = .unsent(.notAttempted)
   ) async -> ProductM2ConnectReport {
     let cleanup = await ProductM2CleanupRunner(dependencies: dependencies).run(
       baseline: baseline,
+      networkWindow: execution.networkWindow,
       coldGeneration: coldGeneration,
       portalLease: portalLease,
+      selectedRoutes: selectedRoutes,
       controlLease: controlLease,
       startReceipt: startReceipt
     )

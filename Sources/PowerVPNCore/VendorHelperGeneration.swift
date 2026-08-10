@@ -34,7 +34,7 @@ public struct VendorHelperGenerationSnapshot: Equatable, Sendable {
       && activeCount.map { $0 > 0 } == true
       && pid.map { $0 > 0 } == true && runs != nil
   }
-  fileprivate static let unavailable = Self(
+  package static let unavailable = Self(
     launchdObserved: false,
     running: false,
     inactiveConfirmed: false,

@@ -1,4 +1,5 @@
 import Foundation
+import PowerVPNCore
 
 public enum ProductM2ConnectionState: String, Encodable, Equatable, Sendable {
   case signedOut = "signed_out"
@@ -26,6 +27,7 @@ public enum ProductM2ConnectOutcome: String, Encodable, Equatable, Sendable {
   case resourceCatalogRejected = "resource_catalog_rejected"
   case resourceNotFound = "resource_not_found"
   case resourceAmbiguous = "resource_ambiguous"
+  case selectedRouteCoverageRejected = "selected_route_coverage_rejected"
   case generationFenceRejected = "generation_fence_rejected"
   case startSnapshotRejected = "start_snapshot_rejected"
   case startRejected = "start_rejected"
@@ -42,6 +44,7 @@ public enum ProductM2BadEvent: String, Encodable, Equatable, Sendable {
   case resourceCatalogRejected = "resource_catalog_rejected"
   case resourceNotFound = "resource_not_found"
   case resourceAmbiguous = "resource_ambiguous"
+  case selectedRouteCoverageRejected = "selected_route_coverage_rejected"
   case generationFenceRejected = "generation_fence_rejected"
   case startSnapshotRejected = "start_snapshot_rejected"
   case startControlRejected = "start_control_rejected"
@@ -105,50 +108,108 @@ public enum ProductM2SSHProofOutcome: String, Encodable, Equatable, Sendable {
 }
 
 package struct ProductM2NetworkBaseline: Equatable, Sendable {
-  package let identifier: UUID
+  private enum Storage: Equatable, Sendable {
+    case observed(NetworkCleanupSnapshot)
+    case synthetic(UUID)
+  }
+
+  private let storage: Storage
 
   package init(identifier: UUID = UUID()) {
-    self.identifier = identifier
+    storage = .synthetic(identifier)
+  }
+
+  package init(snapshot: NetworkCleanupSnapshot) {
+    storage = .observed(snapshot)
+  }
+
+  package var identifier: UUID? {
+    guard case .synthetic(let identifier) = storage else { return nil }
+    return identifier
+  }
+
+  package var snapshot: NetworkCleanupSnapshot? {
+    guard case .observed(let snapshot) = storage else { return nil }
+    return snapshot
+  }
+
+  package static func stable(_ first: Self, _ second: Self) -> Bool {
+    guard let first = first.snapshot, let second = second.snapshot else { return false }
+    return NetworkCleanupAssessment.baselineStable(first, second)
   }
 }
 
 public struct ProductM2CleanupEvidence: Encodable, Equatable, Sendable {
+  public let complete: Bool
   public let defaultRouteRestored: Bool
   public let dnsRestored: Bool
   public let interfacesRestored: Bool
   public let utunRestored: Bool
+  public let persistentRoutesRestored: Bool
+  public let selectedRouteResidueCount: Int
   public let surgeStateRestored: Bool
   public let helperGenerationRestored: Bool
+  public let structuralRouteTablesEqual: Bool
+  public let containsRawRoutes = false
+  public let containsRawState = false
 
   public init(
+    complete: Bool = true,
     defaultRouteRestored: Bool,
     dnsRestored: Bool,
     interfacesRestored: Bool,
     utunRestored: Bool,
+    persistentRoutesRestored: Bool = true,
+    selectedRouteResidueCount: Int = 0,
     surgeStateRestored: Bool,
-    helperGenerationRestored: Bool
+    helperGenerationRestored: Bool,
+    structuralRouteTablesEqual: Bool = true
   ) {
+    self.complete = complete
     self.defaultRouteRestored = defaultRouteRestored
     self.dnsRestored = dnsRestored
     self.interfacesRestored = interfacesRestored
     self.utunRestored = utunRestored
+    self.persistentRoutesRestored = persistentRoutesRestored
+    self.selectedRouteResidueCount = selectedRouteResidueCount
     self.surgeStateRestored = surgeStateRestored
     self.helperGenerationRestored = helperGenerationRestored
+    self.structuralRouteTablesEqual = structuralRouteTablesEqual
   }
 
   public var allDimensionsRestored: Bool {
-    defaultRouteRestored && dnsRestored && interfacesRestored
-      && utunRestored && surgeStateRestored && helperGenerationRestored
+    complete && defaultRouteRestored && dnsRestored && interfacesRestored
+      && utunRestored && persistentRoutesRestored
+      && selectedRouteResidueCount == 0 && surgeStateRestored
+      && helperGenerationRestored
   }
 
   package static let unavailable = Self(
+    complete: false,
     defaultRouteRestored: false,
     dnsRestored: false,
     interfacesRestored: false,
     utunRestored: false,
+    persistentRoutesRestored: false,
     surgeStateRestored: false,
-    helperGenerationRestored: false
+    helperGenerationRestored: false,
+    structuralRouteTablesEqual: false
   )
+
+  package init(_ result: NetworkCleanupResult) {
+    self.init(
+      complete: result.complete,
+      defaultRouteRestored: result.defaultRouteRestored,
+      dnsRestored: result.dnsRestored,
+      interfacesRestored: result.interfacesRestored,
+      utunRestored: result.utunRestored,
+      persistentRoutesRestored: result.persistentRoutesRestored,
+      selectedRouteResidueCount: result.selectedRouteResidueCount,
+      surgeStateRestored: result.surgeStateRestored,
+      helperGenerationRestored: result.helperGenerationRestored,
+      structuralRouteTablesEqual: result.structuralRouteTablesEqual
+    )
+  }
 }
 
 public struct ProductM2ConnectRequest: Equatable, Sendable {
@@ -162,7 +223,7 @@ public struct ProductM2ConnectRequest: Equatable, Sendable {
 }
 
 public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
-  public let schemaVersion = 1
+  public let schemaVersion = 2
   public let outcome: ProductM2ConnectOutcome
   public let finalState: ProductM2ConnectionState
   public let lastGoodState: ProductM2ConnectionState
@@ -172,6 +233,7 @@ public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
   public let portalAcquisition: ProductM2PortalAcquisitionOutcome
   public let startOutcome: ProductM2ControlOutcome
   public let sshProof: ProductM2SSHProofOutcome
+  public let sshProofEvidence: ProductM2FreshSSHProofEvidence?
   public let cleanupPath: ProductM2CleanupPath
   public let stopOutcome: ProductM2ControlOutcome
   public let emergencyStopOutcome: ProductM2ControlOutcome

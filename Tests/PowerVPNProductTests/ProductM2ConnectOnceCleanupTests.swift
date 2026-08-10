@@ -84,9 +84,10 @@ import Testing
     let trace = ProductM2TestTrace()
     let incomplete = ProductM2CleanupEvidence(
       defaultRouteRestored: true,
-      dnsRestored: false,
+      dnsRestored: true,
       interfacesRestored: true,
       utunRestored: true,
+      selectedRouteResidueCount: 1,
       surgeStateRestored: true,
       helperGenerationRestored: true
     )
@@ -199,7 +200,8 @@ import Testing
     }.value
 
     #expect(report.outcome == .cancelled)
-    #expect(report.sshProof == .cancelled)
+    #expect(report.sshProof == .proven)
+    #expect(report.sshProofEvidence?.outcome == .proven)
     #expect(report.cleanupPath == .sameLeaseStop)
     #expect(report.cleanupVerified)
     #expect(trace.count("stop") == 1)

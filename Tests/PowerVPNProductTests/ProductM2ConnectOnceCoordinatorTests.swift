@@ -55,6 +55,10 @@ import Testing
     #expect(trace.count("baseline") == 2)
     #expect(trace.count("preflight") == 2)
     #expect(trace.verifiedBaselineID == second.identifier)
+    #expect(Set(trace.networkWindowIDs).count == 1)
+    #expect(trace.matcherPresence == [false, true, true])
+    #expect(trace.cleanupStartSent == [true])
+    #expect(report.sshProofEvidence?.outcome == report.sshProof)
     let events = trace.events
     #expect(m2EventIndex("preflight", in: events) < m2EventIndex("acquire", in: events))
     #expect(m2EventIndex("acquire", in: events) < m2EventIndex("baseline_stable", in: events))
@@ -89,7 +93,10 @@ import Testing
     #expect(trace.count("begin_start") == 0)
     #expect(trace.count("emergency_stop") == 0)
     #expect(trace.count("logout") == 1)
-    #expect(trace.verifiedBaselineID == first.identifier)
+    #expect(trace.verifiedBaselineID == second.identifier)
+    #expect(Set(trace.networkWindowIDs).count == 1)
+    #expect(trace.matcherPresence == [false, true, true])
+    #expect(trace.cleanupStartSent == [false])
   }
 
   @Test func zeroOrMultipleExactDisplayNameMatchesNeverTouchControl() async throws {
@@ -162,6 +169,68 @@ import Testing
     #expect(trace.count("logout") == 1)
   }
 
+  @Test func proofForDifferentLockedTargetIsNormalizedToRejection() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        sshEvidenceTarget: .thu52
+      )
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(report.outcome == .sshProofRejected)
+    #expect(report.sshProof == .rejected)
+    #expect(report.sshProofEvidence?.outcome == .rejected)
+    #expect(report.sshProofEvidence?.target == .thu52)
+    #expect(report.lastGoodState == .connecting)
+  }
+
+  @Test func selectedRouteThatMissesLockedTargetFailsBeforeSecondBaseline() async throws {
+    let xml = m2ResourceXML(["Campus NC"])
+      .replacingOccurrences(of: "11.11.0.0/16", with: "10.1.2.0/24")
+    let fixture = try authenticatedSnapshot(resourceXML: xml)
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(snapshot: fixture.snapshot, trace: trace)
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(report.outcome == .selectedRouteCoverageRejected)
+    #expect(report.firstBadEvent == .selectedRouteCoverageRejected)
+    #expect(trace.count("baseline") == 1)
+    #expect(trace.count("begin_start") == 0)
+    #expect(trace.count("ssh") == 0)
+    #expect(trace.matcherPresence == [false, false])
+  }
+
+  @Test func unsupportedRouteFamilyIsSnapshotRejectionNotCoverageRejection() async throws {
+    let xml = m2ResourceXML(["Campus NC"])
+      .replacingOccurrences(of: "family=\"4\"", with: "family=\"6\"")
+    let fixture = try authenticatedSnapshot(resourceXML: xml)
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(snapshot: fixture.snapshot, trace: trace)
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(report.outcome == .startSnapshotRejected)
+    #expect(report.firstBadEvent == .startSnapshotRejected)
+    #expect(trace.count("baseline") == 1)
+    #expect(trace.count("begin_start") == 0)
+    #expect(trace.count("ssh") == 0)
+  }
+
   @Test func encodedReportContainsNoHandleOrProtocolMaterial() async throws {
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
     defer { fixture.erase() }
@@ -183,6 +252,10 @@ import Testing
     #expect(!json.contains("psk-material"))
     #expect(!json.contains("166.111.143.19"))
     #expect(!json.contains("10.1.2.3"))
+    #expect(!json.contains("11.11.0.0"))
     #expect(!json.contains("\"handle\""))
+    #expect(json.contains("\"persistentRoutesRestored\":true"))
+    #expect(json.contains("\"selectedRouteResidueCount\":0"))
+    #expect(json.contains("\"containsRawRoutes\":false"))
   }
 }

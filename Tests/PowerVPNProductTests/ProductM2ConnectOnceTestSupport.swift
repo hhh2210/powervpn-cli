@@ -11,6 +11,9 @@ final class ProductM2TestTrace: @unchecked Sendable {
   private var storedBaselines: [ProductM2NetworkBaseline]
   private var verifiedBaseline: UUID?
   private var preflightResults: [Bool]
+  private var storedNetworkWindowIDs: [ObjectIdentifier] = []
+  private var storedMatcherPresence: [Bool] = []
+  private var storedCleanupStartSent: [Bool] = []
 
   init(
     generation: VendorHelperGenerationSnapshot = m2ColdGeneration,
@@ -46,22 +49,38 @@ final class ProductM2TestTrace: @unchecked Sendable {
     }
   }
 
-  func nextBaseline() -> ProductM2NetworkBaseline? {
+  func nextBaseline(
+    window: NetworkCleanupCaptureWindow,
+    selectedRoutes: VendorCharonSelectedRouteMatcher?
+  ) -> ProductM2NetworkBaseline? {
     lock.withLock {
       storedEvents.append("baseline")
+      storedNetworkWindowIDs.append(ObjectIdentifier(window))
+      storedMatcherPresence.append(selectedRoutes != nil)
       return storedBaselines.isEmpty ? nil : storedBaselines.removeFirst()
     }
   }
 
-  func markVerified(_ baseline: ProductM2NetworkBaseline) {
+  func markVerified(
+    _ baseline: ProductM2NetworkBaseline,
+    window: NetworkCleanupCaptureWindow,
+    selectedRoutes: VendorCharonSelectedRouteMatcher?,
+    startRequestSent: Bool
+  ) {
     lock.withLock {
       storedEvents.append("verify")
       verifiedBaseline = baseline.identifier
+      storedNetworkWindowIDs.append(ObjectIdentifier(window))
+      storedMatcherPresence.append(selectedRoutes != nil)
+      storedCleanupStartSent.append(startRequestSent)
     }
   }
 
   var events: [String] { lock.withLock { storedEvents } }
   var verifiedBaselineID: UUID? { lock.withLock { verifiedBaseline } }
+  var networkWindowIDs: [ObjectIdentifier] { lock.withLock { storedNetworkWindowIDs } }
+  var matcherPresence: [Bool] { lock.withLock { storedMatcherPresence } }
+  var cleanupStartSent: [Bool] { lock.withLock { storedCleanupStartSent } }
 
   func count(_ event: String) -> Int {
     lock.withLock { storedEvents.count { $0 == event } }
@@ -184,6 +203,7 @@ func productM2TestDependencies(
   plan: ProductM2TestControlPlan = .acknowledged,
   baselineStable: Bool = true,
   sshProof: ProductM2SSHProofOutcome = .proven,
+  sshEvidenceTarget: ProductM2SSHTarget? = nil,
   cleanup: ProductM2CleanupEvidence = m2CompleteCleanup,
   logout: PortalLeaseLogoutStatus = .accepted,
   controlRuntimePreflightAccepted: Bool = true,
@@ -202,7 +222,9 @@ func productM2TestDependencies(
     },
     observeGeneration: trace.observeGeneration,
     preflightAccepted: { _ in trace.preflight() },
-    captureNetworkBaseline: { trace.nextBaseline() },
+    captureNetworkBaseline: { window, selectedRoutes in
+      trace.nextBaseline(window: window, selectedRoutes: selectedRoutes)
+    },
     baselineStable: { _, _ in
       trace.record("baseline_stable")
       return baselineStable
@@ -213,27 +235,20 @@ func productM2TestDependencies(
       return .acquired(lease)
     },
     control: productM2TestControl(trace: trace, plan: plan),
-    proveFreshSSH: { _ in
+    proveFreshSSH: { target in
       trace.record("ssh")
       if cancelDuringSSH { withUnsafeCurrentTask { $0?.cancel() } }
-      return sshProof
+      return m2SSHEvidence(sshProof, target: sshEvidenceTarget ?? target)
     },
-    verifyCleanup: { baseline in
-      trace.markVerified(baseline)
+    verifyCleanup: { baseline, window, selectedRoutes, startRequestSent in
+      trace.markVerified(
+        baseline,
+        window: window,
+        selectedRoutes: selectedRoutes,
+        startRequestSent: startRequestSent
+      )
       return cleanup
     }
-  )
-}
-
-func m2Receipt(
-  _ outcome: ProductM2ControlOutcome,
-  requestSent: Bool
-) -> ProductM2ControlReceipt {
-  ProductM2ControlReceipt(
-    outcome: outcome,
-    requestSent: requestSent,
-    transportAcknowledged: outcome == .transportAcknowledged,
-    peerGenerationValidated: outcome == .transportAcknowledged
   )
 }
 
@@ -248,7 +263,7 @@ func m2ResourceXML(_ displayNames: [String]) -> String {
       <IPSEC-SA><PROPOSAL><TRANSFORMS><TRANSFORM enc="aes256" hash="sha256"
         life-time="1800"/></TRANSFORMS></PROPOSAL></IPSEC-SA>
       <PSK key="psk-material"/><EXTENSIONS><PRIVATE-IP addr="10.10.10.4"/>
-      <SECURED-ROUTES name="direct"><ROUTE addr="10.1.2.3/24"/>
+      <SECURED-ROUTES name="direct"><ROUTE addr="11.11.0.0/16"/>
       </SECURED-ROUTES></EXTENSIONS></IKE></TUNNEL></NC_RESOURCE>
     """
   }.joined()
@@ -271,15 +286,6 @@ let m2ExitedGeneration = VendorHelperGenerationSnapshot(
 let m2UnavailableGeneration = VendorHelperGenerationSnapshot(
   launchdObserved: false, running: false, inactiveConfirmed: false,
   activeCount: nil, pid: nil, runs: nil)
-
-let m2CompleteCleanup = ProductM2CleanupEvidence(
-  defaultRouteRestored: true,
-  dnsRestored: true,
-  interfacesRestored: true,
-  utunRestored: true,
-  surgeStateRestored: true,
-  helperGenerationRestored: true
-)
 
 func m2EventIndex(_ event: String, in events: [String]) -> Int {
   events.firstIndex(of: event) ?? Int.max

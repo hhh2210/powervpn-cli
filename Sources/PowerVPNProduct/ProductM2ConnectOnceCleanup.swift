@@ -15,8 +15,10 @@ package struct ProductM2CleanupRunner: Sendable {
 
   func run(
     baseline: ProductM2NetworkBaseline,
+    networkWindow: NetworkCleanupCaptureWindow,
     coldGeneration: VendorHelperGenerationSnapshot,
     portalLease: (any ProductM2PortalLeasing)?,
+    selectedRoutes: VendorCharonSelectedRouteMatcher?,
     controlLease: ProductM2ControlLease?,
     startReceipt: ProductM2ControlReceipt
   ) async -> ProductM2CleanupResult {
@@ -27,7 +29,14 @@ package struct ProductM2CleanupRunner: Sendable {
     )
     let logout = await closePortal(portalLease)
     let verifier = dependencies.verifyCleanup
-    let evidence = await Task.detached { await verifier(baseline) }.value
+    let evidence = await Task.detached {
+      await verifier(
+        baseline,
+        networkWindow,
+        selectedRoutes,
+        startReceipt.requestSent
+      )
+    }.value
     let portalClosed = portalLease == nil || logout == .accepted
     let controlClassified = control.path != .cleanupUnproven
     return ProductM2CleanupResult(
@@ -141,6 +150,7 @@ private struct ControlCleanup {
 
 package struct ProductM2Execution {
   let request: ProductM2ConnectRequest
+  let networkWindow: NetworkCleanupCaptureWindow
   var outcome: ProductM2ConnectOutcome = .portalAcquisitionRejected
   var finalState: ProductM2ConnectionState = .signedOut
   var lastGoodState: ProductM2ConnectionState = .signedOut
@@ -148,6 +158,7 @@ package struct ProductM2Execution {
   var portalAcquisition: ProductM2PortalAcquisitionOutcome = .notRequested
   var startOutcome: ProductM2ControlOutcome = .notAttempted
   var sshProof: ProductM2SSHProofOutcome = .notAttempted
+  var sshProofEvidence: ProductM2FreshSSHProofEvidence?
   var cleanupPath: ProductM2CleanupPath = .notRequired
   var stopOutcome: ProductM2ControlOutcome = .notAttempted
   var emergencyStopOutcome: ProductM2ControlOutcome = .notAttempted
@@ -207,6 +218,7 @@ package struct ProductM2Execution {
       portalAcquisition: portalAcquisition,
       startOutcome: startOutcome,
       sshProof: sshProof,
+      sshProofEvidence: sshProofEvidence,
       cleanupPath: cleanupPath,
       stopOutcome: stopOutcome,
       emergencyStopOutcome: emergencyStopOutcome,

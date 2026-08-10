@@ -12,7 +12,10 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
   package func run(
     _ request: ProductM2ConnectRequest
   ) async -> ProductM2ConnectReport {
-    var execution = ProductM2Execution(request: request)
+    var execution = ProductM2Execution(
+      request: request,
+      networkWindow: NetworkCleanupCaptureWindow()
+    )
     guard dependencies.controlRuntimePreflightAccepted() else {
       execution.fail(.preflightBlocked, event: .preflightRejected, state: .blocked)
       return execution.report()
@@ -24,8 +27,12 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
       execution.fail(.preflightBlocked, event: .preflightRejected, state: .blocked)
       return execution.report()
     }
-
-    guard let baseline = await dependencies.captureNetworkBaseline() else {
+    guard
+      let baseline = await dependencies.captureNetworkBaseline(
+        execution.networkWindow,
+        nil
+      )
+    else {
       execution.fail(
         .networkBaselineUnavailable,
         event: .networkBaselineUnavailable,
@@ -130,7 +137,46 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
         portalLease: portalLease
       )
     }
-    guard let preStartBaseline = await dependencies.captureNetworkBaseline() else {
+
+    let selectedRoutes: VendorCharonSelectedRouteMatcher
+    do {
+      selectedRoutes = try selectedRouteMatcher(
+        snapshot: portalLease.snapshot,
+        handle: selected.summary.handle,
+        requiredTargetIPv4: request.sshTarget.requiredTargetIPv4
+      )
+    } catch ProductM2NetworkGateError.selectedRouteCoverageRejected {
+      execution.fail(
+        .selectedRouteCoverageRejected,
+        event: .selectedRouteCoverageRejected,
+        state: .blocked
+      )
+      return await finish(
+        &execution,
+        baseline: baseline,
+        coldGeneration: coldGeneration,
+        portalLease: portalLease
+      )
+    } catch {
+      execution.fail(
+        .startSnapshotRejected,
+        event: .startSnapshotRejected,
+        state: .blocked
+      )
+      return await finish(
+        &execution,
+        baseline: baseline,
+        coldGeneration: coldGeneration,
+        portalLease: portalLease
+      )
+    }
+
+    guard
+      let preStartBaseline = await dependencies.captureNetworkBaseline(
+        execution.networkWindow,
+        selectedRoutes
+      )
+    else {
       execution.fail(
         .networkBaselineUnavailable,
         event: .networkBaselineUnavailable,
@@ -151,9 +197,10 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
       )
       return await finish(
         &execution,
-        baseline: baseline,
+        baseline: preStartBaseline,
         coldGeneration: coldGeneration,
-        portalLease: portalLease
+        portalLease: portalLease,
+        selectedRoutes: selectedRoutes
       )
     }
     let recheckedGeneration = dependencies.observeGeneration()
@@ -172,7 +219,8 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
         &execution,
         baseline: preStartBaseline,
         coldGeneration: coldGeneration,
-        portalLease: portalLease
+        portalLease: portalLease,
+        selectedRoutes: selectedRoutes
       )
     }
     if Task.isCancelled {
@@ -181,87 +229,18 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
         &execution,
         baseline: preStartBaseline,
         coldGeneration: coldGeneration,
-        portalLease: portalLease
+        portalLease: portalLease,
+        selectedRoutes: selectedRoutes
       )
     }
 
-    let validator = replyValidator(before: coldGeneration)
-    var pending: ProductM2PendingStart?
-    do {
-      try AuthenticatedPortalSnapshotMapper.withValidatedStartSnapshot(
-        portalLease.snapshot,
-        handle: selected.summary.handle
-      ) { snapshot in
-        pending = dependencies.control.beginStart(
-          snapshot: snapshot,
-          peerGenerationValidator: validator
-        )
-      }
-    } catch {
-      execution.fail(
-        .startSnapshotRejected,
-        event: .startSnapshotRejected,
-        state: .blocked
-      )
-      return await finish(
-        &execution,
-        baseline: preStartBaseline,
-        coldGeneration: coldGeneration,
-        portalLease: portalLease
-      )
-    }
-
-    execution.lastGoodState = .connecting
-    let start =
-      await pending?.result()
-      ?? ProductM2StartResult(
-        receipt: .unsent(.snapshotEncodingFailed),
-        lease: nil
-      )
-    execution.startOutcome = start.receipt.outcome
-    execution.helperMutationRequested = start.receipt.requestSent
-
-    if start.receipt.transportAcknowledged, start.lease != nil {
-      let postStart = dependencies.observeGeneration()
-      if !ProductM2GenerationFence.singleRunningGeneration(
-        coldGeneration,
-        postStart
-      ) {
-        execution.fail(
-          .generationFenceRejected,
-          event: .postStartGenerationRejected,
-          state: .failed
-        )
-      }
-    } else {
-      execution.fail(.startRejected, event: .startControlRejected, state: .failed)
-    }
-
-    if execution.firstBadEvent == nil {
-      if Task.isCancelled {
-        execution.sshProof = .cancelled
-        execution.fail(.cancelled, event: .cancelled, state: .failed)
-      } else {
-        execution.sshProof = await dependencies.proveFreshSSH(request.sshTarget)
-        if Task.isCancelled {
-          execution.sshProof = .cancelled
-          execution.fail(.cancelled, event: .cancelled, state: .failed)
-        } else if execution.sshProof == .proven {
-          execution.outcome = .connectedAndCleanedUp
-          execution.lastGoodState = .connected
-        } else {
-          execution.fail(.sshProofRejected, event: .sshProofRejected, state: .failed)
-        }
-      }
-    }
-
-    return await finish(
+    return await startProveAndFinish(
       &execution,
       baseline: preStartBaseline,
       coldGeneration: coldGeneration,
       portalLease: portalLease,
-      controlLease: start.lease,
-      startReceipt: start.receipt
+      selected: selected,
+      selectedRoutes: selectedRoutes
     )
   }
 
