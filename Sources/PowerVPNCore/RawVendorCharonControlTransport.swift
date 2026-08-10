@@ -11,7 +11,16 @@ package struct RawVendorCharonControlTransport: Sendable {
       @escaping @Sendable (VendorCharonControlConnectionEvent) -> Void
     ) -> any VendorCharonControlConnectionDriving
 
+  typealias EmergencyDriverFactory =
+    @Sendable (
+      DispatchQueue,
+      @escaping @Sendable (VendorXPCConnectionEvent) -> Void,
+      @escaping @Sendable (VendorXPCReplyCallbackEvent) -> Void,
+      @escaping @Sendable (VendorCharonControlConnectionEvent) -> Void
+    ) -> any VendorCharonEmergencyConnectionDriving
+
   let driverFactory: DriverFactory
+  let emergencyDriverFactory: EmergencyDriverFactory
 
   package init() {
     driverFactory = { queue, handler in
@@ -20,10 +29,34 @@ package struct RawVendorCharonControlTransport: Sendable {
         connectionEventHandler: handler
       )
     }
+    emergencyDriverFactory = { queue, probeHandler, probeReplyHandler, stopHandler in
+      SystemVendorCharonEmergencyConnectionDriver(
+        queue: queue,
+        probeEventHandler: probeHandler,
+        probeReplyHandler: probeReplyHandler,
+        stopEventHandler: stopHandler
+      )
+    }
   }
 
   init(driverFactory: @escaping DriverFactory) {
     self.driverFactory = driverFactory
+    emergencyDriverFactory = { queue, probeHandler, probeReplyHandler, stopHandler in
+      SystemVendorCharonEmergencyConnectionDriver(
+        queue: queue,
+        probeEventHandler: probeHandler,
+        probeReplyHandler: probeReplyHandler,
+        stopEventHandler: stopHandler
+      )
+    }
+  }
+
+  init(
+    driverFactory: @escaping DriverFactory,
+    emergencyDriverFactory: @escaping EmergencyDriverFactory
+  ) {
+    self.driverFactory = driverFactory
+    self.emergencyDriverFactory = emergencyDriverFactory
   }
 
   package func beginStart(

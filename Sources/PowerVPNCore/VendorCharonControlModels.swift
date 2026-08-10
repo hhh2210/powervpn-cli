@@ -6,6 +6,8 @@ package enum VendorCharonControlOperation: String, Equatable, Sendable {
 package enum VendorCharonControlOutcome: String, Equatable, Sendable {
   case transportAcknowledged = "transport_acknowledged"
   case preflightBlocked = "preflight_blocked"
+  case helperVersionMismatch = "helper_version_mismatch"
+  case helperVersionRejected = "helper_version_rejected"
   case invalidTimeout = "invalid_timeout"
   case cancelled
   case timeout
