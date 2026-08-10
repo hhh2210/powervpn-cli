@@ -22,7 +22,7 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
     }
     let coldGeneration = await dependencies.observeGeneration()
     guard coldGeneration.exactInactive,
-      dependencies.preflightAccepted(coldGeneration)
+      await dependencies.preflightAccepted(coldGeneration)
     else {
       execution.fail(.preflightBlocked, event: .preflightRejected, state: .blocked)
       return execution.report()
@@ -221,7 +221,7 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
       ProductM2GenerationFence.sameColdGeneration(
         coldGeneration,
         recheckedGeneration
-      ), dependencies.preflightAccepted(recheckedGeneration)
+      ), await dependencies.preflightAccepted(recheckedGeneration)
     else {
       execution.fail(
         .generationFenceRejected,
