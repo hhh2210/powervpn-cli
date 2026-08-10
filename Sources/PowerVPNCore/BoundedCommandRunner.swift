@@ -12,24 +12,29 @@ package enum BoundedCommandOutcome: String, Equatable, Sendable {
 }
 
 package struct BoundedCommandRequest: Equatable, Sendable {
+  package static let sshAuthSocketEnvironmentKey = "SSH_AUTH_SOCK"
+
   package let executable: String
   package let arguments: [String]
   package let timeoutMilliseconds: Int
   package let stdoutLimitBytes: Int
   package let stderrLimitBytes: Int
+  package let environment: [String: String]
 
   package init(
     executable: String,
     arguments: [String],
     timeoutMilliseconds: Int,
     stdoutLimitBytes: Int,
-    stderrLimitBytes: Int
+    stderrLimitBytes: Int,
+    environment: [String: String] = [:]
   ) {
     self.executable = executable
     self.arguments = arguments
     self.timeoutMilliseconds = timeoutMilliseconds
     self.stdoutLimitBytes = stdoutLimitBytes
     self.stderrLimitBytes = stderrLimitBytes
+    self.environment = environment
   }
 
   var isValid: Bool {
@@ -43,6 +48,7 @@ package struct BoundedCommandRequest: Equatable, Sendable {
       && arguments.count <= 4_096
       && arguments.allSatisfy({ $0.utf8.count <= 1_048_576 })
       && arguments.reduce(0, { $0 + $1.utf8.count }) <= 1_048_576
+      && Self.isValidEnvironment(environment)
       && (1...60_000).contains(timeoutMilliseconds)
       && (1...16_777_216).contains(stdoutLimitBytes)
       && (1...16_777_216).contains(stderrLimitBytes)
@@ -51,6 +57,17 @@ package struct BoundedCommandRequest: Equatable, Sendable {
   private static let forbiddenExecutableNames: Set<String> = [
     "bash", "csh", "dash", "env", "fish", "ksh", "sh", "tcsh", "zsh",
   ]
+
+  private static func isValidEnvironment(_ environment: [String: String]) -> Bool {
+    guard environment.keys.allSatisfy({ $0 == sshAuthSocketEnvironmentKey }) else {
+      return false
+    }
+    guard let socket = environment[sshAuthSocketEnvironmentKey] else { return true }
+    return socket.hasPrefix("/")
+      && (1...1_024).contains(socket.utf8.count)
+      && !socket.utf8.contains(0)
+      && socket.rangeOfCharacter(from: .newlines) == nil
+  }
 }
 
 package struct BoundedCommandResult: Equatable, Sendable {

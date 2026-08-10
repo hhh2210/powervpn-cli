@@ -82,6 +82,16 @@ import Testing
     #expect(!evidence.strictHostKeyPolicy)
     #expect(await trace.count == 0)
   }
+
+  @Test func invalidSSHAuthSocketRejectsBeforeProcessLaunch() async {
+    let evidence = await ProductM2FreshSSHProver(
+      homeDirectory: "/Users/tester",
+      sshAuthSocket: "relative-agent-socket"
+    ).prove(.thu21)
+    #expect(evidence.outcome == .rejected)
+    #expect(!evidence.processStarted)
+    #expect(!evidence.processReaped)
+  }
 }
 
 private actor FreshSSHExecutionTrace {

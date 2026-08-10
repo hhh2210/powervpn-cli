@@ -81,7 +81,11 @@ final class BoundedCommandExecution: @unchecked Sendable {
   private func configureProcess() {
     process.executableURL = URL(fileURLWithPath: request.executable)
     process.arguments = request.arguments
-    process.environment = ["LANG": "C", "LC_ALL": "C"]
+    var environment = ["LANG": "C", "LC_ALL": "C"]
+    if let socket = request.environment[BoundedCommandRequest.sshAuthSocketEnvironmentKey] {
+      environment[BoundedCommandRequest.sshAuthSocketEnvironmentKey] = socket
+    }
+    process.environment = environment
     process.standardInput = FileHandle.nullDevice
     process.standardOutput = stdoutPipe
     process.standardError = stderrPipe

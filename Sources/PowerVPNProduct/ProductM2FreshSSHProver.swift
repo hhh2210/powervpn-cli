@@ -22,6 +22,9 @@ package struct ProductM2FreshSSHProver: Sendable {
 
   package init(
     homeDirectory: String = FileManager.default.homeDirectoryForCurrentUser.path,
+    sshAuthSocket: String? = ProcessInfo.processInfo.environment[
+      BoundedCommandRequest.sshAuthSocketEnvironmentKey
+    ],
     runner: BoundedCommandRunner = BoundedCommandRunner()
   ) {
     self.init(
@@ -34,7 +37,10 @@ package struct ProductM2FreshSSHProver: Sendable {
             arguments: command.arguments,
             timeoutMilliseconds: ProductM2FreshSSHCommand.timeoutMilliseconds,
             stdoutLimitBytes: ProductM2FreshSSHCommand.outputLimitBytes,
-            stderrLimitBytes: ProductM2FreshSSHCommand.outputLimitBytes
+            stderrLimitBytes: ProductM2FreshSSHCommand.outputLimitBytes,
+            environment: sshAuthSocket.map {
+              [BoundedCommandRequest.sshAuthSocketEnvironmentKey: $0]
+            } ?? [:]
           ))
         return ProductM2FreshSSHProcessResult(result)
       }

@@ -108,6 +108,52 @@ import Testing
     #expect(failed.stderr.isEmpty)
     #expect(!String(describing: failed).contains(marker))
   }
+
+  @Test func environmentIsClosedAndSSHAuthSocketIsExplicit() async {
+    let socket = "/private/tmp/powervpn-test-agent.sock"
+    let explicit = await BoundedCommandRunner().run(
+      request(
+        "/usr/bin/printenv",
+        arguments: [BoundedCommandRequest.sshAuthSocketEnvironmentKey],
+        environment: [BoundedCommandRequest.sshAuthSocketEnvironmentKey: socket]
+      )
+    )
+    #expect(explicit.succeeded)
+    #expect(String(decoding: explicit.stdout, as: UTF8.self) == "\(socket)\n")
+
+    let absent = await BoundedCommandRunner().run(
+      request(
+        "/usr/bin/printenv",
+        arguments: [BoundedCommandRequest.sshAuthSocketEnvironmentKey]
+      )
+    )
+    #expect(absent.outcome == .exited)
+    #expect(absent.exitStatus != 0)
+    #expect(absent.stdout.isEmpty)
+
+    let unknown = await BoundedCommandRunner().run(
+      request("/usr/bin/true", environment: ["HOME": "/Users/tester"])
+    )
+    #expect(unknown.outcome == .invalidRequest)
+    #expect(!unknown.started)
+  }
+
+  @Test func invalidSSHAuthSocketPathsNeverLaunch() async {
+    let invalidValues = [
+      "", "relative/socket", "/tmp/line\nfeed", "/tmp/carriage\rreturn", "/tmp/nul\0byte",
+      "/tmp/unicode\u{2028}line", "/" + String(repeating: "x", count: 1_024),
+    ]
+    for value in invalidValues {
+      let result = await BoundedCommandRunner().run(
+        request(
+          "/usr/bin/true",
+          environment: [BoundedCommandRequest.sshAuthSocketEnvironmentKey: value]
+        )
+      )
+      #expect(result.outcome == .invalidRequest)
+      #expect(!result.started)
+    }
+  }
 }
 
 private func request(
@@ -115,13 +161,15 @@ private func request(
   arguments: [String] = [],
   timeout: Int = 1_000,
   stdoutLimit: Int = 1_024,
-  stderrLimit: Int = 1_024
+  stderrLimit: Int = 1_024,
+  environment: [String: String] = [:]
 ) -> BoundedCommandRequest {
   BoundedCommandRequest(
     executable: executable,
     arguments: arguments,
     timeoutMilliseconds: timeout,
     stdoutLimitBytes: stdoutLimit,
-    stderrLimitBytes: stderrLimit
+    stderrLimitBytes: stderrLimit,
+    environment: environment
   )
 }
