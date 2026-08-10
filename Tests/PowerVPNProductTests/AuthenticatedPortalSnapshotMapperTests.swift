@@ -19,7 +19,7 @@ import Testing
 
     let resources = try runtime.resources(from: fixture.snapshot)
     let resource = try #require(resources.selectableResources.first)
-    #expect(resources.schemaVersion == 2)
+    #expect(resources.schemaVersion == 3)
     #expect(resources.selectableResources.count == 1)
     #expect(resource.displayName == "raw-resource-name")
     #expect(resource.handle.hasPrefix("portal:"))
@@ -37,7 +37,7 @@ import Testing
     )
     #expect(session.availability == .available)
     #expect(session.sources == [.authenticatedPortalResource])
-    #expect(report.schemaVersion == 3)
+    #expect(report.schemaVersion == 4)
     #expect(report.selectedResource == resource)
     #expect(report.firstMissingField == .ikePort)
     #expect(report.blocker == .authorizedResourceSnapshotIncomplete)

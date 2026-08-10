@@ -1,6 +1,5 @@
 import Foundation
 import PowerVPNCore
-import PowerVPNPortal
 
 package struct ProductM2ConnectOnceCoordinator: Sendable {
   let dependencies: ProductM2ConnectOnceDependencies
@@ -75,12 +74,15 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
 
     execution.lastGoodState = .authenticating
     let acquisition = await dependencies.acquireAuthorization()
-    let portalLease: (any ProductM2PortalLeasing)?
+    let authorizationLease: ProductM2AuthorizedResourceLease?
     switch acquisition {
-    case .acquired(let source, let lease):
-      portalLease = lease
-      execution.serverContactRequested = source == .nativePortal
-      guard source == dependencies.authorizationSource else {
+    case .acquired(let source, let lease, let contacted):
+      authorizationLease = lease
+      execution.serverContactRequested = contacted
+      execution.authorizationOwnedMaterialErased = false
+      guard source == dependencies.authorizationSource,
+        lease.source == source
+      else {
         execution.authorizationAcquisition = .rejected
         execution.authorizationFailure = .sourceMismatch
         execution.fail(
@@ -92,13 +94,15 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
           &execution,
           baseline: baseline,
           coldGeneration: coldGeneration,
-          portalLease: lease
+          authorizationLease: lease
         )
       }
       execution.authorizationAcquisition = .acquired
-    case .rejected(let source, let failure, let contacted):
-      portalLease = nil
-      execution.serverContactRequested = contacted
+    case .rejected(let source, let failure, let cleanup):
+      authorizationLease = nil
+      execution.serverContactRequested = cleanup.serverContactRequested
+      execution.authorizationOwnedMaterialErased = cleanup.ownedMaterialErased
+      execution.authorizationClose = cleanup.outcome
       let normalizedFailure =
         source == dependencies.authorizationSource ? failure : .sourceMismatch
       execution.authorizationAcquisition =
@@ -116,7 +120,7 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
       )
     }
 
-    guard let portalLease else {
+    guard let authorizationLease else {
       execution.fail(
         .authorizationAcquisitionRejected,
         event: .authorizationAcquisitionRejected,
@@ -134,28 +138,56 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
         &execution,
         baseline: baseline,
         coldGeneration: coldGeneration,
-        portalLease: portalLease
+        authorizationLease: authorizationLease
       )
     }
 
-    let selected: ProductResourceCandidate
+    let selection: ProductM2AuthorizedResourceSelection
     do {
-      let candidates = try AuthenticatedPortalSnapshotMapper.map(portalLease.snapshot)
-        .filter { $0.summary.displayName == request.resourceDisplayName }
-      guard candidates.count == 1 else {
-        let outcome: ProductM2ConnectOutcome =
-          candidates.isEmpty ? .resourceNotFound : .resourceAmbiguous
-        let event: ProductM2BadEvent =
-          candidates.isEmpty ? .resourceNotFound : .resourceAmbiguous
-        execution.fail(outcome, event: event, state: .blocked)
-        return await finish(
-          &execution,
-          baseline: baseline,
-          coldGeneration: coldGeneration,
-          portalLease: portalLease
-        )
-      }
-      selected = candidates[0]
+      selection = try await authorizationLease.selectUnique(
+        displayName: request.resourceDisplayName,
+        requiredTargetIPv4: request.sshTarget.requiredTargetIPv4
+      )
+    } catch ProductM2AuthorizedResourceSelectionError.resourceNotFound {
+      execution.fail(.resourceNotFound, event: .resourceNotFound, state: .blocked)
+      return await finish(
+        &execution,
+        baseline: baseline,
+        coldGeneration: coldGeneration,
+        authorizationLease: authorizationLease
+      )
+    } catch ProductM2AuthorizedResourceSelectionError.resourceAmbiguous {
+      execution.fail(.resourceAmbiguous, event: .resourceAmbiguous, state: .blocked)
+      return await finish(
+        &execution,
+        baseline: baseline,
+        coldGeneration: coldGeneration,
+        authorizationLease: authorizationLease
+      )
+    } catch ProductM2AuthorizedResourceSelectionError.selectedRouteCoverageRejected {
+      execution.fail(
+        .selectedRouteCoverageRejected,
+        event: .selectedRouteCoverageRejected,
+        state: .blocked
+      )
+      return await finish(
+        &execution,
+        baseline: baseline,
+        coldGeneration: coldGeneration,
+        authorizationLease: authorizationLease
+      )
+    } catch ProductM2AuthorizedResourceSelectionError.startSnapshotRejected {
+      execution.fail(
+        .startSnapshotRejected,
+        event: .startSnapshotRejected,
+        state: .blocked
+      )
+      return await finish(
+        &execution,
+        baseline: baseline,
+        coldGeneration: coldGeneration,
+        authorizationLease: authorizationLease
+      )
     } catch {
       execution.fail(
         .resourceCatalogRejected,
@@ -166,7 +198,7 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
         &execution,
         baseline: baseline,
         coldGeneration: coldGeneration,
-        portalLease: portalLease
+        authorizationLease: authorizationLease
       )
     }
 
@@ -177,42 +209,11 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
         &execution,
         baseline: baseline,
         coldGeneration: coldGeneration,
-        portalLease: portalLease
+        authorizationLease: authorizationLease
       )
     }
 
-    let selectedRoutes: VendorCharonSelectedRouteMatcher
-    do {
-      selectedRoutes = try selectedRouteMatcher(
-        snapshot: portalLease.snapshot,
-        handle: selected.summary.handle,
-        requiredTargetIPv4: request.sshTarget.requiredTargetIPv4
-      )
-    } catch ProductM2NetworkGateError.selectedRouteCoverageRejected {
-      execution.fail(
-        .selectedRouteCoverageRejected,
-        event: .selectedRouteCoverageRejected,
-        state: .blocked
-      )
-      return await finish(
-        &execution,
-        baseline: baseline,
-        coldGeneration: coldGeneration,
-        portalLease: portalLease
-      )
-    } catch {
-      execution.fail(
-        .startSnapshotRejected,
-        event: .startSnapshotRejected,
-        state: .blocked
-      )
-      return await finish(
-        &execution,
-        baseline: baseline,
-        coldGeneration: coldGeneration,
-        portalLease: portalLease
-      )
-    }
+    let selectedRoutes = selection.selectedRoutes
 
     guard
       let preStartBaseline = await dependencies.captureNetworkBaseline(
@@ -229,7 +230,7 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
         &execution,
         baseline: baseline,
         coldGeneration: coldGeneration,
-        portalLease: portalLease
+        authorizationLease: authorizationLease
       )
     }
     guard dependencies.baselineStable(baseline, preStartBaseline) else {
@@ -242,7 +243,7 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
         &execution,
         baseline: preStartBaseline,
         coldGeneration: coldGeneration,
-        portalLease: portalLease,
+        authorizationLease: authorizationLease,
         selectedRoutes: selectedRoutes
       )
     }
@@ -262,7 +263,7 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
         &execution,
         baseline: preStartBaseline,
         coldGeneration: coldGeneration,
-        portalLease: portalLease,
+        authorizationLease: authorizationLease,
         selectedRoutes: selectedRoutes
       )
     }
@@ -272,7 +273,7 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
         &execution,
         baseline: preStartBaseline,
         coldGeneration: coldGeneration,
-        portalLease: portalLease,
+        authorizationLease: authorizationLease,
         selectedRoutes: selectedRoutes
       )
     }
@@ -281,9 +282,8 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
       &execution,
       baseline: preStartBaseline,
       coldGeneration: coldGeneration,
-      portalLease: portalLease,
-      selected: selected,
-      selectedRoutes: selectedRoutes
+      authorizationLease: authorizationLease,
+      selection: selection
     )
   }
 

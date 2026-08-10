@@ -13,19 +13,22 @@ package enum VendorCharonSelectedRouteMatcherError: Error, Equatable, Sendable {
 package final class VendorCharonSelectedRouteMatcher: @unchecked Sendable {
   private let key: SymmetricKey
   private let selectedDestinationTokens: Set<Data>
-  let requiredTargetIPv4: UInt32
+  fileprivate let lineage: VendorCharonStartLineage
+  package let requiredTargetIPv4: UInt32
   package let selectedRouteCount: Int
 
   init(
     keyData: Data,
     routes: [(network: UInt32, prefix: UInt8)],
-    requiredTargetIPv4: UInt32
+    requiredTargetIPv4: UInt32,
+    lineage: VendorCharonStartLineage
   ) {
     let localKey = SymmetricKey(data: keyData)
     let localTokens = Set(routes.map { Self.destinationToken($0, key: localKey) })
     key = localKey
     selectedDestinationTokens = localTokens
     self.requiredTargetIPv4 = requiredTargetIPv4
+    self.lineage = lineage
     selectedRouteCount = localTokens.count
   }
 
@@ -150,6 +153,16 @@ package final class VendorCharonSelectedRouteMatcher: @unchecked Sendable {
 }
 
 extension VendorCharonStartSnapshot {
+  package func isBound(
+    to matcher: VendorCharonSelectedRouteMatcher,
+    requiredTargetIPv4: UInt32
+  ) -> Bool {
+    guard matcher.requiredTargetIPv4 == requiredTargetIPv4,
+      let lineage = candidate.lineage
+    else { return false }
+    return matcher.lineage === lineage
+  }
+
   /// Builds a value-free matcher only when this exact resource covers the
   /// caller's fixed numeric SSH target. Neither the target nor route values
   /// escape this borrow.
@@ -179,14 +192,16 @@ extension VendorCharonStartSnapshot {
     guard
       routes.contains(where: {
         Self.masked(requiredTargetIPv4, prefix: $0.prefix) == $0.network
-      })
+      }),
+      let lineage = candidate.lineage
     else {
       throw VendorCharonSelectedRouteMatcherError.requiredTargetNotCovered
     }
     return VendorCharonSelectedRouteMatcher(
       keyData: Data((0..<32).map { _ in UInt8.random(in: .min ... .max) }),
       routes: routes,
-      requiredTargetIPv4: requiredTargetIPv4
+      requiredTargetIPv4: requiredTargetIPv4,
+      lineage: lineage
     )
   }
 

@@ -123,7 +123,8 @@ import Testing
     VendorCharonSelectedRouteMatcher(
       keyData: Data(repeating: 7, count: 32),
       routes: routes,
-      requiredTargetIPv4: target
+      requiredTargetIPv4: target,
+      lineage: VendorCharonStartLineage()
     )
   }
 

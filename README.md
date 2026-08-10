@@ -67,7 +67,22 @@ The default runtime currently stops with
 `authorized_resource_provider_unavailable` before generating an approval code,
 opening `/dev/tty`, installing signal handlers or running any observer. It does
 not silently fall back to the native username/password Portal lane whose last
-authorized result was `tls_rejected`. Once a legitimate `vendor_once`
+authorized result was `tls_rejected`. M2 authorization is now source-neutral:
+one actor-owned authorization generation provides a value-free validated
+catalog, one exact resource selection, one target-bound selected-route matcher
+and one start capability. Core lineage binds the matcher to the snapshot that
+is reborrowed for start; a submitted start remains an irreversible receipt even
+if a source wrapper subsequently invokes its callback again or throws. Close
+revokes the capability and erases app-owned material before its first await.
+The native Portal path exists only as an explicitly injected adapter.
+
+The installed app currently supplies no legitimate `vendor_once` provider.
+Its signed bundle `resource.xml` contains static resource-shaped template data,
+but it is build-time material rather than a current-user authenticated
+generation and is therefore never consumed. Official authorized resources are
+held only in the GUI process after login and are cleared on logout; preferences
+and the credential-history database are not resource providers. Once a
+legitimate `vendor_once`
 authorized-resource provider exists, one approved transaction will own scoped
 snapshot construction, `start_connection`, a bounded same-session connected
 status wait, and an active network snapshot whose effective route for the

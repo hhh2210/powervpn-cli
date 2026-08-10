@@ -30,10 +30,12 @@ import Testing
     }
 
     switch await provider.acquire() {
-    case .rejected(let source, let failure, let contacted):
+    case .rejected(let source, let failure, let cleanup):
       #expect(source == .nativePortal)
       #expect(failure == .tlsRejected)
-      #expect(contacted)
+      #expect(cleanup.serverContactRequested)
+      #expect(cleanup.ownedMaterialErased)
+      #expect(cleanup.outcome == .notRequired)
     case .acquired:
       Issue.record("TLS rejection must not become an acquired authorization")
     }
@@ -55,7 +57,12 @@ import Testing
         .rejected(
           source: .nativePortal,
           failure: .tlsRejected,
-          serverContactRequested: true
+          cleanup: ProductM2AuthorizationCloseReceipt(
+            outcome: .notRequired,
+            ownedMaterialErased: true,
+            sourceCloseRequested: false,
+            serverContactRequested: true
+          )
         )
       },
       control: productM2TestControl(trace: trace, plan: .acknowledged),
@@ -73,6 +80,7 @@ import Testing
     #expect(report.authorizationSource == .nativePortal)
     #expect(report.authorizationAcquisition == .rejected)
     #expect(report.authorizationFailure == .tlsRejected)
+    #expect(report.authorizationOwnedMaterialErased)
     #expect(report.serverContactRequested)
     #expect(!report.helperMutationRequested)
     #expect(trace.count("begin_start") == 0)
@@ -107,12 +115,111 @@ import Testing
     #expect(provider.source == .vendorOnce)
     #expect(provider.availabilityFailure == .providerUnavailable)
     switch await provider.acquire() {
-    case .rejected(let source, let failure, let contacted):
+    case .rejected(let source, let failure, let cleanup):
       #expect(source == .vendorOnce)
       #expect(failure == .providerUnavailable)
-      #expect(!contacted)
+      #expect(!cleanup.serverContactRequested)
+      #expect(cleanup.ownedMaterialErased)
+      #expect(cleanup.outcome == .notRequired)
     case .acquired:
       Issue.record("unavailable provider must fail closed")
     }
+  }
+
+  @Test func rejectedAcquisitionWithoutErasureCannotPassCleanup() async {
+    let trace = ProductM2TestTrace()
+    let dependencies = ProductM2ConnectOnceDependencies(
+      controlRuntimePreflightAccepted: { true },
+      observeGeneration: { m2ColdGeneration },
+      preflightAccepted: { _ in true },
+      captureNetworkBaseline: { window, selectedRoutes in
+        trace.nextBaseline(window: window, selectedRoutes: selectedRoutes)
+      },
+      baselineStable: { _, _ in true },
+      assessActiveConnection: { _, _ in .unavailable },
+      authorizationSource: .vendorOnce,
+      acquireAuthorization: {
+        .rejected(
+          source: .vendorOnce,
+          failure: .internalFailure,
+          cleanup: ProductM2AuthorizationCloseReceipt(
+            outcome: .notRequired,
+            ownedMaterialErased: false,
+            sourceCloseRequested: false,
+            serverContactRequested: false
+          )
+        )
+      },
+      control: productM2TestControl(trace: trace, plan: .acknowledged),
+      proveFreshSSH: { target in m2SSHEvidence(.rejected, target: target) },
+      verifyCleanup: { _, _, _, _ in m2CompleteCleanup }
+    )
+
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: dependencies
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(report.outcome == .cleanupUnproven)
+    #expect(report.firstBadEvent == .authorizationAcquisitionRejected)
+    #expect(!report.authorizationOwnedMaterialErased)
+    #expect(!report.cleanupVerified)
+    #expect(trace.count("begin_start") == 0)
+    #expect(trace.count("ssh") == 0)
+  }
+
+  @Test func rejectedPortalLogoutCannotPassCleanup() async {
+    let report = PortalLoginReport(
+      status: .resourceListRejected,
+      operations: PortalOperationEvidence(
+        loginRequested: true,
+        loginAccepted: true,
+        sessionCheckRequested: false,
+        sessionCheckAccepted: false,
+        resourceListRequested: true,
+        resourceListAccepted: false,
+        logoutRequested: true,
+        logoutAccepted: false
+      ),
+      ownedMaterial: PortalOwnedMaterialEvidence(
+        credentialsErased: true,
+        requestBodiesErased: true,
+        responseBodiesErased: true,
+        sessionMaterialErased: true
+      )
+    )
+    let provider = ProductM2PortalAdapter { .rejected(report) }
+    let trace = ProductM2TestTrace()
+    let dependencies = ProductM2ConnectOnceDependencies(
+      controlRuntimePreflightAccepted: { true },
+      observeGeneration: { m2ColdGeneration },
+      preflightAccepted: { _ in true },
+      captureNetworkBaseline: { window, selectedRoutes in
+        trace.nextBaseline(window: window, selectedRoutes: selectedRoutes)
+      },
+      baselineStable: { _, _ in true },
+      assessActiveConnection: { _, _ in .unavailable },
+      authorizationSource: .nativePortal,
+      acquireAuthorization: provider.acquire,
+      control: productM2TestControl(trace: trace, plan: .acknowledged),
+      proveFreshSSH: { target in m2SSHEvidence(.rejected, target: target) },
+      verifyCleanup: { _, _, _, _ in m2CompleteCleanup }
+    )
+
+    let result = await ProductM2ConnectOnceCoordinator(
+      dependencies: dependencies
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(result.outcome == .cleanupUnproven)
+    #expect(result.authorizationFailure == .resourceListRejected)
+    #expect(result.authorizationClose == .rejected)
+    #expect(result.authorizationOwnedMaterialErased)
+    #expect(result.serverContactRequested)
+    #expect(!result.cleanupVerified)
+    #expect(trace.count("begin_start") == 0)
+    #expect(trace.count("ssh") == 0)
   }
 }

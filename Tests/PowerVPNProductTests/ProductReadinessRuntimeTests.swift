@@ -93,6 +93,31 @@ import Testing
     #expect(!snapshot.snapshotSerialized)
   }
 
+  @Test func installedVendorOnboardingIsASeparateAuthorizedSource() throws {
+    let candidate = ProductResourceCandidate(
+      summary: productSummary("resource"),
+      validation: completeValidation()
+    )
+    let observation = makeObservation(
+      directXPCStatus: .currentReachable,
+      resourceSource: .installedVendorOnboarding,
+      resourceCandidates: [candidate]
+    )
+    let runtime = ProductReadinessRuntime(observer: FixedProductObservation(observation))
+
+    let resources = runtime.resources()
+    #expect(resources.productState == .ready)
+    #expect(resources.resourceSource == .installedVendorOnboarding)
+    #expect(resources.selectableResources == [candidate.summary])
+    let snapshot = runtime.snapshotDryRun()
+    #expect(snapshot.snapshotComplete)
+    #expect(snapshot.resourceSource == .installedVendorOnboarding)
+
+    let json = String(decoding: try JSONEncoder().encode(snapshot), as: UTF8.self)
+    #expect(json.contains("\"resourceSource\":\"installed_vendor_onboarding\""))
+    #expect(!json.contains("authenticated_portal_snapshot"))
+  }
+
   @Test func missingInstalledProfileTakesPriorityInDoctor() {
     let observation = makeObservation(profileSource: .unavailable)
     let report = ProductReadinessRuntime(

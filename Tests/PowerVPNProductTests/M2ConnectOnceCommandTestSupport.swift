@@ -109,6 +109,7 @@ func report(
     stopOutcome: mutated ? .transportAcknowledged : .notAttempted,
     emergencyStopOutcome: .notAttempted,
     authorizationClose: mutated ? .accepted : .notRequired,
+    authorizationOwnedMaterialErased: true,
     cleanupEvidence: ProductM2CleanupEvidence(
       complete: cleanup, defaultRouteRestored: cleanup, dnsRestored: cleanup,
       interfacesRestored: cleanup, utunRestored: cleanup,

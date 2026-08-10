@@ -209,9 +209,9 @@ import Testing
     #expect(trace.count("verify") == 1)
   }
 
-  @Test(arguments: [PortalLeaseLogoutStatus.timedOut, .alreadyClosed])
+  @Test(arguments: [ProductM2AuthorizationCloseOutcome.timedOut, .alreadyClosed])
   func nonAcceptedPortalLogoutMakesCleanupUnproven(
-    _ logout: PortalLeaseLogoutStatus
+    _ logout: ProductM2AuthorizationCloseOutcome
   ) async throws {
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
     defer { fixture.erase() }

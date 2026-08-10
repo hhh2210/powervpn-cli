@@ -279,6 +279,7 @@ import Testing
 
     #expect(json.contains("\"containsSecrets\":false"))
     #expect(json.contains("\"snapshotSerialized\":false"))
+    #expect(json.contains("\"authorizationOwnedMaterialErased\":true"))
     #expect(!json.contains("portal:"))
     #expect(!json.contains("helper-session-material"))
     #expect(!json.contains("psk-material"))

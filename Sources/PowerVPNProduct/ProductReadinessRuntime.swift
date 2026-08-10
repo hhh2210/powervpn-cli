@@ -160,9 +160,9 @@ public struct ProductReadinessRuntime: Sendable {
   public func resources() -> ProductResourcesReport {
     let observation = observer.observe()
     let resources = observation.resourceCandidates.map(\.summary)
-    let validCatalog = resourceCatalogValid(observation.resourceCandidates)
+    let validCatalog = ProductResourceCatalog.isValid(observation.resourceCandidates)
     let available =
-      observation.resourceSource == .authenticatedPortalSnapshot
+      observation.resourceSource.isAuthorized
       && validCatalog
     return ProductResourcesReport(
       productState: available ? .ready : .blocked,
@@ -184,9 +184,9 @@ public struct ProductReadinessRuntime: Sendable {
   private func snapshotReport(
     _ observation: ProductReadinessObservation
   ) -> ProductSnapshotDryRunReport {
-    let catalogValid = resourceCatalogValid(observation.resourceCandidates)
+    let catalogValid = ProductResourceCatalog.isValid(observation.resourceCandidates)
     let candidate =
-      observation.resourceSource == .authenticatedPortalSnapshot
+      observation.resourceSource.isAuthorized
         && catalogValid && observation.resourceCandidates.count == 1
       ? observation.resourceCandidates[0] : nil
     let readiness =
@@ -206,7 +206,7 @@ public struct ProductReadinessRuntime: Sendable {
       ?? readiness.first { $0.availability.blocksSnapshot }?.field
     let complete =
       candidate?.snapshotComplete == true
-      && observation.resourceSource == .authenticatedPortalSnapshot
+      && observation.resourceSource.isAuthorized
       && candidate != nil
     let blocker: ProductBlocker?
     if complete {
@@ -266,17 +266,13 @@ public struct ProductReadinessRuntime: Sendable {
     }
   }
 
-  private func resourceCatalogValid(
-    _ candidates: [ProductResourceCandidate]
-  ) -> Bool {
-    guard !candidates.isEmpty,
-      candidates.allSatisfy({
-        !$0.summary.handle.isEmpty
-          && $0.summary.handle.utf8.count <= 256
-          && !$0.summary.displayName.isEmpty
-          && $0.summary.displayName.utf8.count <= 256
-      })
-    else { return false }
-    return Set(candidates.map(\.summary.handle)).count == candidates.count
+}
+
+extension ProductResourceSource {
+  fileprivate var isAuthorized: Bool {
+    switch self {
+    case .authenticatedPortalSnapshot, .installedVendorOnboarding: true
+    case .unavailable: false
+    }
   }
 }

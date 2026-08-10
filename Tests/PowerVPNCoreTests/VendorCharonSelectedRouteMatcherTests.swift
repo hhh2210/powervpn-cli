@@ -105,6 +105,17 @@ import Testing
     }
   }
 
+  @Test func matcherBindsTheExactSnapshotLineageAndRequiredTarget() throws {
+    let target = ipv4(11, 11, 30, 21)
+    let otherTarget = ipv4(11, 11, 30, 52)
+    let first = try selectedSnapshot(family: 4, routes: [("11.11.30.0", 24)])
+    let second = try selectedSnapshot(family: 4, routes: [("11.11.30.0", 24)])
+    let matcher = try first.makeSelectedRouteMatcher(requiredTargetIPv4: target)
+
+    #expect(first.isBound(to: matcher, requiredTargetIPv4: target))
+    #expect(!second.isBound(to: matcher, requiredTargetIPv4: target))
+    #expect(!first.isBound(to: matcher, requiredTargetIPv4: otherTarget))
+  }
 }
 
 private func matchedCount(

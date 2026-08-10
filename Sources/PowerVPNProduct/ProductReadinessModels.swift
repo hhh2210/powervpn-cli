@@ -24,6 +24,7 @@ public enum ProductProfileSource: String, Codable, Equatable, Sendable {
 
 public enum ProductResourceSource: String, Codable, Equatable, Sendable {
   case authenticatedPortalSnapshot = "authenticated_portal_snapshot"
+  case installedVendorOnboarding = "installed_vendor_onboarding"
   case unavailable
 }
 
@@ -60,7 +61,7 @@ public struct ProductHelperGeneration: Encodable, Equatable, Sendable {
 }
 
 public struct ProductDoctorReport: Encodable, Equatable, Sendable {
-  public let schemaVersion = 1
+  public let schemaVersion = 2
   public let productState: ProductState
   public let onboardingMode = ProductOnboardingMode.vendorOnce
   public let installedVersion: String?
@@ -94,7 +95,7 @@ public struct ProductHelperStatusReport: Encodable, Equatable, Sendable {
 }
 
 public struct ProductResourcesReport: Encodable, Equatable, Sendable {
-  public let schemaVersion = 2
+  public let schemaVersion = 3
   public let productState: ProductState
   public let onboardingMode = ProductOnboardingMode.vendorOnce
   public let profileSource: ProductProfileSource
@@ -130,6 +131,20 @@ public struct ProductResourceCandidate: Equatable, Sendable {
   }
 }
 
+package enum ProductResourceCatalog {
+  package static func isValid(_ candidates: [ProductResourceCandidate]) -> Bool {
+    guard !candidates.isEmpty,
+      candidates.allSatisfy({
+        !$0.summary.handle.isEmpty
+          && $0.summary.handle.utf8.count <= 256
+          && !$0.summary.displayName.isEmpty
+          && $0.summary.displayName.utf8.count <= 256
+      })
+    else { return false }
+    return Set(candidates.map(\.summary.handle)).count == candidates.count
+  }
+}
+
 public struct VendorSnapshotFieldReport: Encodable, Equatable, Sendable {
   public let field: VendorCharonStartField
   public let requirement: VendorCharonStartFieldRequirement
@@ -139,7 +154,7 @@ public struct VendorSnapshotFieldReport: Encodable, Equatable, Sendable {
 }
 
 public struct ProductSnapshotDryRunReport: Encodable, Equatable, Sendable {
-  public let schemaVersion = 3
+  public let schemaVersion = 4
   public let productState: ProductState
   public let profileSource: ProductProfileSource
   public let resourceSource: ProductResourceSource

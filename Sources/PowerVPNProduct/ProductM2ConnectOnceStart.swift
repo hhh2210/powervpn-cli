@@ -5,22 +5,16 @@ extension ProductM2ConnectOnceCoordinator {
     _ execution: inout ProductM2Execution,
     baseline: ProductM2NetworkBaseline,
     coldGeneration: VendorHelperGenerationSnapshot,
-    portalLease: any ProductM2PortalLeasing,
-    selected: ProductResourceCandidate,
-    selectedRoutes: VendorCharonSelectedRouteMatcher
+    authorizationLease: ProductM2AuthorizedResourceLease,
+    selection: ProductM2AuthorizedResourceSelection
   ) async -> ProductM2ConnectReport {
     let validator = replyValidator(before: coldGeneration)
-    var pending: ProductM2PendingStart?
+    let pending: ProductM2PendingStart
     do {
-      try AuthenticatedPortalSnapshotMapper.withValidatedStartSnapshot(
-        portalLease.snapshot,
-        handle: selected.summary.handle
-      ) { snapshot in
-        pending = dependencies.control.beginStart(
-          snapshot: snapshot,
-          peerGenerationValidator: validator
-        )
-      }
+      pending = try await selection.beginStart(
+        control: dependencies.control,
+        peerGenerationValidator: validator
+      )
     } catch {
       execution.fail(
         .startSnapshotRejected,
@@ -31,18 +25,14 @@ extension ProductM2ConnectOnceCoordinator {
         &execution,
         baseline: baseline,
         coldGeneration: coldGeneration,
-        portalLease: portalLease,
-        selectedRoutes: selectedRoutes
+        authorizationLease: authorizationLease,
+        selectedRoutes: selection.selectedRoutes
       )
     }
 
     execution.lastGoodState = .connecting
     let start =
-      await pending?.result()
-      ?? ProductM2StartResult(
-        receipt: .unsent(.snapshotEncodingFailed),
-        lease: nil
-      )
+      await pending.result()
     execution.startOutcome = start.receipt.outcome
     execution.helperMutationRequested = start.receipt.requestSent
     if start.receipt.transportAcknowledged, start.lease != nil {
@@ -65,7 +55,7 @@ extension ProductM2ConnectOnceCoordinator {
       await proveVendorStatusAndActiveNetwork(
         &execution,
         baseline: baseline,
-        selectedRoutes: selectedRoutes,
+        selectedRoutes: selection.selectedRoutes,
         controlLease: start.lease
       )
     }
@@ -76,8 +66,8 @@ extension ProductM2ConnectOnceCoordinator {
       &execution,
       baseline: baseline,
       coldGeneration: coldGeneration,
-      portalLease: portalLease,
-      selectedRoutes: selectedRoutes,
+      authorizationLease: authorizationLease,
+      selectedRoutes: selection.selectedRoutes,
       controlLease: start.lease,
       startReceipt: start.receipt
     )

@@ -1194,3 +1194,64 @@ Approval required: no approval is needed for further offline provider code,
 synthetic tests or review. Fresh explicit approval is required immediately
 before any official-GUI onboarding, Portal/server contact, credential entry,
 helper/XPC start, SSH proof or network mutation. No earlier approval transfers.
+
+## 2026-08-11 — Source-neutral authorization lease and installed-artifact audit
+
+User-visible capability: the M2 command remains locally blocked by the exact
+`authorized_resource_provider_unavailable` gate. The default path still exits
+before approval-code generation, `/dev/tty`, signal installation, machine
+observation or runtime construction. This slice does not add a fallback or make
+the command live-ready.
+
+Production code changed: Product no longer models M2 authorization as a Portal
+snapshot. A source-neutral actor owns one authorization generation, caches one
+validated value-free catalog, issues at most one exact display-name selection
+and one start, revokes the start capability before asynchronous close, and
+erases app-owned material before the first close suspension. Acquisition and
+close receipts separately preserve source, server-contact truth, source-close
+outcome and owned-material erasure. M2 report schema v5 exposes the erasure
+result without serializing a handle, route, snapshot or secret. The native
+Portal implementation is now only an explicit adapter.
+
+The selected-route matcher and the actual start snapshot are bound by the same
+opaque Core lineage and the same locked numeric SSH target. Duplicate catalog
+handles, mismatched prepared summaries or targets, and a matcher from resource
+A paired with a start snapshot from resource B all fail before control
+submission. Once synchronous `beginStart` has submitted, that pending receipt
+is the irreversible linearization point: a source wrapper's second callback or
+post-callback error cannot make Product misreport the mutation as unsent, and
+the coordinator retains the receipt and runs same-lease cleanup.
+
+Installed-artifact result: **NO-GO for a real `vendor_once` provider**. The
+installed app's signed `Contents/Resources/resource.xml` is 10,217 bytes with
+SHA-256
+`e08bf5fbad1eadd4ecf1c03d16a89d10850019a5d1e35aed1dcf9bd87f6a60d5`.
+It contains resource-shaped attributes, but it is sealed build-time template
+material dated with the 2024-08-20 app build, not a current-user authenticated
+generation. Static inspection found the official GUI's authorized resources
+only in process-global arrays after login; logout clears them and no persistence
+or export API was found. Preferences contain UI/auth policy, while the user
+SQLite model is credential history and was not opened or treated as a resource
+source. Helpers expose no resource-export command. No raw attribute, database
+row, credential, log or Keychain material was read or recorded.
+
+Verification: targeted lineage, target, cross-resource, duplicate-catalog and
+post-submission wrapper tests pass. Full `swift test` passes 539 tests: 37 TLS,
+108 Product, 146 Portal and 248 Core. The arm64 `powervpn` product build passes.
+No Portal request, TTY read, helper launch, real XPC session, SSH connection or
+network mutation ran.
+
+Current blocker: the architecture can now accept a lawful source-neutral
+provider, but no installed artifact satisfies authorization generation,
+freshness, scoped borrow and erase provenance. The bundle template and
+credential database must not be adapted into one. The Goal remains **ACTIVE**.
+
+Next end-to-end action: obtain or implement an official onboarding handoff that
+returns one generation-bound, scoped and erasable authorized-resource lease.
+Only after that offline contract exists may a fresh approval be bound to one
+resource display name and one SSH target for the bounded M2 live transaction.
+
+Approval required: no approval is needed for continued offline provider
+contract work, synthetic tests or review. Fresh explicit approval remains
+mandatory immediately before official-GUI onboarding, Portal/server contact,
+credential input, helper/XPC start, SSH proof or any network mutation.

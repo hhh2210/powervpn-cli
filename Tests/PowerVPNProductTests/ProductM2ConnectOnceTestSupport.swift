@@ -88,27 +88,6 @@ final class ProductM2TestTrace: @unchecked Sendable {
   }
 }
 
-actor ProductM2TestPortalLease: ProductM2PortalLeasing {
-  nonisolated let snapshot: AuthenticatedPortalSnapshot
-  private let trace: ProductM2TestTrace
-  private let logoutStatus: PortalLeaseLogoutStatus
-
-  init(
-    snapshot: AuthenticatedPortalSnapshot,
-    trace: ProductM2TestTrace,
-    logoutStatus: PortalLeaseLogoutStatus
-  ) {
-    self.snapshot = snapshot
-    self.trace = trace
-    self.logoutStatus = logoutStatus
-  }
-
-  func logoutAndErase() async -> PortalLeaseLogoutStatus {
-    trace.record("logout")
-    return logoutStatus
-  }
-}
-
 func productM2TestDependencies(
   snapshot: AuthenticatedPortalSnapshot,
   trace: ProductM2TestTrace,
@@ -118,15 +97,44 @@ func productM2TestDependencies(
   sshProof: ProductM2SSHProofOutcome = .proven,
   sshEvidenceTarget: ProductM2SSHTarget? = nil,
   cleanup: ProductM2CleanupEvidence = m2CompleteCleanup,
-  logout: PortalLeaseLogoutStatus = .accepted,
+  logout: ProductM2AuthorizationCloseOutcome = .accepted,
+  dependencyAuthorizationSource: ProductM2AuthorizationSource = .nativePortal,
+  acquisitionAuthorizationSource: ProductM2AuthorizationSource = .nativePortal,
+  leaseAuthorizationSource: ProductM2AuthorizationSource = .nativePortal,
+  authorizationPrepare: ProductM2AuthorizedResourceLease.Prepare? = nil,
   controlRuntimePreflightAccepted: Bool = true,
   cancelDuringAcquire: Bool = false,
   cancelDuringSSH: Bool = false
 ) -> ProductM2ConnectOnceDependencies {
-  let lease = ProductM2TestPortalLease(
-    snapshot: snapshot,
-    trace: trace,
-    logoutStatus: logout
+  let lease = ProductM2AuthorizedResourceLease(
+    source: leaseAuthorizationSource,
+    catalog: {
+      try ProductM2PortalAdapter.catalog(snapshot: snapshot)
+    },
+    prepare: { handle, requiredTargetIPv4 in
+      if let authorizationPrepare {
+        return try authorizationPrepare(handle, requiredTargetIPv4)
+      }
+      return try ProductM2PortalAdapter.prepare(
+        snapshot: snapshot,
+        handle: handle,
+        requiredTargetIPv4: requiredTargetIPv4
+      )
+    },
+    eraseOwnedMaterial: {
+      trace.record("erase_authorization")
+      snapshot.erase()
+      return snapshot.isErased
+    },
+    close: {
+      trace.record("logout")
+      return ProductM2AuthorizationCloseReceipt(
+        outcome: logout,
+        ownedMaterialErased: snapshot.isErased,
+        sourceCloseRequested: true,
+        serverContactRequested: false
+      )
+    }
   )
   return ProductM2ConnectOnceDependencies(
     controlRuntimePreflightAccepted: {
@@ -146,11 +154,15 @@ func productM2TestDependencies(
       trace.record("active_assessment")
       return activeNetwork
     },
-    authorizationSource: .nativePortal,
+    authorizationSource: dependencyAuthorizationSource,
     acquireAuthorization: {
       trace.record("acquire")
       if cancelDuringAcquire { withUnsafeCurrentTask { $0?.cancel() } }
-      return .acquired(source: .nativePortal, lease: lease)
+      return .acquired(
+        source: acquisitionAuthorizationSource,
+        lease: lease,
+        serverContactRequested: true
+      )
     },
     control: productM2TestControl(trace: trace, plan: plan),
     proveFreshSSH: { target in

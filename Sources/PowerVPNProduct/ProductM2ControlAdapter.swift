@@ -1,13 +1,5 @@
 import Foundation
 import PowerVPNCore
-import PowerVPNPortal
-
-package protocol ProductM2PortalLeasing: Sendable {
-  var snapshot: AuthenticatedPortalSnapshot { get }
-  func logoutAndErase() async -> PortalLeaseLogoutStatus
-}
-
-extension AuthenticatedPortalLease: ProductM2PortalLeasing {}
 
 package struct ProductM2ControlReceipt: Equatable, Sendable {
   package let outcome: ProductM2ControlOutcome

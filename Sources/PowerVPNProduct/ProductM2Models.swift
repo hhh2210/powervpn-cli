@@ -236,7 +236,7 @@ public struct ProductM2ConnectRequest: Equatable, Sendable {
 }
 
 public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
-  public let schemaVersion = 4
+  public let schemaVersion = 5
   public let outcome: ProductM2ConnectOutcome
   public let finalState: ProductM2ConnectionState
   public let lastGoodState: ProductM2ConnectionState
@@ -255,6 +255,7 @@ public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
   public let stopOutcome: ProductM2ControlOutcome
   public let emergencyStopOutcome: ProductM2ControlOutcome
   public let authorizationClose: ProductM2AuthorizationCloseOutcome
+  public let authorizationOwnedMaterialErased: Bool
   public let cleanupEvidence: ProductM2CleanupEvidence
   public let cleanupVerified: Bool
   public let serverContactRequested: Bool

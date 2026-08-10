@@ -17,7 +17,7 @@ extension ProductM2ConnectOnceCoordinator {
     _ execution: inout ProductM2Execution,
     baseline: ProductM2NetworkBaseline,
     coldGeneration: VendorHelperGenerationSnapshot,
-    portalLease: (any ProductM2PortalLeasing)? = nil,
+    authorizationLease: ProductM2AuthorizedResourceLease? = nil,
     selectedRoutes: VendorCharonSelectedRouteMatcher? = nil,
     controlLease: ProductM2ControlLease? = nil,
     startReceipt: ProductM2ControlReceipt = .unsent(.notAttempted)
@@ -26,7 +26,7 @@ extension ProductM2ConnectOnceCoordinator {
       baseline: baseline,
       networkWindow: execution.networkWindow,
       coldGeneration: coldGeneration,
-      portalLease: portalLease,
+      authorizationLease: authorizationLease,
       selectedRoutes: selectedRoutes,
       controlLease: controlLease,
       startReceipt: startReceipt

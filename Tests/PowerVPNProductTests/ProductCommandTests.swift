@@ -23,8 +23,9 @@ import Testing
 
     let expectedSchemaVersion =
       switch arguments.first {
-      case "resources": 2
-      case "snapshot": 3
+      case "doctor": 2
+      case "resources": 3
+      case "snapshot": 4
       default: 1
       }
     #expect(object["schemaVersion"] as? Int == expectedSchemaVersion)

@@ -5,7 +5,7 @@ package struct ProductM2CleanupResult: Sendable {
   let path: ProductM2CleanupPath
   let stop: ProductM2ControlReceipt
   let emergencyStop: ProductM2ControlReceipt
-  let authorizationClose: ProductM2AuthorizationCloseOutcome
+  let authorizationClose: ProductM2AuthorizationCloseReceipt
   let evidence: ProductM2CleanupEvidence
   let verified: Bool
 }
@@ -17,7 +17,7 @@ package struct ProductM2CleanupRunner: Sendable {
     baseline: ProductM2NetworkBaseline,
     networkWindow: NetworkCleanupCaptureWindow,
     coldGeneration: VendorHelperGenerationSnapshot,
-    portalLease: (any ProductM2PortalLeasing)?,
+    authorizationLease: ProductM2AuthorizedResourceLease?,
     selectedRoutes: VendorCharonSelectedRouteMatcher?,
     controlLease: ProductM2ControlLease?,
     startReceipt: ProductM2ControlReceipt
@@ -27,7 +27,7 @@ package struct ProductM2CleanupRunner: Sendable {
       controlLease: controlLease,
       startReceipt: startReceipt
     )
-    let logout = await closePortal(portalLease)
+    let authorizationClose = await closeAuthorization(authorizationLease)
     let verifier = dependencies.verifyCleanup
     let evidence = await Task.detached {
       await verifier(
@@ -37,15 +37,18 @@ package struct ProductM2CleanupRunner: Sendable {
         startReceipt.requestSent
       )
     }.value
-    let portalClosed = portalLease == nil || logout == .accepted
+    let authorizationClosed =
+      authorizationLease == nil
+      || (authorizationClose.outcome == .accepted
+        && authorizationClose.ownedMaterialErased)
     let controlClassified = control.path != .cleanupUnproven
     return ProductM2CleanupResult(
       path: control.path,
       stop: control.stop,
       emergencyStop: control.emergencyStop,
-      authorizationClose: logout,
+      authorizationClose: authorizationClose,
       evidence: evidence,
-      verified: portalClosed && controlClassified && evidence.allDimensionsRestored
+      verified: authorizationClosed && controlClassified && evidence.allDimensionsRestored
     )
   }
 
@@ -121,18 +124,18 @@ package struct ProductM2CleanupRunner: Sendable {
     )
   }
 
-  private func closePortal(
-    _ lease: (any ProductM2PortalLeasing)?
-  ) async -> ProductM2AuthorizationCloseOutcome {
-    guard let lease else { return .notRequired }
-    let status = await Task.detached { await lease.logoutAndErase() }.value
-    switch status {
-    case .accepted: return .accepted
-    case .rejected: return .rejected
-    case .timedOut: return .timedOut
-    case .cancelled: return .cancelled
-    case .alreadyClosed: return .alreadyClosed
+  private func closeAuthorization(
+    _ lease: ProductM2AuthorizedResourceLease?
+  ) async -> ProductM2AuthorizationCloseReceipt {
+    guard let lease else {
+      return ProductM2AuthorizationCloseReceipt(
+        outcome: .notRequired,
+        ownedMaterialErased: false,
+        sourceCloseRequested: false,
+        serverContactRequested: false
+      )
     }
+    return await Task.detached { await lease.closeAndErase() }.value
   }
 }
 
@@ -167,6 +170,7 @@ package struct ProductM2Execution {
   var stopOutcome: ProductM2ControlOutcome = .notAttempted
   var emergencyStopOutcome: ProductM2ControlOutcome = .notAttempted
   var authorizationClose: ProductM2AuthorizationCloseOutcome = .notRequired
+  var authorizationOwnedMaterialErased = true
   var cleanupEvidence = ProductM2CleanupEvidence.unavailable
   var cleanupVerified = false
   var serverContactRequested = false
@@ -186,19 +190,29 @@ package struct ProductM2Execution {
     cleanupPath = cleanup.path
     stopOutcome = cleanup.stop.outcome
     emergencyStopOutcome = cleanup.emergencyStop.outcome
-    authorizationClose = cleanup.authorizationClose
+    if cleanup.authorizationClose.outcome != .notRequired {
+      authorizationClose = cleanup.authorizationClose.outcome
+      authorizationOwnedMaterialErased = cleanup.authorizationClose.ownedMaterialErased
+    }
+    serverContactRequested =
+      serverContactRequested || cleanup.authorizationClose.serverContactRequested
     cleanupEvidence = cleanup.evidence
-    cleanupVerified = cleanup.verified
+    let authorizationClosed =
+      authorizationClose == .accepted || authorizationClose == .notRequired
+    cleanupVerified =
+      cleanup.verified && authorizationOwnedMaterialErased && authorizationClosed
     helperMutationRequested =
       helperMutationRequested
       || cleanup.stop.requestSent || cleanup.emergencyStop.requestSent
 
-    guard cleanup.verified else {
+    guard cleanupVerified else {
       if firstBadEvent == nil {
         firstBadEvent =
-          cleanup.authorizationClose == .accepted
-            || cleanup.authorizationClose == .notRequired
-          ? .cleanupVerificationRejected : .authorizationCloseRejected
+          authorizationOwnedMaterialErased
+          ? (cleanup.authorizationClose.outcome == .accepted
+            || cleanup.authorizationClose.outcome == .notRequired
+            ? .cleanupVerificationRejected : .authorizationCloseRejected)
+          : .authorizationCloseRejected
       }
       outcome = .cleanupUnproven
       finalState = .failed
@@ -255,6 +269,7 @@ package struct ProductM2Execution {
       stopOutcome: stopOutcome,
       emergencyStopOutcome: emergencyStopOutcome,
       authorizationClose: authorizationClose,
+      authorizationOwnedMaterialErased: authorizationOwnedMaterialErased,
       cleanupEvidence: cleanupEvidence,
       cleanupVerified: cleanupVerified,
       serverContactRequested: serverContactRequested,

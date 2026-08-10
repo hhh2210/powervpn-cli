@@ -13,6 +13,7 @@ extension AuthenticatedPortalSnapshotMapper {
   package static func withValidatedStartSnapshot(
     _ snapshot: AuthenticatedPortalSnapshot,
     handle: String,
+    lineage: VendorCharonStartLineage = VendorCharonStartLineage(),
     _ body: (VendorCharonStartSnapshot) throws -> Void
   ) throws {
     let index = try authenticatedPortalResourceIndex(
@@ -29,7 +30,8 @@ extension AuthenticatedPortalSnapshotMapper {
         resources[index],
         handle: handle,
         majorVersion: majorVersion,
-        gateway: gateway
+        gateway: gateway,
+        lineage: lineage
       )
       guard let startSnapshot = validation.snapshot else {
         throw AuthenticatedPortalValidatedSnapshotError.incompleteSnapshot(

@@ -21,14 +21,14 @@ enum AuthenticatedPortalSP2Mapper {
     _ resource: AuthenticatedPortalResourceElement,
     handle: String,
     majorVersion: Int32,
-    gateway: any VendorCharonStartTextMaterial
+    gateway: any VendorCharonStartTextMaterial,
+    lineage: VendorCharonStartLineage = VendorCharonStartLineage()
   ) throws -> (ProductResourceSummary, VendorCharonStartValidation) {
     let tunnelElements = try PortalSP2Tree.children(named: "TUNNEL", of: resource)
     guard let firstTunnel = tunnelElements.first else {
       throw AuthenticatedPortalSnapshotMappingError.invalidDisplayName
     }
     let displayName = try PortalSP2Tree.displayName(of: firstTunnel)
-    let lineage = VendorCharonStartLineage()
     let commonIKE = try commonIKE(resource: resource, tunnels: tunnelElements)
     let coreCandidate = VendorCharonStartCandidate(
       lineage: lineage,
