@@ -7,6 +7,7 @@ cd "$repo_root"
 
 base=71fe9eee3d70ef45897002271b4f0a03851e3aff
 manifest=fixtures/redacted/r2-reviewed-candidate-manifest-v1.json
+live_manifest=fixtures/redacted/r2-portal-login-authorized-manifest-v1.json
 runtime_fixture=fixtures/redacted/r2-portal-login-runtime-v1.json
 
 git cat-file -e "$base^{commit}"
@@ -29,6 +30,7 @@ for file in $changed_files; do
 		docs/evidence/checkpoint-r2-raw-header-framing.md | \
 		fixtures/redacted/protocol-correlation-value-free-v1.json | \
 		fixtures/redacted/r2-reviewed-candidate-manifest-v1.json | \
+		fixtures/redacted/r2-portal-login-authorized-manifest-v1.json | \
 		fixtures/redacted/r2-portal-login-runtime-v1.json | \
 		Sources/PowerVPNCore/ProtocolCorrelationFieldNames.swift | \
 		Sources/PowerVPNCore/ProtocolCorrelationProfiles.swift | \
@@ -157,27 +159,64 @@ jq -e --arg review "$expected_review" '
 ' "$manifest" >/dev/null
 
 if [ -f "$runtime_fixture" ]; then
-	manifest_sha=$(shasum -a 256 "$manifest" | awk '{print $1}')
+	[ -f "$live_manifest" ] && [ ! -L "$live_manifest" ]
+	manifest_sha=$(shasum -a 256 "$live_manifest" | awk '{print $1}')
+	[ "$manifest_sha" = bde4de003e1c5bd2128f5e4b147f05ae3149f2b639126e783585bfb6a1b6302b ]
 	jq -e --arg manifest "$manifest_sha" '
-    keys == ["candidateManifestSHA256", "checkpointPass", "cleanupSafe",
-      "cliExitStatus", "cliReport", "cliReportExact", "containsRawPortal",
-      "containsSecrets", "credentialPath", "evidenceClass", "launchd",
+    def tls_failure_report:
+      {schemaVersion:1,mode:"r2_username_password_portal_login",
+       status:"tls_rejected",
+       operations:{loginAccepted:false,loginRequested:true,logoutAccepted:false,
+         logoutRequested:false,resourceListAccepted:false,
+         resourceListRequested:false,sessionCheckAccepted:false,
+         sessionCheckRequested:false},
+       ownedMaterial:{credentialsErased:true,requestBodiesErased:true,
+         responseBodiesErased:true,sessionMaterialErased:true},
+       safety:{appOwnedSecureBuffersErasureObserved:true,
+         credentialInArguments:false,credentialInEnvironment:false,
+         credentialSource:"controlling_tty_no_echo",credentialWrittenToFile:false,
+         endpointSource:"sealed_installed_configuration",
+         endpointValueRetainedInEvidence:false,helperMutationRequested:false,
+         ikeTrafficRequested:false,platformSerialValueRetainedInEvidence:false,
+         portalHTTPSAllowed:true,rawRequestRetainedInEvidence:false,
+         rawResponseRetainedInEvidence:false,redirectsAllowed:false,
+         resourceValueRetainedInEvidence:false,
+         sessionValueRetainedInEvidence:false,
+         swiftAndFoundationBridgeCopiesErasureClaimed:false,
+         systemTrustRequired:true,viciUsed:false,xpcUsed:false},
+       transactionAccepted:false};
+    def tls_failure_monitor:
+      {targetObserved:true,inspectionSucceeded:false,onlySealedPortalTCP:true,
+       portalTCPObserved:false,maximumTCPCount:0,maximumUDPCount:0,
+       vendorHelperObserved:false,nativeCharonObserved:false};
+    keys == ["artifactIdentityStable", "candidateManifestSHA256",
+      "checkpointPass", "cleanupSafe", "cliExitStatus", "cliReport",
+      "cliReportExact", "complete", "containsRawPortal", "containsSecrets",
+      "credentialPath", "evidenceClass", "harnessKillSent", "launchd",
       "manifestExact", "monitor", "monitorExact", "networkStable",
       "schemaVersion"] and
     .schemaVersion == 1 and
     .evidenceClass == "r2_portal_login_live_window" and
     .candidateManifestSHA256 == $manifest and .manifestExact == true and
-    .checkpointPass == true and .cliExitStatus == 0 and
-    .cliReportExact == true and .cliReport.transactionAccepted == true and
-    .monitorExact == true and .monitor.inspectionSucceeded == true and
-    .monitor.onlySealedPortalTCP == true and .monitor.portalTCPObserved == true and
-    .monitor.maximumUDPCount == 0 and .monitor.vendorHelperObserved == false and
-    .monitor.nativeCharonObserved == false and .networkStable == true and
-    .launchd.inactiveAndRunsStable == true and .cleanupSafe == true and
+    .complete == true and .cliReportExact == true and .monitorExact == true and
+    .artifactIdentityStable == true and .cleanupSafe == true and
     .credentialPath == {argumentUsed:false,directControllingTTY:true,
       environmentUsed:false,exposedCredentialRiskAccepted:true,fileUsed:false,
       stdinUsed:false} and
-    .containsSecrets == false and .containsRawPortal == false
+    .harnessKillSent == false and
+    .containsSecrets == false and .containsRawPortal == false and
+    ((.checkpointPass == true and .cliExitStatus == 0 and
+      .cliReport.transactionAccepted == true and
+      .monitor.inspectionSucceeded == true and
+      .monitor.onlySealedPortalTCP == true and
+      .monitor.portalTCPObserved == true and .monitor.maximumUDPCount == 0 and
+      .monitor.vendorHelperObserved == false and
+      .monitor.nativeCharonObserved == false and .networkStable == true and
+      .launchd.inactiveAndRunsStable == true) or
+     (.checkpointPass == false and .cliExitStatus == 2 and
+      .cliReport == tls_failure_report and .monitor == tls_failure_monitor and
+      .networkStable == false and
+      .launchd == {inactiveAndRunsStable:true,runsAfter:19,runsBefore:19}))
   ' "$runtime_fixture" >/dev/null
 fi
 

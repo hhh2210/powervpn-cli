@@ -37,11 +37,10 @@ upstream strongSwan 6.0.7.
   factory-only unforgeable operation proof now keeps forged body, Cookie and
   User-Agent near misses out of both transport lanes, and TLS trust
   classification is limited to peer/issuer verification while handshake and
-  cipher failures are `unavailable`. No second raw-header review ran. No live
-  request, successful TLS transfer, server interaction or credential use
-  occurred, so this is implementation evidence, not server compatibility or
-  authorization to contact the portal. The reviewed R2 candidate is now
-  resealed by manifest SHA-256
+  cipher failures are `unavailable`. No second raw-header review ran. That
+  synthetic evidence remains implementation evidence, not server compatibility.
+  The exact live-authorized manifest is archived at
+  `fixtures/redacted/r2-portal-login-authorized-manifest-v1.json`, SHA-256
   `bde4de003e1c5bd2128f5e4b147f05ae3149f2b639126e783585bfb6a1b6302b`
   and runtime source aggregate SHA-256
   `83c590c8ebb3c15b8e32d125bfbdef6c4b39aabd94ca9235c35aef140b67eee2`.
@@ -51,14 +50,24 @@ upstream strongSwan 6.0.7.
   `a6d98b928a9c0a63ded37b7b60120e9483fabddf8dea6a895a160276a4acab05`.
   Its full offline verifier passes with 120 Portal tests in 19 suites and 109
   Core tests in 10 suites (229 tests in 29 suites), plus the direct raw C
-  parser/status gates. R2 live login remains **HARD NO-GO / NOT TESTED**. The
-  exposed credential cannot be rotated; the user has explicitly accepted that
-  risk. A live window still requires fresh exact-manifest approval plus the
-  non-secret exposed-credential risk-acceptance gate. The credential must be
-  personally re-entered through the no-echo controlling TTY, never read or
-  copied from chat. The evidence records
-  `exposedCredentialRiskAccepted=true` and makes no rotation claim. The frozen
-  raw-header contract is documented in
+  parser/status gates. One authorized, exact-manifest-bound R2B window then ran
+  with TTY-only credential re-entry and
+  `exposedCredentialRiskAccepted=true`. It completed with
+  `checkpointPass=false`, CLI exit 2 and `tls_rejected`; only the login request
+  was attempted. Resource listing, session check and logout were not requested.
+  The complete value-free runtime fixture is
+  `fixtures/redacted/r2-portal-login-runtime-v1.json`, SHA-256
+  `78a0815ab247c36e8d30683b7f83a09d34d4da2dbe94e395e6f116c8423ca714`.
+  No helper, native charon or UDP descriptor appeared, launchd stayed 19→19,
+  and artifact identity/cleanup were exact. The strict network gate failed only
+  because the raw IPv4 route SHA changed; route count 136, persistent route
+  count 65/hash, default route, DNS, interfaces, utun, ESP and Surge remained
+  stable. R2B is **FAIL / INCOMPLETE** and the Goal remains active. Next is a
+  credential-free bounded TLS trust evidence gate, not a blind login retry.
+  Post-evidence verifier binding produced development manifest SHA-256
+  `8e19d1937d7ab432e9a747725d636e565432159561a0962a6d0ec07afe9fdb1e`;
+  those changed bytes were not live-authorized and cannot authorize a retry.
+  The frozen raw-header contract is documented in
   `docs/evidence/checkpoint-r2-raw-header-framing.md`.
 
 - The vendor helper is based on strongSwan 5.8.0. This is proven by unstripped
@@ -204,13 +213,13 @@ the raw command, for checkpoint evidence.
 
 `powervpn login` accepts no options or positional material and emits only a
 closed value-free JSON report. Do not run it directly for checkpoint evidence.
-The R2 harness requires exact manifest SHA-256
+The completed R2B window was bound to manifest SHA-256
 `bde4de003e1c5bd2128f5e4b147f05ae3149f2b639126e783585bfb6a1b6302b`,
-fresh manifest-bound approval, explicit non-secret exposed-credential risk
-acceptance and a direct no-echo controlling TTY. Only the TTY may receive the
-credential; it must never be read or copied from chat. The authorized harness then
-permits TCP only to the sealed portal while rejecting all helper, native-charon
-and UDP activity.
+explicit non-secret exposed-credential risk acceptance and a direct no-echo
+controlling TTY. The credential was personally re-entered through the TTY and
+was never read or copied from chat. The result is a TLS rejection, not login or
+server-compatibility evidence. Do not rerun the raw command or repeat the live
+window; the next gate is credential-free TLS trust evidence collection.
 
 ## Repository map
 

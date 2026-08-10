@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "r2_portal_login_live_window",
+  "candidateManifestSHA256": "bde4de003e1c5bd2128f5e4b147f05ae3149f2b639126e783585bfb6a1b6302b",
+  "manifestExact": true,
+  "checkpointPass": false,
+  "complete": true,
+  "cliExitStatus": 2,
+  "cliReportExact": true,
+  "cliReport": {
+    "schemaVersion": 1,
+    "mode": "r2_username_password_portal_login",
+    "status": "tls_rejected",
+    "operations": {
+      "loginAccepted": false,
+      "loginRequested": true,
+      "logoutAccepted": false,
+      "logoutRequested": false,
+      "resourceListAccepted": false,
+      "resourceListRequested": false,
+      "sessionCheckAccepted": false,
+      "sessionCheckRequested": false
+    },
+    "ownedMaterial": {
+      "credentialsErased": true,
+      "requestBodiesErased": true,
+      "responseBodiesErased": true,
+      "sessionMaterialErased": true
+    },
+    "safety": {
+      "appOwnedSecureBuffersErasureObserved": true,
+      "credentialInArguments": false,
+      "credentialInEnvironment": false,
+      "credentialSource": "controlling_tty_no_echo",
+      "credentialWrittenToFile": false,
+      "endpointSource": "sealed_installed_configuration",
+      "endpointValueRetainedInEvidence": false,
+      "helperMutationRequested": false,
+      "ikeTrafficRequested": false,
+      "platformSerialValueRetainedInEvidence": false,
+      "portalHTTPSAllowed": true,
+      "rawRequestRetainedInEvidence": false,
+      "rawResponseRetainedInEvidence": false,
+      "redirectsAllowed": false,
+      "resourceValueRetainedInEvidence": false,
+      "sessionValueRetainedInEvidence": false,
+      "swiftAndFoundationBridgeCopiesErasureClaimed": false,
+      "systemTrustRequired": true,
+      "viciUsed": false,
+      "xpcUsed": false
+    },
+    "transactionAccepted": false
+  },
+  "monitorExact": true,
+  "monitor": {
+    "targetObserved": true,
+    "inspectionSucceeded": false,
+    "onlySealedPortalTCP": true,
+    "portalTCPObserved": false,
+    "maximumTCPCount": 0,
+    "maximumUDPCount": 0,
+    "vendorHelperObserved": false,
+    "nativeCharonObserved": false
+  },
+  "networkStable": false,
+  "launchd": {
+    "inactiveAndRunsStable": true,
+    "runsBefore": 19,
+    "runsAfter": 19
+  },
+  "artifactIdentityStable": true,
+  "cleanupSafe": true,
+  "credentialPath": {
+    "directControllingTTY": true,
+    "stdinUsed": false,
+    "argumentUsed": false,
+    "environmentUsed": false,
+    "fileUsed": false,
+    "exposedCredentialRiskAccepted": true
+  },
+  "harnessKillSent": false,
+  "containsSecrets": false,
+  "containsRawPortal": false
+}

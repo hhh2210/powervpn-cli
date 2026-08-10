@@ -26,6 +26,8 @@ for file in $changed_files; do
 		docs/evidence/checkpoint-r2-raw-header-framing.md | \
 		docs/progress/GOAL_STATUS.md | \
 		fixtures/redacted/r2-reviewed-candidate-manifest-v1.json | \
+		fixtures/redacted/r2-portal-login-authorized-manifest-v1.json | \
+		fixtures/redacted/r2-portal-login-runtime-v1.json | \
 		Sources/CPortalCurl/CPortalCurl.c | \
 		Sources/CPortalCurl/CPortalCurlHeaders.c | \
 		Sources/CPortalCurl/CPortalCurlInternal.h | \

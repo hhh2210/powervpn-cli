@@ -1,11 +1,10 @@
 # Rescue R2 username/password portal-login gate
 
-Status: **OFFLINE PASS — MANIFEST RESEALED; FULL VERIFIER PASS; LIVE HARD
-NO-GO / NOT TESTED.** The integrated R2 offline-base review and independent
-raw-header review are complete and all direct findings have been applied. The
-reviewed candidate is manifest-bound and its full offline verifier passes. No
-live request, successful TLS transfer, server interaction or credential use
-occurred, so R2 remains active rather than live PASS.
+Status: **OFFLINE PASS; R2B FAIL / INCOMPLETE — `tls_rejected`; GOAL ACTIVE.**
+The integrated R2 offline-base and raw-header reviews are complete, all direct
+findings are applied, and the full offline verifier passes. One authorized,
+manifest-bound live window subsequently completed with `checkpointPass=false`.
+It did not establish successful TLS, login acceptance or server compatibility.
 
 ## Scope
 
@@ -117,8 +116,8 @@ clears the child environment, leaves stdin at `/dev/null`, supplies prompts
 through the controlling TTY, reconstructs stdout through a FIFO and closed
 `jq` schema, and retains only mode-600 value-free evidence.
 
-Any future live harness would require all of these before a request could leave
-the machine:
+The authorized live harness required all of these before the attempt could
+start:
 
 - reviewed candidate manifest SHA-256
   `bde4de003e1c5bd2128f5e4b147f05ae3149f2b639126e783585bfb6a1b6302b`
@@ -130,20 +129,45 @@ the machine:
 - direct controlling TTY;
 - before/after network-state equality.
 
-During the window, the CLI may have TCP only to the sealed portal origin. Any
-UDP descriptor, helper/native-charon process, other remote TCP endpoint,
-route/DNS/interface/utun drift, invalid report, or cleanup residue fails the
+During the window, the CLI was permitted TCP only to the sealed portal origin.
+Any UDP descriptor, helper/native-charon process, other remote TCP endpoint,
+route/DNS/interface/utun drift, invalid report, or cleanup residue failed the
 checkpoint.
 
 One password was pasted into the Codex task text during R2 development. It was
 not used by code or tests. The user states that it cannot be rotated and has
 explicitly accepted the risk of continuing with the same credential. Chat/task
 text remains an invalid runtime source: the value must never be read or copied
-from it. A live window requires fresh approval bound to the exact manifest and
-the non-secret risk-acceptance gate; the user must personally re-enter the
-credential through the no-echo controlling TTY. The retained schema records
+from it. The live window required approval bound to the exact manifest and the
+non-secret risk-acceptance gate; the user personally re-entered the credential
+through the no-echo controlling TTY. The retained schema records
 `credentialPath.exposedCredentialRiskAccepted=true` and makes no rotation
 claim.
+
+## Authorized live-window result
+
+The retained value-free fixture is
+`fixtures/redacted/r2-portal-login-runtime-v1.json`, SHA-256
+`78a0815ab247c36e8d30683b7f83a09d34d4da2dbe94e395e6f116c8423ca714`.
+It is complete, exact and bound to the archived authorized-manifest bytes at
+`fixtures/redacted/r2-portal-login-authorized-manifest-v1.json`, SHA-256
+`bde4de003e1c5bd2128f5e4b147f05ae3149f2b639126e783585bfb6a1b6302b`.
+The result is `checkpointPass=false`, CLI exit 2 and `status=tls_rejected`.
+Only `loginRequested=true`; `loginAccepted=false`, and every resource-list,
+session-check and logout request/acceptance field is false.
+
+The exact monitor has `inspectionSucceeded=false` and recorded no portal TCP
+descriptor, helper, native charon or UDP descriptor (`portalTCPObserved=false`,
+`maximumTCPCount=0`, `maximumUDPCount=0`). Helper launchd stayed inactive with
+runs 19→19. Artifact identity and cleanup are exact, no harness kill was sent,
+all app-owned secure material was erased, and the fixture contains neither
+secrets nor raw portal material.
+
+The strict `networkStable` field is false solely because the raw IPv4 route SHA
+changed. Total route count remained 136. Persistent route count 65/hash,
+default route, DNS, interfaces, utun, ESP and Surge stayed stable. This bounded
+failure is not server/application compatibility evidence and does not authorize
+a blind retry.
 
 ## Integrated review closure and offline acceptance
 
@@ -162,31 +186,37 @@ Cookie and User-Agent near misses with zero transport-lane hits; TLS trust
 classification is limited to peer/issuer verification while handshake and
 cipher failures are `unavailable`. No second raw-header review ran.
 
-The fixed cumulative candidate is bound by reviewed manifest SHA-256
-`bde4de003e1c5bd2128f5e4b147f05ae3149f2b639126e783585bfb6a1b6302b`
-and runtime source aggregate SHA-256
+The live-authorized manifest archive above binds runtime source aggregate
+SHA-256
 `83c590c8ebb3c15b8e32d125bfbdef6c4b39aabd94ca9235c35aef140b67eee2`.
 The same manifest binds runtime-library SHA-256
 `b57c969c986f46c58913c5e5d27bace5131771ff9e343c111e86389d97a12047`
 and raw-header-test aggregate SHA-256
 `a6d98b928a9c0a63ded37b7b60120e9483fabddf8dea6a895a160276a4acab05`.
-Its full offline verifier passed 120 Portal tests in 19 suites and 109 Core tests
-in 10 suites (229 tests in 29 suites), the arm64 build, strict formatting, the
+The authorized candidate's full offline verifier passed 120 Portal tests in 19
+suites and 109 Core tests in 10 suites (229 tests in 29 suites), the arm64
+build, strict formatting, the
 no-network signal harness, the secret scan and the exact manifest gate. The raw
 sub-gates passed 11 direct C parser cases, 5 direct C status cases, 16 Swift
 cases in 3 suites and the separate Foundation fail-closed regression.
 
-This proves only the reviewed offline implementation and safety boundary. No
-real credential, successful TLS transfer, portal TCP connection, helper, XPC,
-VICI, IKE, UDP, route, policy, SA or utun action occurred. Server compatibility
-and the R2 live workflow remain **NOT TESTED**; R2 is **HARD NO-GO** for live
-login and the Goal remains active.
+Post-evidence verifier binding changed the current development manifest to
+SHA-256
+`8e19d1937d7ab432e9a747725d636e565432159561a0962a6d0ec07afe9fdb1e`.
+That manifest was not authorized for the retained live window and is not a
+retry authorization.
+
+This proves only the reviewed offline implementation and safety boundary. The
+authorized live window used a user-entered TTY credential but retained no
+credential or raw portal material. It did not complete TLS, accept login, start
+resource/session/logout operations, or invoke helper, XPC, VICI, IKE, UDP,
+route, policy, SA or utun actions. Server compatibility remains unproven; R2B
+is **FAIL / INCOMPLETE** and the Goal remains active.
 
 The synthetic missing-risk case exits with status 5 before creating live
 evidence or changing system state; scratch identity and network/process state
 remain unchanged, proving zero residue at that gate.
 
-Next: provide fresh approval bound to the exact manifest and the non-secret
-exposed-credential risk acceptance. Only the no-echo controlling TTY may
-receive the user-reentered credential; it must never be read or copied from
-chat.
+Next: run only a bounded, credential-free TLS trust evidence gate. Do not
+blindly retry login, weaken system trust, add an insecure path or request
+another credential entry.

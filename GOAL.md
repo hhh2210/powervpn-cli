@@ -9,7 +9,7 @@ supersedes_for_active_execution: Native Goal V3
 native_v3_role: frozen fallback
 native_fallback_baseline_commit: 8d2e026c1f5db15f5b1e1e0ca81c72d2ae5f2073
 current_checkpoint: R2-username-password-portal-login
-immediate_next: fresh-exact-manifest-r2b-risk-acceptance-approval
+immediate_next: credential-free-bounded-tls-trust-evidence-gate
 user_input_contract: username-and-password-only
 review_policy: one integrated review per checkpoint
 ---
@@ -284,9 +284,9 @@ review is complete. It returned exactly two direct findings, both applied:
 2. TLS trust classification now contains only peer/issuer verification;
    handshake and cipher failures are classified as `unavailable`.
 
-No second raw-header review ran. No live request, successful TLS transfer,
-server interaction or credential use occurred. The reviewed synthetic result
-is implementation evidence only and does not authorize R2B.
+No second raw-header review ran. Within that synthetic subcheckpoint, no live
+request, successful TLS transfer, server interaction or credential use
+occurred. The reviewed result is implementation evidence only.
 
 Its acceptance surface is frozen in
 `docs/evidence/checkpoint-r2-raw-header-framing.md`: an in-process arm64
@@ -295,21 +295,28 @@ synthetic rejection cases. Subprocess curl, proxy/insecure/custom-CA inputs,
 credentials, portal traffic, and any weakening of the existing Foundation
 fail-closed path are outside the subcheckpoint.
 
-The cumulative R2 reviewed manifest has been resealed as SHA-256
-`bde4de003e1c5bd2128f5e4b147f05ae3149f2b639126e783585bfb6a1b6302b`,
-binding runtime source aggregate SHA-256
+The exact live-authorized manifest bytes are archived at
+`fixtures/redacted/r2-portal-login-authorized-manifest-v1.json`, SHA-256
+`bde4de003e1c5bd2128f5e4b147f05ae3149f2b639126e783585bfb6a1b6302b`.
+The archived manifest binds runtime source aggregate SHA-256
 `83c590c8ebb3c15b8e32d125bfbdef6c4b39aabd94ca9235c35aef140b67eee2`.
 It also binds runtime-library SHA-256
 `b57c969c986f46c58913c5e5d27bace5131771ff9e343c111e86389d97a12047`
 and raw-header-test aggregate SHA-256
 `a6d98b928a9c0a63ded37b7b60120e9483fabddf8dea6a895a160276a4acab05`.
 The full offline R2 verifier passes. This closes the offline implementation
-gate only; R2 password login remains a hard NO-GO and server compatibility,
-successful TLS transfer and the live workflow remain untested.
+gate only. The later manifest-bound R2B window reached the login request but
+failed with `tls_rejected` before login acceptance; it proves neither successful
+TLS nor server compatibility.
 
-#### R2B live approval
+After retaining that result, verifier evidence binding changed. The current
+post-evidence development manifest is SHA-256
+`8e19d1937d7ab432e9a747725d636e565432159561a0962a6d0ec07afe9fdb1e`.
+It was not the live-authorized byte sequence and does not authorize a retry.
 
-Run only:
+#### R2B live gate
+
+The authorized window permitted only:
 
 ```text
 powervpn login
@@ -317,24 +324,41 @@ Username: ...
 Password: ...
 ```
 
-Then perform session check, fetch resource catalog and logout. Do not start a
-helper tunnel.
+A passing window would then perform session check, fetch the resource catalog
+and logout. It would not start a helper tunnel.
 
 PASS only if the user enters no other material and no secret is persisted or
 printed.
 
 One password was exposed in the Codex task text during R2 implementation. The
-user has stated that it cannot be rotated and has explicitly accepted the risk
-of continuing with the same credential. Chat/task text is never an approved
-credential source: the implementation must not read or copy the exposed value.
-Any R2B window still requires fresh explicit approval bound to manifest
-SHA-256
+user stated that it cannot be rotated and explicitly accepted the risk of
+continuing with the same credential. Chat/task text remained an invalid
+credential source: the implementation did not read or copy the exposed value.
+The authorized R2B window was bound to manifest SHA-256
 `bde4de003e1c5bd2128f5e4b147f05ae3149f2b639126e783585bfb6a1b6302b`
-and the non-secret exposed-credential risk-acceptance gate. The user must then
-personally re-enter the credential through the no-echo controlling TTY. The
-evidence records `exposedCredentialRiskAccepted=true`; it does not claim that
-the credential was rotated. No credential may appear in chat, Goal text, argv,
-environment, files, fixtures, logs or retained evidence.
+and the non-secret exposed-credential risk-acceptance gate. The user personally
+re-entered the credential through the no-echo controlling TTY. The evidence
+records `exposedCredentialRiskAccepted=true`; it does not claim that the
+credential was rotated. No credential appears in chat-derived runtime input,
+argv, environment, files, fixtures, logs or retained evidence.
+
+#### Authorized R2B window result
+
+The manifest-bound window completed with `checkpointPass=false`, CLI exit 2
+and status `tls_rejected`. Only `loginRequested=true`; login acceptance and all
+resource-list, session-check and logout request/acceptance fields are false.
+The complete value-free fixture SHA-256 is
+`78a0815ab247c36e8d30683b7f83a09d34d4da2dbe94e395e6f116c8423ca714`.
+The monitor observed no helper, native charon, portal TCP descriptor or UDP
+descriptor; helper launchd stayed inactive at run count 19. Artifact identity
+and cleanup are exact. The strict `networkStable` gate is false only because
+the raw IPv4 route SHA changed: total route count stayed 136, while persistent
+route count 65/hash, default route, DNS, interfaces, utun, ESP and Surge stayed
+stable.
+
+R2B is failed and incomplete; the Goal remains active. Next is a bounded,
+credential-free TLS trust evidence gate. Do not blindly retry login, weaken
+system trust, add an insecure path or re-enter a credential in that gate.
 
 ### R3 — Portal response to vendor XPC snapshot
 

@@ -660,14 +660,13 @@ request. R1's read-only authorization does not transfer to R2.
 
 Canonical commit: this cumulative Rescue R1 implementation and evidence commit.
 
-## 2026-08-10 — Rescue R2 offline acceptance and live gate
+## 2026-08-10 — Rescue R2 authorized live failure and TLS evidence gate
 
-State: **OFFLINE PASS — MANIFEST RESEALED; FULL VERIFIER PASS; LIVE HARD NO-GO
-/ NOT TESTED.** R2 is not live PASS and the active Goal remains open. The
-Foundation-only synthetic path still rejects locally before `session.open`;
-the separate reviewed system-libcurl seam and the cumulative candidate have
-passed synthetic/full offline validation. No real credential, successful TLS
-transfer, portal request or network connection was used.
+State: **OFFLINE PASS; R2B FAIL / INCOMPLETE — `tls_rejected`; GOAL ACTIVE.**
+The reviewed system-libcurl seam and cumulative candidate pass offline
+validation. One authorized, exact-manifest-bound live window then completed
+with `checkpointPass=false`, CLI exit 2 and no successful TLS or login
+acceptance.
 
 Verified: the `PowerVPNPortal` target implements the exact
 default password body, sealed installed origin, system-trust-only TLS,
@@ -677,11 +676,10 @@ LeadSec profile, fresh isolated Cookie handling, resource fetch, exact
 logout. `powervpn login` rejects every option/extra argument before constructing
 the runtime and emits only a closed value-free JSON report.
 
-User input required next: fresh approval bound to the exact reviewed manifest
-and its non-secret exposed-credential risk acceptance. The user states that
-rotation is impossible and has accepted continued use of the same credential.
-The value must never be read or copied from chat; the user must personally
-re-enter it through the no-echo controlling TTY after approval.
+User input required next: none. The next gate is credential-free and bounded to
+TLS trust evidence. The completed live window used personal no-echo TTY entry
+with `exposedCredentialRiskAccepted=true`; chat/task text was not a credential
+source, and no rotation is claimed.
 
 Derived automatically: current origin/version/address-selection/language state,
 raw platform serial, Cookie/session state, operation timing and logout. The
@@ -690,7 +688,8 @@ database copy using the exact SQLCipher 3.4.0 profile. No user-table row was
 queried and no database passphrase was retained.
 
 Evidence: `docs/evidence/checkpoint-r2-validation.md`; the corrected CP5
-password-field fixture; reviewed manifest SHA-256
+password-field fixture; the exact live-authorized manifest archive
+`fixtures/redacted/r2-portal-login-authorized-manifest-v1.json`, SHA-256
 `bde4de003e1c5bd2128f5e4b147f05ae3149f2b639126e783585bfb6a1b6302b`;
 and runtime source aggregate SHA-256
 `83c590c8ebb3c15b8e32d125bfbdef6c4b39aabd94ca9235c35aef140b67eee2`.
@@ -698,7 +697,14 @@ The manifest also binds runtime-library SHA-256
 `b57c969c986f46c58913c5e5d27bace5131771ff9e343c111e86389d97a12047`
 and raw-header-test aggregate SHA-256
 `a6d98b928a9c0a63ded37b7b60120e9483fabddf8dea6a895a160276a4acab05`.
-The live value-free fixture does not exist because R2B has not run.
+The completed value-free live fixture is
+`fixtures/redacted/r2-portal-login-runtime-v1.json`, SHA-256
+`78a0815ab247c36e8d30683b7f83a09d34d4da2dbe94e395e6f116c8423ca714`.
+It is exact, complete and bound to the archived authorized manifest, and it
+contains no secret or raw portal material. Post-evidence verifier binding
+changed the current development manifest to SHA-256
+`8e19d1937d7ab432e9a747725d636e565432159561a0962a6d0ec07afe9fdb1e`;
+those bytes were not live-authorized and do not authorize a retry.
 
 Tests/commands: the full offline verifier passed with 120 Portal tests in 19
 suites and 109 Core tests in 10 suites (229 tests in 29 suites), the corrected
@@ -708,13 +714,15 @@ exact manifest and diff checks. Raw sub-gates passed 11 C parser cases, 5 C
 status cases, 16 Swift cases in 3 suites and the separate Foundation fail-closed
 regression. The synthetic missing-risk case exits 5 before live evidence or
 system change and leaves scratch/network/process state unchanged with zero
-residue. This does not claim an R2 live/server/TLS acceptance run.
+residue. The authorized live result is `checkpointPass=false`, CLI exit 2 and
+`tls_rejected`; this does not claim an R2 server/TLS acceptance run.
 
-Safety/cleanup: the synthetic production path failed closed before
-`session.open`; no real credential, portal connection, PowerVPN GUI, helper,
-XPC, VICI, native charon, IKE/UDP, SA, policy, route or utun action occurred.
-One password pasted into Codex task text is compromised, was not used, and is
-forbidden from every future live run.
+Safety/cleanup: the user personally entered the credential through the no-echo
+controlling TTY; argv, environment, stdin, files and chat/task text were not
+credential sources. App-owned material was erased and no secret/raw portal
+material was retained. Only login was requested; resource list, session check
+and logout were not. No helper, native charon or UDP descriptor appeared,
+launchd stayed inactive at 19→19, and artifact identity/cleanup were exact.
 
 R2 offline-base review result: complete. Exactly one integrated review
 inspected the frozen cumulative base and returned five direct findings. All
@@ -724,12 +732,12 @@ Set-Cookie framing, manifest binding for the network snapshot dependency, and
 truthful secure-buffer erasure claims. No second offline-base review or
 unrelated-history review ran.
 
-Offline remaining: none. The reviewed cumulative R2 manifest is resealed and
-the full offline verifier passes. Foundation's projected Set-Cookie value
-remains fail closed, and the reviewed raw-header seam remains implementation
-evidence rather than server acceptance. Live R2B remains hard NO-GO / not
-tested until fresh exact-manifest approval includes the non-secret
-exposed-credential risk acceptance.
+Offline implementation remaining: none. R2B remains failed/incomplete because
+TLS was rejected before login acceptance. Strict `networkStable=false` came
+only from a changed raw IPv4 route SHA: total route count stayed 136, while
+persistent route count 65/hash, default route, DNS, interfaces, utun, ESP and
+Surge stayed stable. This does not override the strict gate or establish server
+compatibility.
 
 Raw-header subcheckpoint status: **OFFLINE PASS — INTEGRATED REVIEW COMPLETE;
 FINDINGS APPLIED.** Its synthetic-only acceptance matrix and architecture
@@ -745,19 +753,17 @@ findings, both fixed. First, the compatibility predicate now requires a
 factory-only unforgeable operation proof; directly forged body, Cookie and
 User-Agent near misses produce zero raw-driver or Foundation-lane hits. Second,
 TLS trust classification is restricted to peer/issuer verification, while
-handshake and cipher failures are `unavailable`. No second review ran. No
-successful TLS transfer, portal/server interaction, credential read or
-server-compatibility claim occurred; R2 remains hard NO-GO.
+handshake and cipher failures are `unavailable`. No second review ran. Within
+that synthetic subcheckpoint, no successful TLS transfer, portal/server
+interaction, credential read or server-compatibility claim occurred.
 
-Next action: fresh explicit approval must bind manifest SHA-256
-`bde4de003e1c5bd2128f5e4b147f05ae3149f2b639126e783585bfb6a1b6302b`
-and non-secret exposed-credential risk acceptance before one R2B window. Do not
-run `powervpn login` before that approval.
+Next action: run only a credential-free, bounded TLS trust evidence gate. Do
+not blindly retry `powervpn login`, weaken system trust, add an insecure/custom
+CA path or request another credential entry.
 
-Approval required: **yes, fresh, exact-manifest-bound and risk-accepting**.
-The user must personally re-enter the credential only through the no-echo
-controlling TTY; chat/task text is an invalid credential source. Evidence must
-record `exposedCredentialRiskAccepted=true` and must not claim rotation.
+Approval required: no new credential/live approval for the credential-free
+evidence gate. Any later live retry remains separately gated and is not
+authorized by the failed R2B window.
 
-Canonical commit: pending successful live evidence and final checkpoint
-validation.
+Canonical commit: pending the TLS evidence gate and any later successful R2B
+and final checkpoint validation.
