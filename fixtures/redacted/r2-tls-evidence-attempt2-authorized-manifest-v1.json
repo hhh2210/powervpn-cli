@@ -1,0 +1,22 @@
+{
+  "artifacts": {
+    "arm64CLISHA256": "94ced885b71e1ff80d7d4577f6643b562bda12a91f578033d2e0eeee681ae62d",
+    "attemptTestsSHA256": "d10c06b8e608dab196cf7ea035ddcf0c67438785bdf2e8abf49434059257e739",
+    "attemptsLibrarySHA256": "7886d8a74fd6ac580e97e46d594d94b179758e29077d8faa47054d0f3b2a885b",
+    "harnessTestsSHA256": "850b9868e12e1484012021545b3166104f3dbf53f705269a9c6289a15e3eca20",
+    "monitorLibrarySHA256": "2794bbc442bf4e30e0c668acd5af74655c59a7ad5778edcce3c41680f66e6a00",
+    "networkSnapshotSHA256": "653407d2053def5d48ebaa81ed530b65518cc94334db1418d4fcb81acffe4447",
+    "runnerSHA256": "2123d7fe834741f40945d83119c316a7f2a53dbfe61013e53a777f7e9cf0c395",
+    "runtimeLibrarySHA256": "d9c40f9ae937f3effbe7190f31179d765749d44e93b3585514514fe594a60c0a",
+    "tlsEvidenceTestsAggregateSHA256": "e0ff233c750e9f7724b359fcc360caf662580372530ae42cef377ee3b6128b5f",
+    "verifierSHA256": "a75cc29444290fed85e43593773492bca8d9edb5ff4eaae096645fbb5b29d893"
+  },
+  "attempt1AuthorizedManifestSHA256": "e8b622cb4600ae5e603364accd13dffcd45d1a4aa6a48afe69401fee314cd5d4",
+  "attempt1RuntimeFixtureSHA256": "27a0b7a511addff9888041c94c94b1a3ba9f408ff0a15b3941dcb7d4f6e3d61b",
+  "baseCommit": "440657873b6fcb91a88262fb8df0e874f7919ec2",
+  "evidenceClass": "r2_tls_peer_evidence_post_attempt1_candidate",
+  "parentR2ManifestSHA256": "8e19d1937d7ab432e9a747725d636e565432159561a0962a6d0ec07afe9fdb1e",
+  "reviewState": "post_attempt1_narrow_review_completed_findings_applied",
+  "runtimeSourceAggregateSHA256": "43ac887fb7a24026be46b329dcecaff3be87c3b79a154c6186ef5a30b2b5afdd",
+  "schemaVersion": 1
+}

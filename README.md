@@ -67,6 +67,22 @@ upstream strongSwan 6.0.7.
   Post-evidence verifier binding produced development manifest SHA-256
   `8e19d1937d7ab432e9a747725d636e565432159561a0962a6d0ec07afe9fdb1e`;
   those changed bytes were not live-authorized and cannot authorize a retry.
+  Two later credential-free TLS evidence windows were both inconclusive and
+  their authorizations are consumed. The post-attempt-2 offline candidate now
+  copies the peer chain directly from Network.framework metadata, calls the
+  rejecting verify completion exactly once, and evaluates new SSL/basic trust
+  objects only on a bounded asynchronous, no-network-fetch lane. Its v3 report
+  separates execution safety, transport evidence, trust evidence,
+  compatibility, monitor quality and environment stability. The candidate is
+  review-only. Follow-up delta analysis required a single-lock combined
+  transport/evidence snapshot, pre-serialization report validation, an exact
+  trust-reservation linearization point, and a one-way finalization barrier
+  with PID-bound guard acknowledgement and atomic result publication. The new
+  pending-review manifest SHA-256 is
+  `22b73d9f6b1f583335f2b0f24f2331b904c8b6bb0f2cb29ef8c99ebb43d54f9d`;
+  the full offline verifier passes 37 TLS-evidence, 120 Portal and 109 Core
+  tests (266 total). Attempt 3, portal login, R3 and UI work remain a hard
+  NO-GO pending an independent delta review.
   The frozen raw-header contract is documented in
   `docs/evidence/checkpoint-r2-raw-header-framing.md`.
 

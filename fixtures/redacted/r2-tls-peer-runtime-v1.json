@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "r2_tls_peer_live_window",
+  "candidateManifestSHA256": "e8b622cb4600ae5e603364accd13dffcd45d1a4aa6a48afe69401fee314cd5d4",
+  "manifestExact": true,
+  "complete": true,
+  "checkpointPass": false,
+  "cliExitStatus": 2,
+  "cliReportExact": true,
+  "cliReport": {
+    "applicationDataSent": false,
+    "basicTrustAccepted": false,
+    "basicTrustCategory": "unavailable",
+    "chainLength": 0,
+    "containsIssuer": false,
+    "containsRawCertificate": false,
+    "containsSAN": false,
+    "containsSecrets": false,
+    "containsSerial": false,
+    "containsSubject": false,
+    "evidenceClass": "r2_tls_peer_value_free",
+    "leafCertificateSHA256": null,
+    "leafSPKISHA256": null,
+    "orderedCertificateSHA256": [],
+    "schemaVersion": 1,
+    "sslTrustAccepted": false,
+    "sslTrustCategory": "unavailable",
+    "status": "timed_out",
+    "verifyAccepted": false
+  },
+  "monitorExact": true,
+  "monitor": {
+    "targetObserved": true,
+    "inspectionSucceeded": false,
+    "onlySealedEndpointTCP": true,
+    "sealedEndpointTCPObserved": false,
+    "maximumTCPCount": 0,
+    "maximumUDPCount": 0,
+    "vendorHelperObserved": false,
+    "nativeCharonObserved": false
+  },
+  "network": {
+    "stableUnderTLSProjection": false,
+    "ipv4TransientRouteHashChanged": true
+  },
+  "launchd": {
+    "inactiveAndRunsStable": true,
+    "runsBefore": 19,
+    "runsAfter": 19
+  },
+  "artifactIdentityStable": true,
+  "cleanupSafe": true,
+  "deadlineReached": false,
+  "harnessKillSent": false,
+  "nextTrustDisposition": "incompatible_or_inconclusive",
+  "credentialsRequested": false,
+  "applicationDataRequested": false,
+  "httpRequested": false,
+  "containsSecrets": false,
+  "containsRawCertificate": false
+}

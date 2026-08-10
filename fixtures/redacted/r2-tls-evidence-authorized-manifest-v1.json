@@ -1,0 +1,17 @@
+{
+  "artifacts": {
+    "arm64CLISHA256": "68f3d63798d96c985ba70d6cde25bb3d9e99c59badadd45d6088827e404f96f1",
+    "harnessTestsSHA256": "79ce90e1007950ea5a35cd11ff3ac054e66695b21ba3ebabb7a14025ca4bc5c5",
+    "networkSnapshotSHA256": "653407d2053def5d48ebaa81ed530b65518cc94334db1418d4fcb81acffe4447",
+    "runnerSHA256": "88f18865597435470a71ccdfb222d154aae4fe78dfc46f10bd1c5bd7430d359c",
+    "runtimeLibrarySHA256": "25917692ed54bd1b66535b0451cc9ef64d75b43cbe2763b8d71bd09860e1f231",
+    "tlsEvidenceTestsAggregateSHA256": "1810da6d8ce49bfc9cdea80c3093b74606e42755d8f0b44185d260cc3409ea70",
+    "verifierSHA256": "2d997ac5c91e6a3a57a098d969150b4c6a812683cfd6dc1d3767292607aa11d6"
+  },
+  "baseCommit": "440657873b6fcb91a88262fb8df0e874f7919ec2",
+  "evidenceClass": "r2_tls_peer_evidence_reviewed_candidate",
+  "parentR2ManifestSHA256": "8e19d1937d7ab432e9a747725d636e565432159561a0962a6d0ec07afe9fdb1e",
+  "reviewState": "integrated_review_completed_findings_applied",
+  "runtimeSourceAggregateSHA256": "dbc1e574b45fbda300b2baf381ca57ae9b6ed4050b35124cc53fec2618779c88",
+  "schemaVersion": 1
+}

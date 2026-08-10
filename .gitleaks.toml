@@ -1,0 +1,12 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Generated and installed build trees excluded from source evidence"
+paths = [
+  '''(^|/)\.build/''',
+  '''(^|/)\.swiftpm/''',
+  '''(^|/)build/''',
+  '''(^|/)prefix/''',
+  '''(^|/)runtime/''',
+]

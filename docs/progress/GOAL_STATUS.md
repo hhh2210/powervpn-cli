@@ -767,3 +767,214 @@ authorized by the failed R2B window.
 
 Canonical commit: pending the TLS evidence gate and any later successful R2B
 and final checkpoint validation.
+
+## 2026-08-10 — Rescue R2 credential-free TLS evidence attempt 1
+
+State: **INCONCLUSIVE / FAIL — `timed_out`; GOAL ACTIVE.** The TLS-only
+live-window artifact completed, but the checkpoint did not pass and no peer
+certificate or trust disposition was obtained.
+
+Verified: the exact authorized-manifest archive is
+`fixtures/redacted/r2-tls-evidence-authorized-manifest-v1.json`, SHA-256
+`e8b622cb4600ae5e603364accd13dffcd45d1a4aa6a48afe69401fee314cd5d4`.
+The exact retained value-free result is
+`fixtures/redacted/r2-tls-peer-runtime-v1.json`, SHA-256
+`27a0b7a511addff9888041c94c94b1a3ba9f408ff0a15b3941dcb7d4f6e3d61b`;
+it records `cliReportExact=true`, and the corresponding standalone live report
+has SHA-256
+`108b10b5282842b30a29bb4f7a9821520abfaaa12227f629f96992140f91cfe4`.
+
+Result: `checkpointPass=false`, CLI exit 2, `status=timed_out`, zero
+certificate-chain entries, null leaf hashes and both trust categories
+`unavailable`. The process monitor did not complete descriptor inspection and
+recorded no sealed-endpoint TCP descriptor. The strict network projection
+failed on transient IPv4 route-hash drift. These observations do not prove
+peer incompatibility, server acceptance or TLS acceptance.
+
+Safety/cleanup: no credential, HTTP request or application data was requested.
+No raw certificate or certificate identity was retained. The monitor recorded
+no helper, native charon or UDP descriptor. Launchd remained inactive at runs
+19→19; artifact identity and cleanup were exact; no harness kill was sent.
+
+Remaining: diagnose the timeout and monitor inspection/process-identity
+ambiguity offline. Attempt 1's manifest-bound authorization is consumed and
+cannot be reused. Do not blindly retry the TLS window or the password login,
+and do not weaken system trust or introduce an insecure/custom-CA path.
+
+Next action: after the offline diagnosis and fix, seal all corrected inputs in
+a new reviewed manifest. Any attempt 2 requires fresh explicit authorization
+bound to that exact new manifest; it remains credential-free and must not send
+HTTP or application data.
+
+Canonical commit: pending corrected TLS evidence and later R2 completion.
+
+## 2026-08-10 — Rescue R2 TLS evidence attempt-2 offline candidate
+
+State at candidate seal: **OFFLINE PASS; REVIEW FINDING APPLIED; ATTEMPT 2 NOT
+YET AUTHORIZED; GOAL ACTIVE.** The attempt-1 result remains `INCONCLUSIVE /
+FAIL` and is not reclassified. The later attempt-2 result is recorded in the
+next status entry and does not retroactively turn this offline PASS into live
+acceptance.
+
+Verified: localhost-only SNI and exact trust-builder differentials ruled out
+the two initial implementation hypotheses without contacting the portal. The
+new report schema is v2 and retains only value-free transport progress. The
+process monitor now requires the exact exec image and records separate identity,
+attempt, success and failure evidence. The predecessor gate accepts only the
+unique archived attempt-1 manifest `e8b622cb…5d4` and exact result
+`27a0b7a5…61b`; all missing, altered, additional or stale-selector variants
+fail closed.
+
+Review: one post-attempt-1 main-agent narrow review found one P2: cold preflight
+did not bind the predecessor even though live execution did. Preflight now
+requires and emits `predecessorReady=true`. An independent Claude invocation
+failed authentication before review and is not counted as PASS. No second
+completed narrow review or review-of-review ran.
+
+Evidence: current reviewed candidate manifest SHA-256
+`b63fc19d41a50e99e473156c7c486b44d0d970147da743cf45b25474af00b354`;
+review state `post_attempt1_narrow_review_completed_findings_applied`. The
+offline verifier passes 14 TLS-evidence + 120 Portal + 109 Core tests (243
+total), arm64 build, strict format, ShellCheck, exact monitor and predecessor
+synthetic tests, historical failure fixture validation, Gitleaks and diff
+checks. TLS observation is bounded to 15 seconds; harness wait is bounded to
+20 seconds. No portal, credential, HTTP, application data, helper or live TLS
+action occurred in this offline correction.
+
+Remaining at this pre-live snapshot: attempt 2 had not run and the reviewed
+manifest had not been live authorized. Its later exact authorization and
+inconclusive result are recorded below. Attempt 1's authorization remained
+consumed and could not be reused. R3-R7 remained pending.
+
+Canonical commit: pending the final offline verifier and checkpoint-local
+squash; R2 remains incomplete until a later accepted TLS/login path.
+
+## 2026-08-10 — Rescue R2 credential-free TLS evidence attempt 2
+
+State: **INCONCLUSIVE / FAIL — `timed_out`; GOAL ACTIVE.** The exact TLS-only
+live window completed, but `checkpointPass=false` and no peer certificate or
+trust disposition was obtained. R2B remains failed/incomplete; R3–R7 remain
+pending.
+
+Evidence: the byte-exact authorized manifest archive is
+`fixtures/redacted/r2-tls-evidence-attempt2-authorized-manifest-v1.json`,
+SHA-256
+`b63fc19d41a50e99e473156c7c486b44d0d970147da743cf45b25474af00b354`.
+The byte-exact retained result is
+`fixtures/redacted/r2-tls-peer-runtime-attempt2-v1.json`, SHA-256
+`8766a176e542173bf7b53b79ca005cde0c222a5d2c699871e6aeafd329761219`;
+it records `cliReportExact=true`, and the corresponding standalone live report
+has SHA-256
+`603dce97c50c6c014dc2d83f1be2ded00dee75dfbcfc0ecdb9bd4b4e63ced647`.
+
+Result: CLI exit 2 and `status=timed_out`. The value-free progress record has
+`connectionStarted`, `preparingObserved`, `waitingObserved` and
+`verifyCallbackObserved` true; `readyObserved` and `failedObserved` are false.
+The report contains no certificate-chain entry or leaf hash, and both trust
+categories are `unavailable`. This does not locate a particular blocking line
+inside the trust builder and does not prove peer compatibility,
+incompatibility, TLS acceptance or server acceptance.
+
+Monitor: the separate value-free live monitor has SHA-256
+`0f310886e8bbd99ad28a9ed36de8eec619d9616fbcbc26db8354fb17b6f9b5b0`
+and retained exact and stable target identity. Sixty of 62 descriptor
+inspections succeeded and two failed; aggregate `inspectionSucceeded=false`.
+No sealed-endpoint TCP descriptor was observed, so the closed checkpoint result
+correctly has `monitorExact=false` and `monitor=null`. No UDP descriptor, vendor
+helper or native charon was observed. The strict network projection failed on
+transient IPv4 route-hash drift. Launchd remained inactive at runs 19→19.
+
+Safety/cleanup: no credential, HTTP request or application data was requested.
+No raw certificate, certificate identity or secret was retained. Artifact
+identity and cleanup were exact, the predecessor was validated and no harness
+kill was sent.
+
+Remaining: attempt 2's manifest-bound authorization is consumed and cannot be
+reused. Do not blindly run attempt 3 or retry the password login; do not weaken
+system trust or introduce an insecure/custom-CA path. Any later live attempt
+requires a newly bounded offline diagnosis, a new reviewed exact manifest and
+fresh explicit authorization.
+
+Canonical commit: pending this attempt-2 failure evidence and later R2
+completion; the Goal is not complete.
+
+## 2026-08-10 — Rescue R2 post-attempt-2 narrow hardening
+
+State: **OFFLINE VERIFIER PASS; EXTERNAL REVIEW PENDING; LIVE HARD NO-GO;
+GOAL ACTIVE.** No new TLS live window or portal login ran in this hardening
+step, and the consumed attempt-2 authorization was not reused.
+
+Verified: localhost-only IP-literal ClientHello tests show automatic and
+explicit server-name modes both omit SNI, reach one rejecting verify callback,
+never become ready and send no application data. Connection start/cancel is
+now a sticky linearizable state machine. One absolute monotonic deadline covers
+all harness phases, and blocked FIFO/validator tests prove bounded cleanup with
+zero owned residue. Exact PID/PPID/image/command monitoring plus a positive
+localhost `lsof -i` fixture closes the earlier false inspection failure; live
+acceptance would require exactly one sealed TCP descriptor and zero UDP.
+
+Classification and evidence closure: Basic trust no longer coerces an SSL
+failure into hostname mismatch. Swift and shell share the same v2 report
+invariants and integral 1...16 observed-chain bound. Runtime source, full test
+trees, all transitive shell/runtime/snapshot/verifier inputs and test-only
+OpenSSL identity are hash-bound; symlink/FIFO/special descendants fail closed.
+The live-result `manifestExact` field is recomputed post-run instead of being a
+constant.
+
+Evidence: 18 TLS-evidence + 120 Portal + 109 Core tests pass (247 total), along
+with arm64 build, strict format, ShellCheck, localhost-only runtime/deadline
+tests, historical fixture gates, manifest mutation negatives, Gitleaks and
+diff checks. Exact candidate manifest SHA-256:
+`d46773c3f2e5a1f3aaebc2409da3ff807e02ef102c75cf9ea5158481c35713c2`.
+Its fixed review state is `post_attempt1_narrow_review_pending`, therefore
+`R2TLS_REVIEW_COMPLETE=false` and cold preflight cannot authorize live use.
+
+Remaining: obtain the independent review over these exact bytes. Any finding
+must be fixed offline and causes a new manifest SHA. Any later attempt 3 still
+requires a separately reviewed manifest and fresh exact user authorization;
+do not retry TLS/login or request credentials under the current manifest.
+
+Canonical commit: this checkpoint-local amend records only the offline
+hardening candidate; R2 and the project Goal remain active.
+
+## 2026-08-10 — Rescue R2 attempt-3 review-only candidate
+
+State: **OFFLINE IMPLEMENTATION COMPLETE; FINAL SEAL/EXTERNAL REVIEW PENDING;
+LIVE HARD NO-GO; GOAL ACTIVE.** No attempt-3 socket, portal login, credential,
+HTTP request, application-data send, helper action or UI work ran.
+
+The diagnostic delta now captures the peer chain from TLS metadata inside the
+verify callback, invokes `completion(false)` exactly once, then evaluates new
+SSL-host and Basic-X509 trust objects on a dedicated bounded asynchronous lane
+with all network fetching disabled. The v3 value-free report separates chain
+copy, verify invocation/return, both trust evaluations, deadline and duplicate
+callback phases. It no longer waits for `.failed` before publishing complete
+evidence.
+
+Attempt-3 lineage requires exact attempt1/attempt2 five-file run aggregates
+`aef7d3b7734b132f6b5d1bb3fc498d7609d3424c0808a5a029af0e4076d687c9`
+and
+`21eb127eae03c6c49a56538e285cab0215e00d7122a1c8c0d8184d646bbdcce2`,
+plus the byte-exact attempt-2 manifest/result. The selector is fixed to
+`attempt3-after-inconclusive-v2`; a future exact authorization is consumed by
+an atomic manifest-named marker before any network activity. The current
+scratch contains no such marker.
+
+Evidence so far: 37 TLS-evidence tests pass, including metadata order/bounds,
+single-lock combined progress snapshots, encode/decode cross-object rejection,
+inline and asynchronous trust callbacks, atomic per-policy start reservations,
+a shared absolute deadline, late and duplicate callbacks, retained trust
+lifetime and localhost-only IP-literal TLS.
+Attempt lineage/dimension, historical fixture, manifest DAG and deterministic
+ZIP synthetic tests also pass. PID-bound guard acknowledgement, one-shot final
+dimension computation and same-filesystem atomic result publication close the
+remaining finalization boundary identified in the follow-up analysis.
+The replacement pending-review candidate manifest SHA-256 is
+`22b73d9f6b1f583335f2b0f24f2331b904c8b6bb0f2cb29ef8c99ebb43d54f9d`.
+The complete offline verifier passes 37 TLS-evidence + 120 Portal + 109 Core
+tests (266 total), arm64 build, strict format, ShellCheck, Gitleaks, diff check,
+historical/lineage/manifest negatives and deterministic bundle construction.
+
+Remaining: perform one independent delta review on the exact replacement
+manifest, then require a fresh manifest-bound user authorization. Attempt 3,
+login and R3 remain unauthorized.

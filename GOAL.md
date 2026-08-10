@@ -9,7 +9,7 @@ supersedes_for_active_execution: Native Goal V3
 native_v3_role: frozen fallback
 native_fallback_baseline_commit: 8d2e026c1f5db15f5b1e1e0ca81c72d2ae5f2073
 current_checkpoint: R2-username-password-portal-login
-immediate_next: credential-free-bounded-tls-trust-evidence-gate
+immediate_next: attempt3-independent-delta-review
 user_input_contract: username-and-password-only
 review_policy: one integrated review per checkpoint
 ---
@@ -153,6 +153,10 @@ Stop with evidence if any of these is proven:
 - portal response cannot legally produce the helper material;
 - mapping requires replayable secret extraction from vendor logs/process memory;
 - Rosetta helper remains too unstable after bounded full-snapshot recovery;
+- the discovered portal endpoint is incompatible with macOS system trust and
+  no legally derived system-trusted hostname exists; Rescue MUST NOT reproduce
+  the vendor client's disabled peer or hostname verification without an
+  explicit security-policy revision of this Goal;
 - Surge coexistence or cleanup cannot be made safe.
 
 A blocker report must contain last-good-state, first-bad-event, cleanup status,
@@ -359,6 +363,53 @@ stable.
 R2B is failed and incomplete; the Goal remains active. Next is a bounded,
 credential-free TLS trust evidence gate. Do not blindly retry login, weaken
 system trust, add an insecure path or re-enter a credential in that gate.
+
+#### Post-attempt-2 TLS evidence candidate
+
+Attempt 1 and attempt 2 were both inconclusive and their exact authorizations
+are consumed. Attempt 3 is the final credential-free TLS evidence attempt
+permitted by this Goal, and it is not authorized. Its offline candidate MUST
+bind the two retained run directories byte-for-byte, accept only the exact
+`attempt3-after-inconclusive-v2` selector, and atomically consume any future
+manifest-specific authorization before opening a socket. No attempt 4 may be
+implemented, authorized or run without an explicit revision of this Goal.
+
+The diagnostic delta is deliberately narrow. Inside the TLS verify callback it
+copies the peer-presented certificate chain directly from
+`sec_protocol_metadata`, rejects the handshake exactly once with
+`completion(false)`, and performs no trust evaluation there. It then constructs
+independent SSL-host and Basic-X509 `SecTrust` objects and evaluates them with
+network fetching disabled on one bounded asynchronous lane. The result retains
+only hashes, closed trust categories and value-free phase booleans. It MUST NOT
+retain certificate bytes, identity fields, endpoint/error descriptions,
+credentials, HTTP data, application data or helper evidence.
+
+The live-result contract separates `executionSafetyPass`,
+`transportEvidenceComplete`, `trustEvidenceComplete`, `compatibilityOutcome`,
+`monitorQuality`, `environmentStable` and `checkpointPass`. A complete trust
+diagnosis may be `blocked_by_system_trust` without being relabelled compatible.
+Before any possible attempt 3, these bytes require an independent review and a
+new exact user authorization. R3 and all UI work remain blocked.
+
+An attempt-3 outcome of `compatible_under_system_trust` may support only a
+separately reviewed, newly manifest-bound R2B login window. It does not complete
+R2B, authorize that login by itself, or unblock R3.
+
+#### Attempt-3 terminal decision
+
+- `compatible_under_system_trust` is necessary but not sufficient for R3. It
+  permits preparation of one separately reviewed R2B password-login window;
+  only an accepted login and authenticated portal response can complete R2.
+- `blocked_by_system_trust` closes Rescue R2 under the current security
+  boundary. Do not add an insecure, custom-CA or vendor-equivalent trust bypass;
+  resume only after an explicit Goal/security-policy revision or record
+  Blocked B.
+- If peer-chain capture succeeds but trust evidence remains incomplete or
+  times out, stop this Network.framework evidence lane. Attempt 4 remains
+  prohibited without an explicit Goal revision and a genuinely
+  information-gaining design.
+- An execution, monitor or environment failure permits only an offline fix tied
+  to a specific diagnostic defect; it never authorizes a blind retry.
 
 ### R3 — Portal response to vendor XPC snapshot
 
