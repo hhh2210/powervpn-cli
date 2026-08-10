@@ -209,6 +209,49 @@ import Testing
     #expect(driver.cancelCount == 0)
     #expect(validator.callCount == 0)
   }
+
+  @Test func taskCancellationCancelsAnActiveConnectionExactlyOnce() async {
+    let driver = ScriptedVendorXPCDriver(steps: [])
+    let task = Task {
+      await transport(driver).getVersion(
+        timeoutMilliseconds: 500,
+        peerGenerationValidator: { _ in true }
+      )
+    }
+    for _ in 0..<100 where driver.startCount == 0 {
+      await Task.yield()
+    }
+    #expect(driver.startCount == 1)
+
+    task.cancel()
+    let evidence = await task.value
+
+    #expect(evidence.outcome == .cancelled)
+    #expect(evidence.connectionCancelRequested)
+    #expect(driver.cancelCount == 1)
+  }
+
+  @Test func timeoutBoundsAnAsyncPeerGenerationValidation() async {
+    let driver = ScriptedVendorXPCDriver(steps: [
+      .connection(.business(acceptedReply(), peerPID: 44))
+    ])
+
+    let evidence = await transport(
+      driver,
+      validationTimeoutMilliseconds: 10
+    ).getVersion(
+      timeoutMilliseconds: 10,
+      peerGenerationValidator: { _ in
+        try? await Task.sleep(for: .seconds(5))
+        return true
+      }
+    )
+
+    #expect(evidence.outcome == .timeout)
+    #expect(!evidence.accepted)
+    #expect(evidence.connectionCancelRequested)
+    #expect(driver.cancelCount == 1)
+  }
 }
 
 private enum DriverStep: Sendable {
@@ -268,11 +311,14 @@ private final class ScriptedVendorXPCDriver: @unchecked Sendable,
 
 private func transport(
   _ driver: ScriptedVendorXPCDriver,
-  holdMilliseconds: Int = 5
+  holdMilliseconds: Int = 5,
+  validationTimeoutMilliseconds: Int =
+    RawVendorXPCTransport.peerGenerationValidationTimeoutMilliseconds
 ) -> RawVendorXPCTransport {
   RawVendorXPCTransport(
     driverFactory: { _ in driver },
-    businessObservationHoldMilliseconds: holdMilliseconds
+    businessObservationHoldMilliseconds: holdMilliseconds,
+    peerGenerationValidationTimeoutMilliseconds: validationTimeoutMilliseconds
   )
 }
 

@@ -216,10 +216,15 @@ private actor FakeVendorXPCTransport: VendorXPCTransporting {
 
   func getVersion(
     timeoutMilliseconds _: Int,
-    peerGenerationValidator: @escaping @Sendable (Int32) -> Bool
+    peerGenerationValidator: @escaping @Sendable (Int32) async -> Bool
   ) async -> VendorXPCGetVersionEvidence {
     callCount += 1
-    let peerValidated = peerPID.map(peerGenerationValidator) ?? false
+    let peerValidated: Bool
+    if let peerPID {
+      peerValidated = await peerGenerationValidator(peerPID)
+    } else {
+      peerValidated = false
+    }
     return VendorXPCGetVersionEvidence(
       outcome: evidence.outcome,
       versionByteLength: evidence.versionByteLength,

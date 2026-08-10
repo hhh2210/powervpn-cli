@@ -1,30 +1,39 @@
 import Dispatch
+import Foundation
 @preconcurrency import XPC
 
 public struct RawVendorXPCTransport: VendorXPCTransporting, Sendable {
   public static let defaultTimeoutMilliseconds = 2_000
   public static let validTimeoutMilliseconds = 1...60_000
   public static let businessObservationHoldMilliseconds = 200
+  static let peerGenerationValidationTimeoutMilliseconds = 2_000
 
   private let driverFactory: @Sendable (DispatchQueue) -> any VendorXPCConnectionDriving
   private let businessObservationHoldMilliseconds: Int
+  private let peerGenerationValidationTimeoutMilliseconds: Int
 
   public init() {
     driverFactory = { SystemVendorXPCConnectionDriver(queue: $0) }
     businessObservationHoldMilliseconds = Self.businessObservationHoldMilliseconds
+    peerGenerationValidationTimeoutMilliseconds =
+      Self.peerGenerationValidationTimeoutMilliseconds
   }
 
   init(
     driverFactory: @escaping @Sendable (DispatchQueue) -> any VendorXPCConnectionDriving,
-    businessObservationHoldMilliseconds: Int = Self.businessObservationHoldMilliseconds
+    businessObservationHoldMilliseconds: Int = Self.businessObservationHoldMilliseconds,
+    peerGenerationValidationTimeoutMilliseconds: Int =
+      Self.peerGenerationValidationTimeoutMilliseconds
   ) {
     self.driverFactory = driverFactory
     self.businessObservationHoldMilliseconds = businessObservationHoldMilliseconds
+    self.peerGenerationValidationTimeoutMilliseconds =
+      peerGenerationValidationTimeoutMilliseconds
   }
 
   public func getVersion(
     timeoutMilliseconds: Int = Self.defaultTimeoutMilliseconds,
-    peerGenerationValidator: @escaping @Sendable (Int32) -> Bool
+    peerGenerationValidator: @escaping @Sendable (Int32) async -> Bool
   ) async -> VendorXPCGetVersionEvidence {
     guard Self.validTimeoutMilliseconds.contains(timeoutMilliseconds) else {
       return VendorXPCGetVersionEvidence(
@@ -32,22 +41,47 @@ public struct RawVendorXPCTransport: VendorXPCTransporting, Sendable {
         connectionCancelRequested: false
       )
     }
+    guard !Task.isCancelled else {
+      return VendorXPCGetVersionEvidence(
+        outcome: .cancelled,
+        connectionCancelRequested: false
+      )
+    }
     let queue = DispatchQueue(label: "com.powervpn.r1.raw-xpc")
+    let attempt = VendorXPCGetVersionAttempt()
     let transaction = VendorXPCGetVersionTransaction(
       queue: queue,
       driver: driverFactory(queue),
       timeoutMilliseconds: timeoutMilliseconds,
       businessObservationHoldMilliseconds: businessObservationHoldMilliseconds,
+      peerGenerationValidationTimeoutMilliseconds:
+        peerGenerationValidationTimeoutMilliseconds,
       peerGenerationValidator: peerGenerationValidator
     )
-    return await transaction.run()
+    return await withTaskCancellationHandler {
+      await transaction.run(attempt: attempt)
+    } onCancel: {
+      attempt.cancel()
+      transaction.cancel(attempt: attempt)
+    }
+  }
+}
+
+private final class VendorXPCGetVersionAttempt: @unchecked Sendable {
+  private let lock = NSLock()
+  private var cancelled = false
+
+  var isCancelled: Bool { lock.withLock { cancelled } }
+
+  func cancel() {
+    lock.withLock { cancelled = true }
   }
 }
 
 private final class SystemVendorXPCConnectionDriver: @unchecked Sendable,
   VendorXPCConnectionDriving
 {
-  private static let serviceName = "com.leadsec.charon-xpc"
+  private static let serviceName = VendorXPCSessionContract.serviceName
 
   private let connection: xpc_connection_t
   private let queue: DispatchQueue
@@ -98,11 +132,15 @@ private final class VendorXPCGetVersionTransaction: @unchecked Sendable {
   private var driver: (any VendorXPCConnectionDriving)?
   private let timeoutMilliseconds: Int
   private let businessObservationHoldMilliseconds: Int
-  private let peerGenerationValidator: @Sendable (Int32) -> Bool
+  private let peerGenerationValidationTimeoutMilliseconds: Int
+  private let peerGenerationValidator: @Sendable (Int32) async -> Bool
   private var continuation: CheckedContinuation<VendorXPCGetVersionEvidence, Never>?
   private var timer: DispatchSourceTimer?
+  private var peerValidationTask: Task<Void, Never>?
+  private var currentAttempt: VendorXPCGetVersionAttempt?
   private var finished = false
   private var businessOutcomePending = false
+  private var businessValidationPending = false
   private var emptyDispatcherTailObserved = false
   private var emptyReplyAcknowledgementObserved = false
 
@@ -111,19 +149,31 @@ private final class VendorXPCGetVersionTransaction: @unchecked Sendable {
     driver: any VendorXPCConnectionDriving,
     timeoutMilliseconds: Int,
     businessObservationHoldMilliseconds: Int,
-    peerGenerationValidator: @escaping @Sendable (Int32) -> Bool
+    peerGenerationValidationTimeoutMilliseconds: Int,
+    peerGenerationValidator: @escaping @Sendable (Int32) async -> Bool
   ) {
     self.queue = queue
     self.driver = driver
     self.timeoutMilliseconds = timeoutMilliseconds
     self.businessObservationHoldMilliseconds = businessObservationHoldMilliseconds
+    self.peerGenerationValidationTimeoutMilliseconds =
+      peerGenerationValidationTimeoutMilliseconds
     self.peerGenerationValidator = peerGenerationValidator
   }
 
-  func run() async -> VendorXPCGetVersionEvidence {
+  func run(attempt: VendorXPCGetVersionAttempt) async -> VendorXPCGetVersionEvidence {
     await withCheckedContinuation { continuation in
       queue.async { [self] in
+        guard !attempt.isCancelled else {
+          continuation.resume(
+            returning: VendorXPCGetVersionEvidence(
+              outcome: .cancelled,
+              connectionCancelRequested: false
+            ))
+          return
+        }
         self.continuation = continuation
+        currentAttempt = attempt
         armTimeout()
         driver?.start(
           connectionEventHandler: { [self] event in
@@ -134,6 +184,13 @@ private final class VendorXPCGetVersionTransaction: @unchecked Sendable {
           }
         )
       }
+    }
+  }
+
+  func cancel(attempt: VendorXPCGetVersionAttempt) {
+    queue.async { [self] in
+      guard currentAttempt === attempt, !finished else { return }
+      finish(outcome: .cancelled)
     }
   }
 
@@ -151,7 +208,6 @@ private final class VendorXPCGetVersionTransaction: @unchecked Sendable {
     switch event {
     case .business(let reply, let peerPID):
       guard !businessOutcomePending else { return }
-      let peerGenerationValidated = peerGenerationValidator(peerPID)
       let outcome: VendorXPCGetVersionOutcome
       if !reply.versionMatchesLockedBuild {
         outcome = .lockedVersionMismatch
@@ -160,11 +216,23 @@ private final class VendorXPCGetVersionTransaction: @unchecked Sendable {
       } else {
         outcome = .accepted
       }
-      holdBusinessOutcome(
-        outcome,
-        reply: reply,
-        replyPeerGenerationValidated: peerGenerationValidated
-      )
+      businessOutcomePending = true
+      businessValidationPending = true
+      timer?.cancel()
+      timer = nil
+      armPeerValidationTimeout()
+      peerValidationTask = Task { [self] in
+        let peerGenerationValidated = await peerGenerationValidator(peerPID)
+        queue.async { [self] in
+          guard !finished, businessValidationPending else { return }
+          businessValidationPending = false
+          holdBusinessOutcome(
+            outcome,
+            reply: reply,
+            replyPeerGenerationValidated: peerGenerationValidated
+          )
+        }
+      }
     case .emptyDispatcherTail:
       emptyDispatcherTailObserved = true
     case .malformedBusinessEvent:
@@ -180,6 +248,16 @@ private final class VendorXPCGetVersionTransaction: @unchecked Sendable {
     case .unexpectedConnectionEvent:
       finishFailure(.unexpectedConnectionEvent)
     }
+  }
+
+  private func armPeerValidationTimeout() {
+    let timer = DispatchSource.makeTimerSource(queue: queue)
+    timer.schedule(
+      deadline: .now() + .milliseconds(peerGenerationValidationTimeoutMilliseconds)
+    )
+    timer.setEventHandler { [self] in finish(outcome: .timeout) }
+    self.timer = timer
+    timer.resume()
   }
 
   private func handle(_ event: VendorXPCReplyCallbackEvent) {
@@ -205,7 +283,7 @@ private final class VendorXPCGetVersionTransaction: @unchecked Sendable {
     reply: VendorXPCBusinessReply? = nil,
     replyPeerGenerationValidated: Bool = false
   ) {
-    guard !finished, !businessOutcomePending else { return }
+    guard !finished, !businessValidationPending else { return }
     businessOutcomePending = true
     timer?.cancel()
     timer = nil
@@ -234,6 +312,9 @@ private final class VendorXPCGetVersionTransaction: @unchecked Sendable {
     finished = true
     timer?.cancel()
     timer = nil
+    peerValidationTask?.cancel()
+    peerValidationTask = nil
+    currentAttempt = nil
     let currentDriver = driver
     driver = nil
     currentDriver?.cancel()

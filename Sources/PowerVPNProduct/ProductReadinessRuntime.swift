@@ -91,11 +91,21 @@ public struct InstalledProductReadinessObserver: ProductReadinessObserving {
 
 public struct ProductReadinessRuntime: Sendable {
   let observer: any ProductReadinessObserving
+  let helperProbeFactory: @Sendable () -> any VendorXPCReachabilityProbing
 
   public init(
     observer: any ProductReadinessObserving = InstalledProductReadinessObserver()
   ) {
     self.observer = observer
+    helperProbeFactory = { VendorXPCReachabilityProbe() }
+  }
+
+  package init(
+    observer: any ProductReadinessObserving,
+    helperProbeFactory: @escaping @Sendable () -> any VendorXPCReachabilityProbing
+  ) {
+    self.observer = observer
+    self.helperProbeFactory = helperProbeFactory
   }
 
   public func doctor() -> ProductDoctorReport {
@@ -113,46 +123,6 @@ public struct ProductReadinessRuntime: Sendable {
       resourceSource: observation.resourceSource,
       snapshotComplete: snapshot.snapshotComplete,
       firstMissingField: snapshot.firstMissingField,
-      blocker: blocker
-    )
-  }
-
-  public func helperStatus() -> ProductHelperStatusReport {
-    let observation = observer.observe()
-    let probeAvailable =
-      observation.helperAvailable
-      && observation.generation.launchdObserved
-      && observation.directXPCPreflightSafe
-    let state: ProductState
-    let blocker: ProductBlocker?
-    if !observation.helperAvailable {
-      state = .blocked
-      blocker = .helperUnavailable
-    } else if !observation.generation.launchdObserved {
-      state = .blocked
-      blocker = .helperGenerationUnavailable
-    } else if !observation.directXPCPreflightSafe {
-      state = .blocked
-      blocker = .directXPCPreflightUnsafe
-    } else if observation.directXPCStatus == .currentReachable {
-      state = .ready
-      blocker = nil
-    } else if observation.directXPCStatus == .currentUnreachable {
-      state = .blocked
-      blocker = .directXPCUnreachable
-    } else {
-      state = .degraded
-      blocker = .directXPCNotProbed
-    }
-    return ProductHelperStatusReport(
-      productState: state,
-      helperAvailable: observation.helperAvailable,
-      generation: ProductHelperGeneration(observation.generation),
-      directXPCStatus: observation.directXPCStatus,
-      liveProbePerformed: observation.directXPCStatus == .currentReachable
-        || observation.directXPCStatus == .currentUnreachable,
-      probeAvailable: probeAvailable,
-      preflightSafe: observation.directXPCPreflightSafe,
       blocker: blocker
     )
   }

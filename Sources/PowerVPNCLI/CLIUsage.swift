@@ -21,7 +21,8 @@ func printCLIUsage() {
                              Read the installed charon helper version over exact XPC
       login                  Run the sealed username/password portal transaction
       doctor --json          Show product readiness and the first blocker
-      helper status --json   Show helper generation and direct-XPC probe state
+      helper status [--probe] --json
+                             Show passive helper state; --probe performs one bounded get_version
       resources --json       List selectable authorized resources, if available
       snapshot --dry-run --json
                              Check vendor snapshot completeness without serializing it

@@ -22,3 +22,26 @@
   one exact authenticated resource and an agent-independent cleanup path are
   both proven. No credential, GUI, Keychain, TCC, interactive sudo, fixture, or
   placeholder value may be used.
+
+## 2026-08-11 05:31 +0800 — explicit helper probe implemented offline
+
+- Product capability: `powervpn helper status --probe --json` now routes to one
+  explicit, fixed-service, exact `get_version` transaction. The passive
+  `helper status --json` path remains observation-only and does not construct a
+  probe.
+- Safety contract: Core performs bounded launchd-generation observation and
+  cold preflight before XPC, validates the reply against the launched helper
+  generation, supports task cancellation, and returns a value-free final
+  generation receipt. No caller can choose the service or request payload.
+- Verification: the integrated helper/Product/CLI targeted set passed 44 tests;
+  the full package test run passed; `swift build --arch arm64 --product
+  powervpn` passed; strict formatting and diff checks passed. No real helper,
+  XPC, network, Portal, SSH, or credential path has been invoked yet.
+- Supervisor review: adding `SIGHUP` handling and a 120-second cancellation
+  trigger improves cooperative teardown, but does not by itself prove the
+  unattended contract. A P0 remains where a submitted start can lose its
+  normal lease and, under an unclassified generation, send zero stop requests.
+- Exact next action: preserve a same-session cleanup-only capability at the
+  start submission linearization point, test every submitted failure path for
+  an exact-one stop attempt, then reassess whether the read-only helper probe is
+  eligible to run on the installed machine.

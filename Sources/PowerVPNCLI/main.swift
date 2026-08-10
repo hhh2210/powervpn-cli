@@ -29,7 +29,7 @@ struct PowerVPNCommand {
 
     switch command {
     case "doctor", "helper", "resources", "snapshot":
-      let result = try runProductCommand(arguments)
+      let result = try await runProductCommand(arguments)
       print(result.standardOutput)
       if result.exitCode != 0 {
         Foundation.exit(result.exitCode)

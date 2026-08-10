@@ -10,6 +10,7 @@ public enum VendorXPCGetVersionOutcome: String, Codable, Equatable, Sendable {
   case connectionInvalid = "connection_invalid"
   case peerCodeSigningRequirement = "peer_code_signing_requirement"
   case timeout
+  case cancelled
   case invalidTimeout = "invalid_timeout"
   case unexpectedXPCError = "unexpected_xpc_error"
   case unexpectedConnectionEvent = "unexpected_connection_event"
@@ -60,7 +61,7 @@ public struct VendorXPCGetVersionEvidence: Equatable, Sendable {
 public protocol VendorXPCTransporting: Sendable {
   func getVersion(
     timeoutMilliseconds: Int,
-    peerGenerationValidator: @escaping @Sendable (Int32) -> Bool
+    peerGenerationValidator: @escaping @Sendable (Int32) async -> Bool
   ) async -> VendorXPCGetVersionEvidence
 }
 

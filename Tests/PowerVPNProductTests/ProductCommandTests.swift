@@ -14,8 +14,8 @@ import Testing
       ["snapshot", "--dry-run", "--json"],
     ]
   )
-  func exactProductSurfacesEmitSortedJSON(_ arguments: [String]) throws {
-    let result = try runProductCommand(arguments, runtime: blockedRuntime())
+  func exactProductSurfacesEmitSortedJSON(_ arguments: [String]) async throws {
+    let result = try await runProductCommand(arguments, runtime: blockedRuntime())
     let object = try #require(
       JSONSerialization.jsonObject(with: Data(result.standardOutput.utf8))
         as? [String: Any]
@@ -44,15 +44,16 @@ import Testing
       ["doctor", "--verbose", "--json"],
       ["helper", "--json", "status"],
       ["helper", "status"],
-      ["helper", "status", "--probe", "--json"],
+      ["helper", "status", "--json", "--probe"],
+      ["helper", "status", "--probe", "--probe", "--json"],
       ["resources", "--json", "extra"],
       ["snapshot", "--json", "--dry-run"],
       ["snapshot", "--dry-run"],
     ]
   )
-  func malformedSurfacesFailClosed(_ arguments: [String]) {
+  func malformedSurfacesFailClosed(_ arguments: [String]) async {
     do {
-      _ = try runProductCommand(arguments, runtime: blockedRuntime())
+      _ = try await runProductCommand(arguments, runtime: blockedRuntime())
       Issue.record("expected usage rejection")
     } catch let error as ProductCommandError {
       #expect(error == .invalidArguments)
@@ -62,8 +63,8 @@ import Testing
     }
   }
 
-  @Test func snapshotOutputNamesMissingFieldButContainsNoSnapshotValues() throws {
-    let result = try runProductCommand(
+  @Test func snapshotOutputNamesMissingFieldButContainsNoSnapshotValues() async throws {
+    let result = try await runProductCommand(
       ["snapshot", "--dry-run", "--json"],
       runtime: blockedRuntime()
     )
