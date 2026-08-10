@@ -11,7 +11,7 @@ package struct RawVendorCharonControlTransport: Sendable {
       @escaping @Sendable (VendorCharonControlConnectionEvent) -> Void
     ) -> any VendorCharonControlConnectionDriving
 
-  private let driverFactory: DriverFactory
+  let driverFactory: DriverFactory
 
   package init() {
     driverFactory = { queue, handler in

@@ -5,6 +5,7 @@ package enum VendorCharonControlOperation: String, Equatable, Sendable {
 
 package enum VendorCharonControlOutcome: String, Equatable, Sendable {
   case transportAcknowledged = "transport_acknowledged"
+  case preflightBlocked = "preflight_blocked"
   case invalidTimeout = "invalid_timeout"
   case cancelled
   case timeout
@@ -45,6 +46,9 @@ package struct VendorCharonControlReceipt: Equatable, Sendable {
 
   /// The installed charon helper has no synchronous start/stop business reply.
   package var helperSuccessEstablished: Bool { false }
+
+  /// Transport acknowledgement alone cannot prove route/tunnel cleanup.
+  package var cleanupEstablished: Bool { false }
 }
 
 package struct VendorCharonControlObservation: Equatable, Sendable {
