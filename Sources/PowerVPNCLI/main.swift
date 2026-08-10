@@ -8,6 +8,9 @@ struct PowerVPNCommand {
   static func main() async {
     do {
       try await run(Array(CommandLine.arguments.dropFirst()))
+    } catch let error as M2ConnectOnceCommandError {
+      FileHandle.standardError.write(Data("error: \(error)\n".utf8))
+      Foundation.exit(64)
     } catch let error as ProductCommandError {
       FileHandle.standardError.write(Data("error: \(error)\n".utf8))
       Foundation.exit(64)
@@ -58,8 +61,14 @@ struct PowerVPNCommand {
       if result.exitCode != 0 {
         Foundation.exit(result.exitCode)
       }
+    case "m2":
+      let result = try await runM2ConnectOnceCommand(arguments)
+      print(result.standardOutput)
+      if result.exitCode != 0 {
+        Foundation.exit(result.exitCode)
+      }
     case "help", "--help", "-h":
-      printUsage()
+      printCLIUsage()
     default:
       throw CLIError.unknownCommand(command)
     }
@@ -238,38 +247,6 @@ struct PowerVPNCommand {
     return TimeInterval(arguments[index + 1])
   }
 
-  private static func printUsage() {
-    print(
-      """
-      Usage: powervpn <command> [options]
-
-        status                 Show GUI, helper, crash, and tunnel state
-        probe [--timeout N]    Read SSH banners from thu21 and thu52
-        diagnose              Run status and probe together
-        oracle [inventory]     Read-only vendor helper and protocol inventory
-        oracle correlate <value-free-trace.json>
-                               Validate metadata-only control/XPC correlation
-        spec validate-redacted <path>
-                               Validate a commit-safe redacted TunnelSpec fixture
-        spec vici-dry-run <path>
-                               Build and hash a pure-Swift VICI load-conn payload
-        vici version --socket <path> [--timeout-ms N]
-                               Run a value-free version request against charon
-        vici cp7a-smoke --socket <path> [--timeout-ms N]
-                               Run bounded synthetic load/list/unload over VICI
-        xpc get-version [--timeout-ms N]
-                               Read the installed charon helper version over exact XPC
-        login                  Run the sealed username/password portal transaction
-        doctor --json          Show product readiness and the first blocker
-        helper status --json   Show helper generation and direct-XPC probe state
-        resources --json       List selectable authorized resources, if available
-        snapshot --dry-run --json
-                               Check vendor snapshot completeness without serializing it
-
-      Options:
-        --json                 Emit JSON
-      """)
-  }
 }
 
 private enum CLIError: Error, CustomStringConvertible {

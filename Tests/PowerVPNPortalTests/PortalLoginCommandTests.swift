@@ -154,7 +154,7 @@ private final class RuntimeInvocationProbe: @unchecked Sendable {
   var count: Int { lock.withLock { invocationCount } }
 }
 
-private final class ManualPortalLoginSignalMonitor: PortalLoginSignalMonitoring,
+private final class ManualPortalLoginSignalMonitor: CLISignalMonitoring,
   @unchecked Sendable
 {
   private let lock = NSLock()
