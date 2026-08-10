@@ -1,12 +1,16 @@
 import Foundation
 import PowerVPNCore
 import PowerVPNPortal
+import PowerVPNProduct
 
 @main
 struct PowerVPNCommand {
   static func main() async {
     do {
       try await run(Array(CommandLine.arguments.dropFirst()))
+    } catch let error as ProductCommandError {
+      FileHandle.standardError.write(Data("error: \(error)\n".utf8))
+      Foundation.exit(64)
     } catch {
       FileHandle.standardError.write(Data("error: \(error)\n".utf8))
       Foundation.exit(1)
@@ -18,6 +22,12 @@ struct PowerVPNCommand {
     let json = arguments.contains("--json")
 
     switch command {
+    case "doctor", "helper", "resources", "snapshot":
+      let result = try runProductCommand(arguments)
+      print(result.standardOutput)
+      if result.exitCode != 0 {
+        Foundation.exit(result.exitCode)
+      }
     case "status":
       renderStatus(SystemInspector().status(), json: json)
     case "probe":
@@ -250,6 +260,11 @@ struct PowerVPNCommand {
         xpc get-version [--timeout-ms N]
                                Read the installed charon helper version over exact XPC
         login                  Run the sealed username/password portal transaction
+        doctor --json          Show product readiness and the first blocker
+        helper status --json   Show helper generation and direct-XPC probe state
+        resources --json       List selectable authorized resources, if available
+        snapshot --dry-run --json
+                               Check vendor snapshot completeness without serializing it
 
       Options:
         --json                 Emit JSON

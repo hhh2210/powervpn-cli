@@ -978,3 +978,51 @@ historical/lineage/manifest negatives and deterministic bundle construction.
 Remaining: perform one independent delta review on the exact replacement
 manifest, then require a fresh manifest-bound user authorization. Attempt 3,
 login and R3 remain unauthorized.
+
+## 2026-08-10 — Rescue product reset and M1 vertical slice
+
+User-visible capability: `powervpn doctor --json`,
+`powervpn helper status --json`, `powervpn resources --json`, and
+`powervpn snapshot --dry-run --json` now provide strict product-facing
+readiness output. The current machine reports PowerVPN 3.2.1/24572, the
+installed x86_64 helper, launchd inactive at run 19, a sealed installed portal
+profile, zero selectable production resources, and `common.sessionid` as the
+first missing required vendor-snapshot field.
+
+Production code changed: active development moved to `rescue-mvp`; the frozen
+evidence branch remains `rescue-state-machine@b1908f2`. A new
+`PowerVPNProduct` target combines Core installation/helper inspection with
+Portal installed-profile discovery. CLI parsing accepts only the four exact M1
+argument sequences and outputs sorted, value-free JSON. Pure installation
+inspection no longer reads the historical tunnel log. Snapshot completeness is
+scoped to exactly one authorized resource candidate rather than a cross-resource
+field union, and `doctor=ready` additionally requires GUI absence, observable
+helper generation, safe preflight and current direct-XPC reachability.
+
+Live result: all four M1 observation commands ran locally. No direct XPC probe,
+helper launch, portal request, login, SSH probe, `start_connection`, route,
+DNS, interface, utun, or SA mutation ran. `doctor` and `helper status` returned
+completed degraded state; `resources` and `snapshot --dry-run` returned the
+expected unavailable-provider result.
+
+Current blocker: the owned portal workflow accepts and then erases its
+authenticated response; it exposes neither a typed resource catalog nor the
+memory-only session/resource material needed by the helper. Synthetic
+correlation fixtures contain field metadata only and cannot supply
+`common.sessionid`.
+
+Cleanup status: no helper process was started, launchd remained inactive, and
+the commands wrote no runtime artifact or secret-bearing file.
+
+Deferred debt: remaining R2 TLS evidence findings are frozen in
+`docs/debt/R2_TLS_EVIDENCE_BACKLOG.md`; they are not M1 product gates.
+
+Next end-to-end action: design the non-Codable, explicitly erasable
+authenticated portal/resource snapshot and its Portal-to-Core mapping, or use
+one explicitly approved `onboardingMode=vendor_once` observation to identify a
+lawful installed source. Do not send a server request or start a helper until
+that action is separately approved.
+
+Approval required: yes, immediately before any official-GUI onboarding,
+portal request, direct XPC probe, `start_connection`, SSH proof, or network
+mutation. No approval is needed for further offline implementation and tests.

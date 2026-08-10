@@ -19,10 +19,14 @@ let package = Package(
     ),
     .target(name: "PowerVPNCore"),
     .target(name: "PowerVPNPortal", dependencies: ["CPortalCurl"]),
+    .target(
+      name: "PowerVPNProduct",
+      dependencies: ["PowerVPNCore", "PowerVPNPortal"]
+    ),
     .target(name: "PowerVPNTLSEvidence"),
     .executableTarget(
       name: "PowerVPNCLI",
-      dependencies: ["PowerVPNCore", "PowerVPNPortal"]
+      dependencies: ["PowerVPNCore", "PowerVPNPortal", "PowerVPNProduct"]
     ),
     .executableTarget(
       name: "PowerVPNTLSEvidenceCLI",
@@ -35,6 +39,10 @@ let package = Package(
     .testTarget(
       name: "PowerVPNPortalTests",
       dependencies: ["CPortalCurl", "PowerVPNPortal", "PowerVPNCLI"]
+    ),
+    .testTarget(
+      name: "PowerVPNProductTests",
+      dependencies: ["PowerVPNProduct", "PowerVPNCLI"]
     ),
     .testTarget(
       name: "PowerVPNTLSEvidenceTests",

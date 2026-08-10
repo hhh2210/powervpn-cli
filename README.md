@@ -1,15 +1,57 @@
-# PowerVPN Protocol Lab
+# PowerVPN Native Rescue
 
-An unofficial, Apple Silicon-native protocol feasibility lab for replacing the
-LeadSec PowerVPN macOS client without changing the server or bypassing
-authentication.
+An unofficial, arm64-native macOS client under development for ordinary
+GUI-free use of the installed LeadSec PowerVPN tunnel helpers. Authentication
+is never bypassed, and the current product still requires the official PowerVPN
+installation.
 
-This repository is **not a working VPN replacement yet**. Its current job is to
-turn the installed x86_64 client into a read-only protocol oracle, preserve
-redacted evidence, and measure the exact delta between LeadSec's fork and
-upstream strongSwan 6.0.7.
+## Current product status — 2026-08-10
 
-## Current verdict
+The active branch is `rescue-mvp`. M1 now exposes four strict, value-free
+product-readiness commands:
+
+```sh
+powervpn doctor --json
+powervpn helper status --json
+powervpn resources --json
+powervpn snapshot --dry-run --json
+```
+
+On this Mac they currently establish:
+
+- PowerVPN 3.2.1 build 24572 is installed as x86_64;
+- the root-owned x86_64 charon helper is installed, launchd-observed, inactive,
+  and at generation run 19;
+- the sealed installed portal profile is available;
+- a bounded direct-XPC probe is safe to perform, but these observation commands
+  do not launch the helper and therefore report `directXPCStatus=not_probed`;
+- no production resource catalog is exposed yet;
+- a complete `start_connection` snapshot cannot be constructed; its first
+  missing required value is `common.sessionid`.
+
+The four commands contact no server, send no XPC, serialize no complete helper
+snapshot, and contain no credential, cookie, PSK, route value, or session value.
+The current product state is therefore **blocked at M1**, not a usable VPN yet.
+The next product slice is an in-memory authenticated portal/resource snapshot
+or a reviewed `vendor_once` onboarding source that can lawfully supply the
+missing helper material.
+
+## Development
+
+```sh
+swift build --product powervpn --arch arm64
+swift test --filter 'ProductReadinessRuntimeTests|ProductCommandTests'
+```
+
+Product JSON commands use exit `0` when ready, `2` for a completed degraded
+observation, `64` for invalid product-command grammar, and `69` when a required
+local provider is unavailable.
+
+## Archived evidence history
+
+The following sections preserve the protocol lab and Rescue R1/R2 lineage. They
+are useful implementation inputs, but they are no longer the active product
+critical path.
 
 - Active execution has switched to the Rescue CLI on
   `rescue-state-machine`; Native V3 remains frozen at the clean CP7B fallback,

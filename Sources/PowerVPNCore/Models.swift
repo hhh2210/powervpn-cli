@@ -52,6 +52,25 @@ public struct HelperState: Codable, Sendable {
   public var isRunning: Bool { state == "running" && pid != nil }
 }
 
+public struct PowerVPNInstallation: Codable, Sendable {
+  public let appVersion: String?
+  public let appBuild: String?
+  public let appArchitectures: [String]
+  public let appRunning: Bool
+
+  public init(
+    appVersion: String?,
+    appBuild: String?,
+    appArchitectures: [String],
+    appRunning: Bool
+  ) {
+    self.appVersion = appVersion
+    self.appBuild = appBuild
+    self.appArchitectures = appArchitectures
+    self.appRunning = appRunning
+  }
+}
+
 public enum TunnelHealth: String, Codable, Sendable {
   case healthy
   case stopped

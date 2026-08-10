@@ -141,9 +141,21 @@ public struct SystemInspector: Sendable {
     self.runner = runner
   }
 
-  public func status() -> PowerVPNStatus {
+  public func installation() -> PowerVPNInstallation {
     let appURL = URL(fileURLWithPath: Self.appPath)
     let bundle = Bundle(url: appURL)
+    return PowerVPNInstallation(
+      appVersion: bundle?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+      appBuild: bundle?.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
+      appArchitectures: architectures(of: "\(Self.appPath)/Contents/MacOS/PowerVPN"),
+      appRunning: !NSRunningApplication.runningApplications(
+        withBundleIdentifier: "com.leadsec.PowerVPN-Mac"
+      ).isEmpty
+    )
+  }
+
+  public func status() -> PowerVPNStatus {
+    let installation = installation()
     let helperOutput = (try? runner.run("/bin/launchctl", ["print", Self.helperLabel])) ?? ""
     let helper = HelperOutputParser.parse(helperOutput)
     let log = AllowlistedLogReader.readLines(
@@ -155,15 +167,11 @@ public struct SystemInspector: Sendable {
       helper: helper,
       analyzedLogState: TunnelLogAnalyzer.analyze(log)
     )
-    let running = !NSRunningApplication.runningApplications(
-      withBundleIdentifier: "com.leadsec.PowerVPN-Mac"
-    ).isEmpty
-
     return PowerVPNStatus(
-      appVersion: bundle?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
-      appBuild: bundle?.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
-      appArchitectures: architectures(of: "\(Self.appPath)/Contents/MacOS/PowerVPN"),
-      appRunning: running,
+      appVersion: installation.appVersion,
+      appBuild: installation.appBuild,
+      appArchitectures: installation.appArchitectures,
+      appRunning: installation.appRunning,
       helper: helper,
       tunnel: tunnel
     )
