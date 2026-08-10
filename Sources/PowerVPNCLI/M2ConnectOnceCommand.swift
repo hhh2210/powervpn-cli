@@ -25,6 +25,9 @@ func runM2ConnectOnceCommand(
   generateApprovalCode: @escaping @Sendable () throws -> String = M2TTYApproval.secureCode,
   approval: M2TTYApproval = M2TTYApproval(),
   signalMonitorFactory: CLISignalMonitorFactory = { DarwinCLISignalMonitor() },
+  runtimeDeadline: @escaping @Sendable () async -> Void = {
+    try? await Task.sleep(for: .seconds(120))
+  },
   runtime: @escaping M2ConnectOnceRuntimeOperation = { request in
     await ProductM2CurrentMachineRuntime().run(request)
   }
@@ -62,6 +65,12 @@ func runM2ConnectOnceCommand(
     return M2RuntimeExecution.report(await runtime(request))
   }
   cancellation.install(task)
+  let deadlineTask = Task {
+    await runtimeDeadline()
+    guard !Task.isCancelled else { return }
+    cancellation.request()
+  }
+  defer { deadlineTask.cancel() }
   await gate.open()
   switch await task.value {
   case .cancelledBeforeRuntime:

@@ -64,7 +64,7 @@ final class DarwinCLISignalMonitor: CLISignalMonitoring, @unchecked Sendable {
   func start(handler: @escaping @Sendable () -> Void) {
     lock.withLock {
       guard sources.isEmpty else { return }
-      for number in [SIGINT, SIGTERM] {
+      for number in [SIGHUP, SIGINT, SIGTERM] {
         let previous = Darwin.signal(number, SIG_IGN)
         let source = DispatchSource.makeSignalSource(signal: number, queue: queue)
         source.setEventHandler(handler: handler)

@@ -49,6 +49,31 @@ import Testing
     #expect(monitor.stopCount == 1)
   }
 
+  @Test func totalDeadlineCancelsRuntimeAndAwaitsItsCleanupReport() async throws {
+    let monitor = M2ManualSignalMonitor()
+    let runtime = M2CancellationRuntime()
+    let deadline = M2ManualDeadline()
+    let command = Task {
+      try await runM2ConnectOnceCommand(
+        m2ValidArguments,
+        authorizationAvailabilityFailure: { nil },
+        generateApprovalCode: { "A1B2C3D4" },
+        approval: M2TTYApproval(exchange: { _ in .line("A1B2C3D4") }),
+        signalMonitorFactory: { monitor },
+        runtimeDeadline: deadline.wait,
+        runtime: runtime.run
+      )
+    }
+    #expect(runtime.waitUntilStarted())
+    await deadline.fire()
+    let result = try await command.value
+
+    #expect(result.exitCode == 130)
+    #expect(runtime.invocationCount == 1)
+    #expect(runtime.cancellationCount == 1)
+    #expect(monitor.stopCount == 1)
+  }
+
   @Test func exitMappingHonorsCleanupAndCancellationPriority() {
     #expect(m2ConnectOnceExitCode(successReport()) == 0)
     #expect(m2ConnectOnceExitCode(report(outcome: .preflightBlocked)) == 69)
@@ -64,5 +89,21 @@ import Testing
         report(outcome: .connectedAndCleanedUp, cleanup: false, mutated: true)) == 74)
     #expect(m2ConnectOnceExitCode(report(outcome: .cancelled)) == 130)
     #expect(m2ConnectOnceExitCode(successReport(finalState: .connected)) == 1)
+  }
+}
+
+private actor M2ManualDeadline {
+  private var fired = false
+  private var continuation: CheckedContinuation<Void, Never>?
+
+  func wait() async {
+    guard !fired else { return }
+    await withCheckedContinuation { continuation = $0 }
+  }
+
+  func fire() {
+    fired = true
+    continuation?.resume()
+    continuation = nil
   }
 }
