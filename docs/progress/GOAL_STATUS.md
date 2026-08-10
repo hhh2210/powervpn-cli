@@ -1309,3 +1309,45 @@ Approval required: no approval is needed for that offline budget/provider
 contract work or synthetic verification. Fresh explicit approval remains
 mandatory immediately before any future Portal/server contact, credential
 entry, `start_connection`, SSH proof or network mutation.
+
+## 2026-08-11 — Monotonic M2 supervisor budget and cancellation closure
+
+Status: the offline supervisor-budget blocker is closed. One TTY-approved
+monotonic T0 now governs the 65-second mutation cutoff and the 73/94/118/120
+second control, authorization, verification and report cutoffs. Report schema
+v7 exposes `deadline_exceeded`; cleanup-unproven remains the higher-priority
+terminal truth.
+
+Production changes: Core dynamically bounds generation, preflight and network
+snapshot commands from one remaining deadline. Product makes authorization a
+one-shot cancellable attempt, gates the explicit Portal child across task
+creation/installation, rechecks the absolute work deadline inside the scoped
+snapshot borrow immediately before start submission, and rechecks every
+cleanup cutoff after its await. Cancellation-shielded fallback observation can
+still select the authenticated emergency stop after an unsent provisional
+stop. Late stop/logout/network evidence remains visible but cannot be promoted
+to verified cleanup.
+
+Review and verification: an initial independent review found cancel-before-
+result provider execution, a stale relative timeout at the mutation point and
+late cleanup evidence being accepted. All three were reproduced and fixed; a
+second integration pass also closed the Portal create/install gap, inherited-
+cancellation cleanup observation and false time charging for absent stages.
+Final independent verdict is `NO_FINDINGS`. Product M2 passes 86 tests in 17
+suites; focused budget/CLI tests pass 27 cases; Core budget tests pass 20 cases;
+the full package test run, arm64 build, strict formatting, diff checks, build/run
+wrapper tests and secret scan pass.
+
+Live status: **NO-GO**. No connection-changing live action was attempted. The
+only remaining first-order blocker is
+`authorized_resource_provider_unavailable`: the installed product exposes no
+lawful, current-generation, scoped and erasable `vendor_once` resource handoff.
+The budget guarantee is conditional on future production dependencies honoring
+their bounded/cancellable contract; the product deliberately does not use a
+hard process kill that could abandon cleanup.
+
+Next product action: obtain an official authorized-resource handoff or a
+separately reviewed native onboarding path, implement it behind the existing
+source-neutral provider contract, and repeat all offline gates. Only then may a
+fresh approval name one exact resource and SSH target for the first bounded M2
+transaction.

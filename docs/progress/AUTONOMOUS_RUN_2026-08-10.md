@@ -97,3 +97,40 @@
 - Exact next action: implement that coherent absolute-budget/provider-attempt
   contract. The independent installed-state blocker remains the absence of a
   lawful current-generation `vendor_once` resource provider.
+
+## 2026-08-11 06:48 +0800 — absolute supervisor budget closed offline
+
+- Product now creates one monotonic budget only after the fresh TTY approval.
+  It stops new mutation at 65 seconds, completes control cleanup by 73 seconds,
+  authorization close by 94 seconds, after-state verification by 118 seconds
+  and final report classification by 120 seconds. M2 report schema is now 7;
+  `deadline_exceeded` maps to exit 124, while `cleanup_unproven` retains exit 74.
+- Core consumes the remaining budget rather than restarting fixed timeouts.
+  Generation/preflight observation accepts a shrinking timeout, and one
+  network capture owns a monotonic deadline across every fixed command. Zero,
+  overflow, clock regression and deadline exhaustion start no later command
+  and return value-free unavailable evidence.
+- Authorization acquisition is a cancellable one-shot attempt. A cancel that
+  wins before result permanently removes the provider operation; the explicit
+  Portal adapter also gates its child task across create/install so cancellation
+  cannot enter the provider through that gap. Native Portal remains injected
+  only and is not the default production provider.
+- The final `start_connection` check now occurs inside the snapshot borrow,
+  immediately before synchronous submission. A stale relative timeout cannot
+  cross the 65-second boundary. After submission, cancellation/deadline always
+  enters cleanup with active-lease or provisional same-session authority.
+- Cleanup generation observation is detached from inherited cancellation. Each
+  stop, authorization-close and verification await is checked again against
+  its absolute cutoff; late receipts are retained but cannot make cleanup
+  verified. Stages that were genuinely not required are not falsely charged.
+- Independent review first found two P0 races and one P1 cutoff-truth issue;
+  deterministic counterexamples were added and the final re-review returned
+  `NO_FINDINGS`. Root verification passed the full package test run, 27 focused
+  budget/CLI tests, Product M2 86/86, Core budget 20/20, the arm64 product build,
+  strict changed-file formatting, wrapper tests, diff checks and a 2.64 MB
+  secret scan.
+- No additional live helper probe, Portal request, credential read, TTY
+  exchange, `start_connection`, SSH connection or network mutation ran.
+- Remaining exact blocker: `authorized_resource_provider_unavailable`. No
+  installed artifact is a lawful current-generation `vendor_once` handoff, so
+  the production command still exits locally before approval and side effects.

@@ -3,38 +3,94 @@ import Foundation
 package protocol NetworkCleanupObserving: Sendable {
   func capture(
     window: NetworkCleanupCaptureWindow,
-    selectedRoutes: VendorCharonSelectedRouteMatcher?
+    selectedRoutes: VendorCharonSelectedRouteMatcher?,
+    timeoutMilliseconds: Int
   ) async -> NetworkCleanupSnapshot
 }
 
-package struct InstalledNetworkCleanupObserver: NetworkCleanupObserving {
-  private let runner: any NetworkCleanupCommandRunning
-
-  package init() {
-    runner = InstalledNetworkCleanupCommandRunner()
-  }
-
-  init(runner: any NetworkCleanupCommandRunning) {
-    self.runner = runner
-  }
-
+extension NetworkCleanupObserving {
   package func capture(
     window: NetworkCleanupCaptureWindow,
     selectedRoutes: VendorCharonSelectedRouteMatcher? = nil
   ) async -> NetworkCleanupSnapshot {
-    let helperBefore = await helper()
-    let processesBefore = await processes(window: window)
-    let defaultRoute = await fingerprint(.defaultRoute) {
+    await capture(
+      window: window,
+      selectedRoutes: selectedRoutes,
+      timeoutMilliseconds: 24_000
+    )
+  }
+}
+
+package struct InstalledNetworkCleanupObserver: NetworkCleanupObserving {
+  private let runner: any NetworkCleanupCommandRunning
+  private let monotonicNowNanoseconds: @Sendable () -> UInt64
+
+  package init() {
+    runner = InstalledNetworkCleanupCommandRunner()
+    monotonicNowNanoseconds = { DispatchTime.now().uptimeNanoseconds }
+  }
+
+  init(
+    runner: any NetworkCleanupCommandRunning,
+    monotonicNowNanoseconds: @escaping @Sendable () -> UInt64 = {
+      DispatchTime.now().uptimeNanoseconds
+    }
+  ) {
+    self.runner = runner
+    self.monotonicNowNanoseconds = monotonicNowNanoseconds
+  }
+
+  package func capture(
+    window: NetworkCleanupCaptureWindow,
+    selectedRoutes: VendorCharonSelectedRouteMatcher?,
+    timeoutMilliseconds: Int
+  ) async -> NetworkCleanupSnapshot {
+    let budget = NetworkCleanupCommandBudget(
+      timeoutMilliseconds: timeoutMilliseconds,
+      monotonicNowNanoseconds: monotonicNowNanoseconds
+    )
+    do {
+      return try await capture(
+        window: window,
+        selectedRoutes: selectedRoutes,
+        budget: budget
+      )
+    } catch {
+      return .unavailable(.commandFailed)
+    }
+  }
+
+  private func capture(
+    window: NetworkCleanupCaptureWindow,
+    selectedRoutes: VendorCharonSelectedRouteMatcher?,
+    budget: NetworkCleanupCommandBudget
+  ) async throws -> NetworkCleanupSnapshot {
+    let helperBefore = try await helper(budget: budget)
+    let processesBefore = try await processes(window: window, budget: budget)
+    let defaultRoute = try await fingerprint(.defaultRoute, budget: budget) {
       try NetworkDefaultRouteCanonicalizer.canonicalize($0)
     }
-    let dns = await fingerprint(.dns) {
+    let dns = try await fingerprint(.dns, budget: budget) {
       try NetworkDNSCanonicalizer.canonicalize($0)
     }
-    let interfaces = await interfaceSnapshot(window: window)
-    let ipv4 = await routeSnapshot(.ipv4Routes, family: .inet, selectedRoutes: selectedRoutes)
-    let ipv6 = await routeSnapshot(.ipv6Routes, family: .inet6, selectedRoutes: nil)
-    let processesAfter = await processes(window: window)
-    let helperAfter = await helper()
+    let interfaces = try await interfaceSnapshot(window: window, budget: budget)
+    let ipv4 = try await routeSnapshot(
+      .ipv4Routes,
+      family: .inet,
+      selectedRoutes: selectedRoutes,
+      budget: budget
+    )
+    let ipv6 = try await routeSnapshot(
+      .ipv6Routes,
+      family: .inet6,
+      selectedRoutes: nil,
+      budget: budget
+    )
+    let processesAfter = try await processes(window: window, budget: budget)
+    let helperAfter = try await helper(budget: budget)
+    guard budget.nextCommandTimeoutMilliseconds() != nil else {
+      throw NetworkCleanupBudgetError.expired
+    }
 
     let stableSurge: NetworkCleanupSurgeSnapshot
     switch (processesBefore, processesAfter) {
@@ -91,9 +147,10 @@ package struct InstalledNetworkCleanupObserver: NetworkCleanupObserving {
 
   private func fingerprint(
     _ command: NetworkCleanupCommand,
+    budget: NetworkCleanupCommandBudget,
     parser: (Data) throws -> NetworkCleanupFingerprint
-  ) async -> NetworkCleanupFingerprint {
-    let result = await runner.run(command)
+  ) async throws -> NetworkCleanupFingerprint {
+    let result = try await run(command, budget: budget)
     guard result.succeeded else {
       return .unavailable(NetworkCleanupCommandOutput.state(result))
     }
@@ -101,9 +158,10 @@ package struct InstalledNetworkCleanupObserver: NetworkCleanupObserving {
   }
 
   private func interfaceSnapshot(
-    window: NetworkCleanupCaptureWindow
-  ) async -> NetworkCleanupInterfaceSnapshot {
-    let result = await runner.run(.interfaces)
+    window: NetworkCleanupCaptureWindow,
+    budget: NetworkCleanupCommandBudget
+  ) async throws -> NetworkCleanupInterfaceSnapshot {
+    let result = try await run(.interfaces, budget: budget)
     guard result.succeeded else {
       return .unavailable(NetworkCleanupCommandOutput.state(result))
     }
@@ -117,15 +175,25 @@ package struct InstalledNetworkCleanupObserver: NetworkCleanupObserving {
   private func routeSnapshot(
     _ command: NetworkCleanupCommand,
     family: NetworkRouteFamily,
-    selectedRoutes: VendorCharonSelectedRouteMatcher?
-  ) async -> NetworkCleanupRouteSnapshot {
-    let result = await runner.run(command)
+    selectedRoutes: VendorCharonSelectedRouteMatcher?,
+    budget: NetworkCleanupCommandBudget
+  ) async throws -> NetworkCleanupRouteSnapshot {
+    let result = try await run(command, budget: budget)
     guard result.succeeded else {
       return .unavailable(NetworkCleanupCommandOutput.state(result))
     }
+    let routes: [NetworkCanonicalRoute]
     do {
-      let routes = try NetworkRouteCanonicalizer.parse(result.stdout, family: family)
-      let effectiveRoute = await effectiveRouteSnapshot(selectedRoutes, routes: routes)
+      routes = try NetworkRouteCanonicalizer.parse(result.stdout, family: family)
+    } catch {
+      return .unavailable(.invalidOutput)
+    }
+    let effectiveRoute = try await effectiveRouteSnapshot(
+      selectedRoutes,
+      routes: routes,
+      budget: budget
+    )
+    do {
       return try NetworkRouteCanonicalizer.canonicalize(
         result.stdout,
         family: family,
@@ -139,10 +207,11 @@ package struct InstalledNetworkCleanupObserver: NetworkCleanupObserving {
 
   private func effectiveRouteSnapshot(
     _ matcher: VendorCharonSelectedRouteMatcher?,
-    routes: [NetworkCanonicalRoute]
-  ) async -> NetworkCleanupEffectiveRouteSnapshot? {
+    routes: [NetworkCanonicalRoute],
+    budget: NetworkCleanupCommandBudget
+  ) async throws -> NetworkCleanupEffectiveRouteSnapshot? {
     guard let matcher else { return nil }
-    let result = await runner.run(matcher.effectiveRouteCommand)
+    let result = try await run(matcher.effectiveRouteCommand, budget: budget)
     guard result.succeeded else {
       return .unavailable(NetworkCleanupCommandOutput.state(result))
     }
@@ -158,9 +227,12 @@ package struct InstalledNetworkCleanupObserver: NetworkCleanupObserving {
   }
 
   private func processes(
-    window: NetworkCleanupCaptureWindow
-  ) async -> Result<NetworkCleanupProcessInventory, NetworkCleanupObservationState> {
-    let result = await runner.run(.surgeProcesses)
+    window: NetworkCleanupCaptureWindow,
+    budget: NetworkCleanupCommandBudget
+  ) async throws
+    -> Result<NetworkCleanupProcessInventory, NetworkCleanupObservationState>
+  {
+    let result = try await run(.surgeProcesses, budget: budget)
     guard result.succeeded else {
       return .failure(NetworkCleanupCommandOutput.state(result))
     }
@@ -178,10 +250,12 @@ package struct InstalledNetworkCleanupObserver: NetworkCleanupObserving {
     }
   }
 
-  private func helper() async
+  private func helper(
+    budget: NetworkCleanupCommandBudget
+  ) async throws
     -> Result<VendorHelperGenerationSnapshot, NetworkCleanupObservationState>
   {
-    let result = await runner.run(.helperGeneration)
+    let result = try await run(.helperGeneration, budget: budget)
     guard result.succeeded else {
       return .failure(NetworkCleanupCommandOutput.state(result))
     }
@@ -193,6 +267,19 @@ package struct InstalledNetworkCleanupObserver: NetworkCleanupObserving {
       return .failure(.invalidOutput)
     }
     return .success(snapshot)
+  }
+
+  private func run(
+    _ command: NetworkCleanupCommand,
+    budget: NetworkCleanupCommandBudget
+  ) async throws -> BoundedCommandResult {
+    guard let timeoutMilliseconds = budget.nextCommandTimeoutMilliseconds() else {
+      throw NetworkCleanupBudgetError.expired
+    }
+    return await runner.run(
+      command,
+      timeoutMilliseconds: timeoutMilliseconds
+    )
   }
 }
 

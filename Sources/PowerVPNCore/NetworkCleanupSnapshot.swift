@@ -120,6 +120,20 @@ package struct NetworkCleanupSnapshot: Equatable, Sendable {
   package let helperGeneration: VendorHelperGenerationSnapshot
   package let helperObservationState: NetworkCleanupObservationState
 
+  package static func unavailable(_ state: NetworkCleanupObservationState) -> Self {
+    Self(
+      defaultRoute: .unavailable(state),
+      dns: .unavailable(state),
+      interfaces: .unavailable(state),
+      ipv4Routes: .unavailable(state),
+      ipv6Routes: .unavailable(state),
+      surge: .unavailable(state),
+      vendorProcesses: .unavailable(state),
+      helperGeneration: .unavailable,
+      helperObservationState: state
+    )
+  }
+
   package var complete: Bool {
     defaultRoute.isObserved && dns.isObserved && interfaces.isObserved
       && ipv4Routes.isObserved && ipv6Routes.isObserved && surge.isObserved

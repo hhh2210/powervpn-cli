@@ -1,4 +1,3 @@
-import Foundation
 import Testing
 
 @testable import PowerVPNPortal
@@ -29,7 +28,9 @@ import Testing
     }
     #expect(replay == .selectionAlreadyIssued)
     #expect(state.prepareCount == 1)
-    #expect((await lease.closeAndErase()).outcome == .accepted)
+    #expect(
+      (await lease.closeAndErase(deadline: m2TestBudget().authorizationCleanup)).outcome
+        == .accepted)
   }
 
   @Test func failedPrepareConsumesTheOnlySelectionAttempt() async throws {
@@ -52,7 +53,7 @@ import Testing
         state.recordErase(snapshot.isErased)
         return snapshot.isErased
       },
-      close: {
+      close: { _ in
         state.recordClose()
         return closeReceipt(erased: state.erased)
       }
@@ -73,7 +74,7 @@ import Testing
     #expect(first == .startSnapshotRejected)
     #expect(second == .selectionAlreadyIssued)
     #expect(state.prepareCount == 1)
-    _ = await lease.closeAndErase()
+    _ = await lease.closeAndErase(deadline: m2TestBudget().authorizationCleanup)
   }
 
   @Test func copiedSelectionCannotReplayStart() async throws {
@@ -89,6 +90,7 @@ import Testing
     let copy = selection
     let pending = try await selection.beginStart(
       control: productM2TestControl(trace: trace, plan: .acknowledged),
+      deadline: m2TestBudget().work,
       peerGenerationValidator: { true }
     )
     _ = await pending.result()
@@ -96,12 +98,13 @@ import Testing
     let replay = await selectionError {
       _ = try await copy.beginStart(
         control: productM2TestControl(trace: trace, plan: .acknowledged),
+        deadline: m2TestBudget().work,
         peerGenerationValidator: { true }
       )
     }
     #expect(replay == .startAlreadyIssued)
     #expect(trace.count("begin_start") == 1)
-    _ = await lease.closeAndErase()
+    _ = await lease.closeAndErase(deadline: m2TestBudget().authorizationCleanup)
   }
 
   @Test func closeMarksClosingAndErasesBeforeAwaitingSource() async throws {
@@ -120,13 +123,16 @@ import Testing
       requiredTargetIPv4: ProductM2SSHTarget.thu21.requiredTargetIPv4
     )
 
-    let closing = Task { await lease.closeAndErase() }
+    let closing = Task {
+      await lease.closeAndErase(deadline: m2TestBudget().authorizationCleanup)
+    }
     await gate.waitUntilEntered()
     #expect(state.eraseCount == 1)
     #expect(state.erased)
     let beginAfterClose = await selectionError {
       _ = try await selection.beginStart(
         control: productM2TestControl(trace: trace, plan: .acknowledged),
+        deadline: m2TestBudget().work,
         peerGenerationValidator: { true }
       )
     }
@@ -146,7 +152,11 @@ import Testing
       of: ProductM2AuthorizationCloseReceipt.self,
       returning: [ProductM2AuthorizationCloseReceipt].self
     ) { group in
-      for _ in 0..<8 { group.addTask { await lease.closeAndErase() } }
+      for _ in 0..<8 {
+        group.addTask {
+          await lease.closeAndErase(deadline: m2TestBudget().authorizationCleanup)
+        }
+      }
       var values: [ProductM2AuthorizationCloseReceipt] = []
       for await value in group { values.append(value) }
       return values
@@ -168,7 +178,8 @@ import Testing
       eraseSucceeds: false
     )
 
-    let receipt = await lease.closeAndErase()
+    let receipt = await lease.closeAndErase(
+      deadline: m2TestBudget().authorizationCleanup)
     #expect(receipt.outcome == .rejected)
     #expect(!receipt.ownedMaterialErased)
     #expect(state.eraseCount == 1)
@@ -188,108 +199,5 @@ import Testing
     #expect(state.eraseCount == 1)
     #expect(state.closeCount == 0)
     #expect(fixture.snapshot.isErased)
-  }
-}
-
-private func testAuthorizationLease(
-  snapshot: AuthenticatedPortalSnapshot,
-  state: AuthorizationLeaseTestState,
-  closeGate: AuthorizationCloseGate? = nil,
-  eraseSucceeds: Bool = true
-) -> ProductM2AuthorizedResourceLease {
-  ProductM2AuthorizedResourceLease(
-    source: .vendorOnce,
-    catalog: {
-      state.recordCatalog()
-      return try ProductM2PortalAdapter.catalog(snapshot: snapshot)
-    },
-    prepare: { handle, target in
-      state.recordPrepare()
-      return try ProductM2PortalAdapter.prepare(
-        snapshot: snapshot,
-        handle: handle,
-        requiredTargetIPv4: target
-      )
-    },
-    eraseOwnedMaterial: {
-      if eraseSucceeds { snapshot.erase() }
-      state.recordErase(snapshot.isErased)
-      return snapshot.isErased
-    },
-    close: {
-      state.recordClose()
-      if let closeGate { await closeGate.block() }
-      return closeReceipt(erased: state.erased)
-    }
-  )
-}
-
-private func closeReceipt(erased: Bool) -> ProductM2AuthorizationCloseReceipt {
-  ProductM2AuthorizationCloseReceipt(
-    outcome: .accepted,
-    ownedMaterialErased: erased,
-    sourceCloseRequested: false,
-    serverContactRequested: false
-  )
-}
-
-private func selectionError(
-  _ operation: () async throws -> Void
-) async -> ProductM2AuthorizedResourceSelectionError? {
-  do {
-    try await operation()
-    return nil
-  } catch let error as ProductM2AuthorizedResourceSelectionError {
-    return error
-  } catch {
-    return nil
-  }
-}
-
-private final class AuthorizationLeaseTestState: @unchecked Sendable {
-  private let lock = NSLock()
-  private var catalogCalls = 0
-  private var prepareCalls = 0
-  private var eraseCalls = 0
-  private var closeCalls = 0
-  private var materialErased = false
-
-  func recordCatalog() { lock.withLock { catalogCalls += 1 } }
-  func recordPrepare() { lock.withLock { prepareCalls += 1 } }
-  func recordClose() { lock.withLock { closeCalls += 1 } }
-  func recordErase(_ erased: Bool) {
-    lock.withLock {
-      eraseCalls += 1
-      materialErased = erased
-    }
-  }
-
-  var catalogCount: Int { lock.withLock { catalogCalls } }
-  var prepareCount: Int { lock.withLock { prepareCalls } }
-  var eraseCount: Int { lock.withLock { eraseCalls } }
-  var closeCount: Int { lock.withLock { closeCalls } }
-  var erased: Bool { lock.withLock { materialErased } }
-}
-
-private actor AuthorizationCloseGate {
-  private var entered = false
-  private var enteredWaiters: [CheckedContinuation<Void, Never>] = []
-  private var releaseContinuation: CheckedContinuation<Void, Never>?
-
-  func block() async {
-    entered = true
-    for waiter in enteredWaiters { waiter.resume() }
-    enteredWaiters.removeAll()
-    await withCheckedContinuation { releaseContinuation = $0 }
-  }
-
-  func waitUntilEntered() async {
-    guard !entered else { return }
-    await withCheckedContinuation { enteredWaiters.append($0) }
-  }
-
-  func release() {
-    releaseContinuation?.resume()
-    releaseContinuation = nil
   }
 }

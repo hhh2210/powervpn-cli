@@ -10,7 +10,9 @@ actor ProbeGenerationObserver: BoundedVendorHelperGenerationObserving {
     self.snapshots = snapshots
   }
 
-  func observe() async -> VendorHelperGenerationSnapshot {
+  func observe(
+    timeoutMilliseconds _: Int
+  ) async -> VendorHelperGenerationSnapshot {
     callCount += 1
     if snapshots.count > 1 { return snapshots.removeFirst() }
     return snapshots[0]
@@ -26,7 +28,8 @@ actor ProbePreflightChecker: BoundedVendorXPCPreflightChecking {
   }
 
   func check(
-    generation _: VendorHelperGenerationSnapshot
+    generation _: VendorHelperGenerationSnapshot,
+    timeoutMilliseconds _: Int
   ) async -> VendorXPCPreflightEvidence {
     callCount += 1
     return evidence

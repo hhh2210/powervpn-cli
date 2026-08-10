@@ -21,24 +21,38 @@ package struct ProductM2CleanupRunner: Sendable {
     selectedRoutes: VendorCharonSelectedRouteMatcher?,
     controlLease: ProductM2ControlLease?,
     provisionalStopCapability: ProductM2ProvisionalStopCapability?,
-    startReceipt: ProductM2ControlReceipt
+    startReceipt: ProductM2ControlReceipt,
+    budget: ProductM2AbsoluteBudget
   ) async -> ProductM2CleanupResult {
-    let control = await closeControl(
+    let completedControl = await closeControl(
       coldGeneration: coldGeneration,
       controlLease: controlLease,
       provisionalStopCapability: provisionalStopCapability,
-      startReceipt: startReceipt
+      startReceipt: startReceipt,
+      deadline: budget.controlCleanup
     )
-    let authorizationClose = await closeAuthorization(authorizationLease)
+    let controlCompletedWithinDeadline =
+      completedControl.path == .notRequired || budget.controlCleanup.hasRemaining
+    let control =
+      controlCompletedWithinDeadline
+      ? completedControl : completedControl.invalidatedByDeadline
+    let authorizationClose = await closeAuthorization(
+      authorizationLease,
+      deadline: budget.authorizationCleanup
+    )
+    let authorizationCompletedWithinDeadline =
+      authorizationLease == nil || budget.authorizationCleanup.hasRemaining
     let verifier = dependencies.verifyCleanup
     let evidence = await Task.detached {
       await verifier(
         baseline,
         networkWindow,
         selectedRoutes,
-        startReceipt.requestSent
+        startReceipt.requestSent,
+        budget.verification
       )
     }.value
+    let verificationCompletedWithinDeadline = budget.verification.hasRemaining
     let authorizationClosed =
       authorizationLease == nil
       || (authorizationClose.outcome == .accepted
@@ -50,7 +64,12 @@ package struct ProductM2CleanupRunner: Sendable {
       emergencyStop: control.emergencyStop,
       authorizationClose: authorizationClose,
       evidence: evidence,
-      verified: authorizationClosed && controlClassified && evidence.allDimensionsRestored
+      verified: controlCompletedWithinDeadline
+        && authorizationCompletedWithinDeadline
+        && verificationCompletedWithinDeadline
+        && authorizationClosed
+        && controlClassified
+        && evidence.allDimensionsRestored
     )
   }
 
@@ -58,10 +77,16 @@ package struct ProductM2CleanupRunner: Sendable {
     coldGeneration: VendorHelperGenerationSnapshot,
     controlLease: ProductM2ControlLease?,
     provisionalStopCapability: ProductM2ProvisionalStopCapability?,
-    startReceipt: ProductM2ControlReceipt
+    startReceipt: ProductM2ControlReceipt,
+    deadline: ProductM2StageDeadline
   ) async -> ControlCleanup {
     if let controlLease {
-      let stop = await Task.detached { await controlLease.stop() }.value
+      guard let timeout = deadline.remainingMilliseconds(cappedAt: 2_000) else {
+        return .deadlineExceeded
+      }
+      let stop = await Task.detached {
+        await controlLease.stop(timeoutMilliseconds: timeout)
+      }.value
       guard !stop.requestSent else {
         return ControlCleanup(
           path: .sameLeaseStop,
@@ -71,12 +96,18 @@ package struct ProductM2CleanupRunner: Sendable {
       }
       return await classifyPostStartGeneration(
         coldGeneration: coldGeneration,
-        stop: stop
+        stop: stop,
+        deadline: deadline
       )
     }
 
     if let provisionalStopCapability {
-      let stop = await Task.detached { await provisionalStopCapability.stop() }.value
+      guard let timeout = deadline.remainingMilliseconds(cappedAt: 2_000) else {
+        return .deadlineExceeded
+      }
+      let stop = await Task.detached {
+        await provisionalStopCapability.stop(timeoutMilliseconds: timeout)
+      }.value
       guard !stop.requestSent else {
         return ControlCleanup(
           path: .sameSessionProvisionalStop,
@@ -86,22 +117,32 @@ package struct ProductM2CleanupRunner: Sendable {
       }
       return await classifyPostStartGeneration(
         coldGeneration: coldGeneration,
-        stop: stop
+        stop: stop,
+        deadline: deadline
       )
     }
 
     guard startReceipt.requestSent else { return .notRequired }
     return await classifyPostStartGeneration(
       coldGeneration: coldGeneration,
-      stop: .unsent(.notAttempted)
+      stop: .unsent(.notAttempted),
+      deadline: deadline
     )
   }
 
   private func classifyPostStartGeneration(
     coldGeneration: VendorHelperGenerationSnapshot,
-    stop: ProductM2ControlReceipt
+    stop: ProductM2ControlReceipt,
+    deadline: ProductM2StageDeadline
   ) async -> ControlCleanup {
-    let post = await dependencies.observeGeneration()
+    guard deadline.hasRemaining else {
+      return .deadlineExceeded(stop: stop)
+    }
+    let observe = dependencies.observeGeneration
+    let shieldedObservation: @Sendable () async -> VendorHelperGenerationSnapshot = {
+      await Task.detached { await observe(deadline) }.value
+    }
+    let post = await shieldedObservation()
     if ProductM2GenerationFence.singleExitedGeneration(coldGeneration, post) {
       return ControlCleanup(
         path: .naturalHelperExit,
@@ -117,20 +158,23 @@ package struct ProductM2CleanupRunner: Sendable {
       )
     }
 
-    let observe = dependencies.observeGeneration
     let control = dependencies.control
+    guard let timeout = deadline.remainingMilliseconds(cappedAt: 2_000) else {
+      return .deadlineExceeded(stop: stop)
+    }
     let emergency = await Task.detached {
       await control.emergencyStop(
+        timeoutMilliseconds: timeout,
         expectedRunningPredicate: {
           ProductM2GenerationFence.singleRunningGeneration(
             coldGeneration,
-            await observe()
+            await shieldedObservation()
           )
         },
         peerGenerationValidator: {
           ProductM2GenerationFence.validatesReply(
             before: coldGeneration,
-            current: await observe()
+            current: await shieldedObservation()
           )
         }
       )
@@ -143,7 +187,8 @@ package struct ProductM2CleanupRunner: Sendable {
   }
 
   private func closeAuthorization(
-    _ lease: ProductM2AuthorizedResourceLease?
+    _ lease: ProductM2AuthorizedResourceLease?,
+    deadline: ProductM2StageDeadline
   ) async -> ProductM2AuthorizationCloseReceipt {
     guard let lease else {
       return ProductM2AuthorizationCloseReceipt(
@@ -153,7 +198,7 @@ package struct ProductM2CleanupRunner: Sendable {
         serverContactRequested: false
       )
     }
-    return await Task.detached { await lease.closeAndErase() }.value
+    return await Task.detached { await lease.closeAndErase(deadline: deadline) }.value
   }
 }
 
@@ -167,131 +212,26 @@ private struct ControlCleanup {
     stop: .unsent(.notAttempted),
     emergencyStop: .unsent(.notAttempted)
   )
-}
 
-package struct ProductM2Execution {
-  let request: ProductM2ConnectRequest
-  let networkWindow: NetworkCleanupCaptureWindow
-  var outcome: ProductM2ConnectOutcome = .authorizationAcquisitionRejected
-  var finalState: ProductM2ConnectionState = .signedOut
-  var lastGoodState: ProductM2ConnectionState = .signedOut
-  var firstBadEvent: ProductM2BadEvent?
-  var authorizationSource: ProductM2AuthorizationSource
-  var authorizationAcquisition: ProductM2AuthorizationAcquisitionOutcome = .notRequested
-  var authorizationFailure: ProductM2AuthorizationFailure?
-  var startOutcome: ProductM2ControlOutcome = .notAttempted
-  var vendorStatusEvidence = ProductM2VendorStatusEvidence.notAttempted
-  var activeNetworkEvidence = ProductM2ActiveNetworkEvidence.unavailable
-  var sshProof: ProductM2SSHProofOutcome = .notAttempted
-  var sshProofEvidence: ProductM2FreshSSHProofEvidence?
-  var cleanupPath: ProductM2CleanupPath = .notRequired
-  var stopOutcome: ProductM2ControlOutcome = .notAttempted
-  var emergencyStopOutcome: ProductM2ControlOutcome = .notAttempted
-  var authorizationClose: ProductM2AuthorizationCloseOutcome = .notRequired
-  var authorizationOwnedMaterialErased = true
-  var cleanupEvidence = ProductM2CleanupEvidence.unavailable
-  var cleanupVerified = false
-  var serverContactRequested = false
-  var helperMutationRequested = false
+  static let deadlineExceeded = Self.deadlineExceeded(
+    stop: .unsent(.timeout)
+  )
 
-  mutating func fail(
-    _ outcome: ProductM2ConnectOutcome,
-    event: ProductM2BadEvent,
-    state: ProductM2ConnectionState
-  ) {
-    self.outcome = outcome
-    firstBadEvent = firstBadEvent ?? event
-    finalState = state
+  static func deadlineExceeded(
+    stop: ProductM2ControlReceipt
+  ) -> Self {
+    Self(
+      path: .cleanupUnproven,
+      stop: stop,
+      emergencyStop: .unsent(.timeout)
+    )
   }
 
-  mutating func apply(_ cleanup: ProductM2CleanupResult) {
-    cleanupPath = cleanup.path
-    stopOutcome = cleanup.stop.outcome
-    emergencyStopOutcome = cleanup.emergencyStop.outcome
-    if cleanup.authorizationClose.outcome != .notRequired {
-      authorizationClose = cleanup.authorizationClose.outcome
-      authorizationOwnedMaterialErased = cleanup.authorizationClose.ownedMaterialErased
-    }
-    serverContactRequested =
-      serverContactRequested || cleanup.authorizationClose.serverContactRequested
-    cleanupEvidence = cleanup.evidence
-    let authorizationClosed =
-      authorizationClose == .accepted || authorizationClose == .notRequired
-    cleanupVerified =
-      cleanup.verified && authorizationOwnedMaterialErased && authorizationClosed
-    helperMutationRequested =
-      helperMutationRequested
-      || cleanup.stop.requestSent || cleanup.emergencyStop.requestSent
-
-    guard cleanupVerified else {
-      if firstBadEvent == nil {
-        firstBadEvent =
-          authorizationOwnedMaterialErased
-          ? (cleanup.authorizationClose.outcome == .accepted
-            || cleanup.authorizationClose.outcome == .notRequired
-            ? .cleanupVerificationRejected : .authorizationCloseRejected)
-          : .authorizationCloseRejected
-      }
-      outcome = .cleanupUnproven
-      finalState = .failed
-      return
-    }
-    if outcome == .connectedAndCleanedUp {
-      guard cleanup.path == .sameLeaseStop,
-        cleanup.stop.requestSent,
-        cleanup.stop.statusEventCount > 0,
-        cleanup.stop.statusAtSubmission == .connected
-      else {
-        let latest = cleanup.stop.statusAtSubmission
-        vendorStatusEvidence = ProductM2VendorStatusEvidence(
-          outcome: latest == .disconnected ? .disconnected : .leaseClosed,
-          statusEventCount: cleanup.stop.statusEventCount,
-          latestClassification: latest,
-          terminalControlOutcome: latest == nil ? cleanup.stop.outcome : nil
-        )
-        firstBadEvent = firstBadEvent ?? .vendorStatusUnproven
-        outcome = .vendorStatusUnproven
-        finalState = .disconnected
-        return
-      }
-      vendorStatusEvidence = ProductM2VendorStatusEvidence(
-        outcome: .connected,
-        statusEventCount: cleanup.stop.statusEventCount,
-        latestClassification: .connected,
-        terminalControlOutcome: nil
-      )
-      lastGoodState = .connected
-      finalState = .disconnected
-    } else if helperMutationRequested {
-      finalState = .disconnected
-    }
-  }
-
-  func report() -> ProductM2ConnectReport {
-    ProductM2ConnectReport(
-      outcome: outcome,
-      finalState: finalState,
-      lastGoodState: lastGoodState,
-      firstBadEvent: firstBadEvent,
-      resourceDisplayName: request.resourceDisplayName,
-      sshTarget: request.sshTarget,
-      authorizationSource: authorizationSource,
-      authorizationAcquisition: authorizationAcquisition,
-      authorizationFailure: authorizationFailure,
-      startOutcome: startOutcome,
-      vendorStatusEvidence: vendorStatusEvidence,
-      activeNetworkEvidence: activeNetworkEvidence,
-      sshProof: sshProof,
-      sshProofEvidence: sshProofEvidence,
-      cleanupPath: cleanupPath,
-      stopOutcome: stopOutcome,
-      emergencyStopOutcome: emergencyStopOutcome,
-      authorizationClose: authorizationClose,
-      authorizationOwnedMaterialErased: authorizationOwnedMaterialErased,
-      cleanupEvidence: cleanupEvidence,
-      cleanupVerified: cleanupVerified,
-      serverContactRequested: serverContactRequested,
-      helperMutationRequested: helperMutationRequested
+  var invalidatedByDeadline: Self {
+    Self(
+      path: .cleanupUnproven,
+      stop: stop,
+      emergencyStop: emergencyStop
     )
   }
 }

@@ -5,7 +5,7 @@ import Testing
 
 @Suite struct ProductM2AuthorizedResourceProviderTests {
   @Test func explicitNativePortalProviderPreservesTLSRejection() async {
-    let provider = ProductM2PortalAdapter {
+    let provider = ProductM2PortalAdapter { _ in
       .rejected(
         PortalLoginReport(
           status: .tlsRejected,
@@ -29,7 +29,7 @@ import Testing
       )
     }
 
-    switch await provider.acquire() {
+    switch await provider.beginAcquire(budget: m2TestBudget().authorization).result() {
     case .rejected(let source, let failure, let cleanup):
       #expect(source == .nativePortal)
       #expect(failure == .tlsRejected)
@@ -45,29 +45,30 @@ import Testing
     let trace = ProductM2TestTrace()
     let dependencies = ProductM2ConnectOnceDependencies(
       controlRuntimePreflightAccepted: { true },
-      observeGeneration: { m2ColdGeneration },
-      preflightAccepted: { _ in true },
-      captureNetworkBaseline: { window, selectedRoutes in
+      observeGeneration: { _ in m2ColdGeneration },
+      preflightAccepted: { _, _ in true },
+      captureNetworkBaseline: { window, selectedRoutes, _ in
         trace.nextBaseline(window: window, selectedRoutes: selectedRoutes)
       },
       baselineStable: { _, _ in false },
       assessActiveConnection: { _, _ in .unavailable },
       authorizationSource: .nativePortal,
-      acquireAuthorization: {
-        .rejected(
-          source: .nativePortal,
-          failure: .tlsRejected,
-          cleanup: ProductM2AuthorizationCloseReceipt(
-            outcome: .notRequired,
-            ownedMaterialErased: true,
-            sourceCloseRequested: false,
-            serverContactRequested: true
-          )
+      beginAuthorization: { _ in
+        m2AuthorizationAttempt(
+          .rejected(
+            source: .nativePortal,
+            failure: .tlsRejected,
+            cleanup: ProductM2AuthorizationCloseReceipt(
+              outcome: .notRequired,
+              ownedMaterialErased: true,
+              sourceCloseRequested: false,
+              serverContactRequested: true
+            ))
         )
       },
       control: productM2TestControl(trace: trace, plan: .acknowledged),
-      proveFreshSSH: { target in m2SSHEvidence(.rejected, target: target) },
-      verifyCleanup: { _, _, _, _ in m2CompleteCleanup }
+      proveFreshSSH: { target, _ in m2SSHEvidence(.rejected, target: target) },
+      verifyCleanup: { _, _, _, _, _ in m2CompleteCleanup }
     )
 
     let report = await ProductM2ConnectOnceCoordinator(
@@ -114,7 +115,7 @@ import Testing
     let provider = ProductM2UnavailableVendorOnceProvider()
     #expect(provider.source == .vendorOnce)
     #expect(provider.availabilityFailure == .providerUnavailable)
-    switch await provider.acquire() {
+    switch await provider.beginAcquire(budget: m2TestBudget().authorization).result() {
     case .rejected(let source, let failure, let cleanup):
       #expect(source == .vendorOnce)
       #expect(failure == .providerUnavailable)
@@ -130,29 +131,30 @@ import Testing
     let trace = ProductM2TestTrace()
     let dependencies = ProductM2ConnectOnceDependencies(
       controlRuntimePreflightAccepted: { true },
-      observeGeneration: { m2ColdGeneration },
-      preflightAccepted: { _ in true },
-      captureNetworkBaseline: { window, selectedRoutes in
+      observeGeneration: { _ in m2ColdGeneration },
+      preflightAccepted: { _, _ in true },
+      captureNetworkBaseline: { window, selectedRoutes, _ in
         trace.nextBaseline(window: window, selectedRoutes: selectedRoutes)
       },
       baselineStable: { _, _ in true },
       assessActiveConnection: { _, _ in .unavailable },
       authorizationSource: .vendorOnce,
-      acquireAuthorization: {
-        .rejected(
-          source: .vendorOnce,
-          failure: .internalFailure,
-          cleanup: ProductM2AuthorizationCloseReceipt(
-            outcome: .notRequired,
-            ownedMaterialErased: false,
-            sourceCloseRequested: false,
-            serverContactRequested: false
-          )
+      beginAuthorization: { _ in
+        m2AuthorizationAttempt(
+          .rejected(
+            source: .vendorOnce,
+            failure: .internalFailure,
+            cleanup: ProductM2AuthorizationCloseReceipt(
+              outcome: .notRequired,
+              ownedMaterialErased: false,
+              sourceCloseRequested: false,
+              serverContactRequested: false
+            ))
         )
       },
       control: productM2TestControl(trace: trace, plan: .acknowledged),
-      proveFreshSSH: { target in m2SSHEvidence(.rejected, target: target) },
-      verifyCleanup: { _, _, _, _ in m2CompleteCleanup }
+      proveFreshSSH: { target, _ in m2SSHEvidence(.rejected, target: target) },
+      verifyCleanup: { _, _, _, _, _ in m2CompleteCleanup }
     )
 
     let report = await ProductM2ConnectOnceCoordinator(
@@ -189,22 +191,22 @@ import Testing
         sessionMaterialErased: true
       )
     )
-    let provider = ProductM2PortalAdapter { .rejected(report) }
+    let provider = ProductM2PortalAdapter { _ in .rejected(report) }
     let trace = ProductM2TestTrace()
     let dependencies = ProductM2ConnectOnceDependencies(
       controlRuntimePreflightAccepted: { true },
-      observeGeneration: { m2ColdGeneration },
-      preflightAccepted: { _ in true },
-      captureNetworkBaseline: { window, selectedRoutes in
+      observeGeneration: { _ in m2ColdGeneration },
+      preflightAccepted: { _, _ in true },
+      captureNetworkBaseline: { window, selectedRoutes, _ in
         trace.nextBaseline(window: window, selectedRoutes: selectedRoutes)
       },
       baselineStable: { _, _ in true },
       assessActiveConnection: { _, _ in .unavailable },
       authorizationSource: .nativePortal,
-      acquireAuthorization: provider.acquire,
+      beginAuthorization: provider.beginAcquire,
       control: productM2TestControl(trace: trace, plan: .acknowledged),
-      proveFreshSSH: { target in m2SSHEvidence(.rejected, target: target) },
-      verifyCleanup: { _, _, _, _ in m2CompleteCleanup }
+      proveFreshSSH: { target, _ in m2SSHEvidence(.rejected, target: target) },
+      verifyCleanup: { _, _, _, _, _ in m2CompleteCleanup }
     )
 
     let result = await ProductM2ConnectOnceCoordinator(
@@ -222,4 +224,14 @@ import Testing
     #expect(trace.count("begin_start") == 0)
     #expect(trace.count("ssh") == 0)
   }
+}
+
+private func m2AuthorizationAttempt(
+  _ result: ProductM2AuthorizedResourceAcquisition
+) -> ProductM2AuthorizationAttempt {
+  ProductM2AuthorizationAttempt(
+    source: .vendorOnce,
+    operation: { result },
+    cancel: {}
+  )
 }

@@ -116,14 +116,20 @@ struct ProductM2TestControlPlan: Sendable {
 
 func productM2TestControl(
   trace: ProductM2TestTrace,
-  plan: ProductM2TestControlPlan
+  plan: ProductM2TestControlPlan,
+  onBeginStart: @escaping @Sendable (Int) -> Void = { _ in },
+  onAwaitStart: @escaping @Sendable () -> Void = {},
+  onStop: @escaping @Sendable (Int) -> Void = { _ in },
+  onEmergencyStop: @escaping @Sendable (Int) -> Void = { _ in }
 ) -> ProductM2ControlAdapter {
   ProductM2ControlAdapter(
-    beginStart: { _, validator in
+    beginStart: { _, timeoutMilliseconds, validator in
       trace.record("begin_start")
+      onBeginStart(timeoutMilliseconds)
       trace.setGeneration(plan.generationAfterBegin)
       return ProductM2PendingStart {
         trace.record("await_start")
+        onAwaitStart()
         if plan.startOutcome == .cancelled { withUnsafeCurrentTask { $0?.cancel() } }
         let validatorAccepted =
           plan.startOutcome == .transportAcknowledged
@@ -138,8 +144,9 @@ func productM2TestControl(
               ? .peerGenerationMismatch : plan.startOutcome,
           requestSent: plan.startRequestSent
         )
-        let stopOperation: @Sendable () async -> ProductM2ControlReceipt = {
+        let stopOperation: @Sendable (Int) async -> ProductM2ControlReceipt = { timeout in
           trace.record("stop")
+          onStop(timeout)
           if Task.isCancelled { return .unsent(.cancelled) }
           return m2Receipt(
             plan.stopOutcome,
@@ -152,7 +159,7 @@ func productM2TestControl(
           acknowledged && plan.retainLease
           ? ProductM2ControlLease(
             stopOperation: stopOperation,
-            statusOperation: {
+            statusOperation: { _ in
               trace.record("status_wait")
               return plan.statusEvidence
             }
@@ -168,14 +175,16 @@ func productM2TestControl(
         )
       }
     },
-    emergencyStop: { predicate, validator in
+    emergencyStop: { timeout, predicate, validator in
       trace.record("emergency_stop")
       guard await predicate() else { return .unsent(.preflightBlocked) }
       let accepted = await validator()
-      return m2Receipt(
+      let receipt = m2Receipt(
         accepted ? .transportAcknowledged : .peerGenerationMismatch,
         requestSent: accepted
       )
+      onEmergencyStop(timeout)
+      return receipt
     }
   )
 }

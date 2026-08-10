@@ -70,7 +70,7 @@ import Testing
         snapshot.erase()
         return snapshot.isErased
       },
-      close: {
+      close: { _ in
         ProductM2AuthorizationCloseReceipt(
           outcome: .accepted,
           ownedMaterialErased: snapshot.isErased,
@@ -89,7 +89,9 @@ import Testing
     } catch let error as ProductM2AuthorizedResourceSelectionError {
       #expect(error == .preparedSelectionMismatch)
     }
-    #expect((await lease.closeAndErase()).outcome == .accepted)
+    #expect(
+      (await lease.closeAndErase(deadline: m2TestBudget().authorizationCleanup)).outcome
+        == .accepted)
   }
 
   @Test func duplicateCatalogHandlesAreRejectedBeforePrepare() async throws {
@@ -111,7 +113,7 @@ import Testing
         snapshot.erase()
         return snapshot.isErased
       },
-      close: { acceptedCloseReceipt(snapshot: snapshot) }
+      close: { _ in acceptedCloseReceipt(snapshot: snapshot) }
     )
 
     let error = await invariantSelectionError {
@@ -123,7 +125,9 @@ import Testing
 
     #expect(error == .catalogRejected)
     #expect(trace.count("prepare") == 0)
-    #expect((await lease.closeAndErase()).outcome == .accepted)
+    #expect(
+      (await lease.closeAndErase(deadline: m2TestBudget().authorizationCleanup)).outcome
+        == .accepted)
   }
 
   @Test func preparedTargetMismatchFailsBeforeBorrowOrControl() async throws {
@@ -153,7 +157,7 @@ import Testing
         snapshot.erase()
         return snapshot.isErased
       },
-      close: { acceptedCloseReceipt(snapshot: snapshot) }
+      close: { _ in acceptedCloseReceipt(snapshot: snapshot) }
     )
 
     let error = await invariantSelectionError {
@@ -166,7 +170,9 @@ import Testing
     #expect(error == .preparedSelectionMismatch)
     #expect(trace.count("start_snapshot_borrow") == 0)
     #expect(trace.count("begin_start") == 0)
-    #expect((await lease.closeAndErase()).outcome == .accepted)
+    #expect(
+      (await lease.closeAndErase(deadline: m2TestBudget().authorizationCleanup)).outcome
+        == .accepted)
   }
 
   @Test func crossResourceMatcherAndStartSnapshotFailBeforeControl() async throws {
@@ -210,7 +216,7 @@ import Testing
         snapshot.erase()
         return snapshot.isErased
       },
-      close: { acceptedCloseReceipt(snapshot: snapshot) }
+      close: { _ in acceptedCloseReceipt(snapshot: snapshot) }
     )
     let selection = try await lease.selectUnique(
       displayName: "Campus A",
@@ -220,13 +226,16 @@ import Testing
     let error = await invariantSelectionError {
       _ = try await selection.beginStart(
         control: productM2TestControl(trace: trace, plan: .acknowledged),
+        deadline: m2TestBudget().work,
         peerGenerationValidator: { true }
       )
     }
 
     #expect(error == .startSnapshotRejected)
     #expect(trace.count("begin_start") == 0)
-    #expect((await lease.closeAndErase()).outcome == .accepted)
+    #expect(
+      (await lease.closeAndErase(deadline: m2TestBudget().authorizationCleanup)).outcome
+        == .accepted)
   }
 }
 

@@ -63,7 +63,7 @@ import Testing
             trace.record("monitor")
             return M2ManualSignalMonitor()
           },
-          runtime: { _ in
+          runtime: { _, _ in
             trace.record("runtime")
             return successReport()
           }
@@ -93,7 +93,11 @@ import Testing
         trace.record("monitor")
         return M2ManualSignalMonitor()
       },
-      runtime: { request in
+      budgetFactory: {
+        trace.record("budget")
+        return ProductM2AbsoluteBudget.start()
+      },
+      runtime: { request, _ in
         trace.record("runtime:\(request.resourceDisplayName):\(request.sshTarget.rawValue)")
         return successReport(resource: request.resourceDisplayName)
       }
@@ -102,8 +106,13 @@ import Testing
     #expect(result.exitCode == 0)
     #expect(trace.count("code") == 1)
     #expect(trace.count("approval") == 1)
+    #expect(trace.count("budget") == 1)
     #expect(trace.count("monitor") == 1)
     #expect(trace.count("runtime: Campus NC :thu21") == 1)
+    #expect(
+      trace.events == [
+        "code", "approval", "budget", "monitor", "runtime: Campus NC :thu21",
+      ])
     let prompt = try #require(trace.prompt)
     for marker in [
       " Campus NC ", "thu21", "A1B2C3D4", "authorized resource", "start_connection",
@@ -132,7 +141,11 @@ import Testing
           trace.record("monitor")
           return M2ManualSignalMonitor()
         },
-        runtime: { _ in
+        budgetFactory: {
+          trace.record("budget")
+          return ProductM2AbsoluteBudget.start()
+        },
+        runtime: { _, _ in
           trace.record("runtime")
           return successReport()
         }
@@ -140,6 +153,7 @@ import Testing
 
       #expect(result.exitCode == 77)
       #expect(trace.count("runtime") == 0)
+      #expect(trace.count("budget") == 0)
       #expect(trace.count("monitor") == 0)
       #expect(trace.count("approval") == (code == "invalid" ? 0 : 1))
       assertSortedJSON(result.standardOutput)
@@ -159,7 +173,11 @@ import Testing
         trace.record("monitor")
         return M2ManualSignalMonitor()
       },
-      runtime: { _ in
+      budgetFactory: {
+        trace.record("budget")
+        return ProductM2AbsoluteBudget.start()
+      },
+      runtime: { _, _ in
         trace.record("runtime")
         return successReport()
       }

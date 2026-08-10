@@ -41,8 +41,9 @@ package struct ProductM2CurrentMachineRuntime: Sendable {
   }
 
   package func run(
-    _ request: ProductM2ConnectRequest
+    _ request: ProductM2ConnectRequest,
+    budget: ProductM2AbsoluteBudget
   ) async -> ProductM2ConnectReport {
-    await coordinator.run(request)
+    await coordinator.run(request, budget: budget)
   }
 }

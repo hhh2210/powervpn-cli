@@ -58,7 +58,7 @@ import Testing
         snapshot.erase()
         return snapshot.isErased
       },
-      close: {
+      close: { _ in
         ProductM2AuthorizationCloseReceipt(
           outcome: .accepted,
           ownedMaterialErased: snapshot.isErased,
@@ -74,6 +74,7 @@ import Testing
 
     let pending = try await selection.beginStart(
       control: productM2TestControl(trace: trace, plan: .acknowledged),
+      deadline: m2TestBudget().work,
       peerGenerationValidator: { true }
     )
     let result = await pending.result()
@@ -81,14 +82,17 @@ import Testing
     #expect(result.receipt.requestSent)
     #expect(result.receipt.transportAcknowledged)
     #expect(trace.count("begin_start") == 1)
-    let stop = await result.lease?.stop()
+    let stop = await result.lease?.stop(timeoutMilliseconds: 2_000)
     #expect(stop?.requestSent == true)
     #expect(trace.count("stop") == 1)
-    #expect((await lease.closeAndErase()).outcome == .accepted)
+    #expect(
+      (await lease.closeAndErase(deadline: m2TestBudget().authorizationCleanup)).outcome
+        == .accepted)
   }
 }
 
 enum PostSubmissionWrapperBehavior: Sendable {
+  case invokeOnce
   case invokeTwice
   case throwAfterInvocation
 }
@@ -97,11 +101,12 @@ private enum PostSubmissionWrapperError: Error {
   case afterInvocation
 }
 
-private func wrappedPreparedResource(
+func wrappedPreparedResource(
   snapshot: AuthenticatedPortalSnapshot,
   handle: String,
   target: UInt32,
-  behavior: PostSubmissionWrapperBehavior
+  behavior: PostSubmissionWrapperBehavior,
+  beforeInvocation: @escaping @Sendable () -> Void = {}
 ) throws -> ProductM2PreparedAuthorizedResource {
   let candidate = try #require(
     ProductM2PortalAdapter.catalog(snapshot: snapshot).first {
@@ -130,8 +135,11 @@ private func wrappedPreparedResource(
         handle: handle,
         lineage: lineage
       ) { startSnapshot in
+        beforeInvocation()
         try body(startSnapshot)
         switch behavior {
+        case .invokeOnce:
+          break
         case .invokeTwice:
           try body(startSnapshot)
         case .throwAfterInvocation:

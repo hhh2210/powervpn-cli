@@ -4,7 +4,7 @@ import Security
 
 package struct ProductM2FreshSSHProver: Sendable {
   package typealias Execute =
-    @Sendable (ProductM2FreshSSHCommand) async -> ProductM2FreshSSHProcessResult
+    @Sendable (ProductM2FreshSSHCommand, Int) async -> ProductM2FreshSSHProcessResult
 
   private let homeDirectory: String
   private let generateChallenge: @Sendable () throws -> String
@@ -30,12 +30,12 @@ package struct ProductM2FreshSSHProver: Sendable {
     self.init(
       homeDirectory: homeDirectory,
       generateChallenge: secureChallenge,
-      execute: { command in
+      execute: { command, timeoutMilliseconds in
         let result = await runner.run(
           BoundedCommandRequest(
             executable: ProductM2FreshSSHCommand.executable,
             arguments: command.arguments,
-            timeoutMilliseconds: ProductM2FreshSSHCommand.timeoutMilliseconds,
+            timeoutMilliseconds: timeoutMilliseconds,
             stdoutLimitBytes: ProductM2FreshSSHCommand.outputLimitBytes,
             stderrLimitBytes: ProductM2FreshSSHCommand.outputLimitBytes,
             environment: sshAuthSocket.map {
@@ -48,8 +48,11 @@ package struct ProductM2FreshSSHProver: Sendable {
   }
 
   package func prove(
-    _ target: ProductM2SSHTarget
+    _ target: ProductM2SSHTarget,
+    timeoutMilliseconds: Int
   ) async -> ProductM2FreshSSHProofEvidence {
+    guard (1...ProductM2FreshSSHCommand.timeoutMilliseconds).contains(timeoutMilliseconds)
+    else { return .timedOut(target: target) }
     if Task.isCancelled { return unstarted(target: target, cancelled: true) }
     let command: ProductM2FreshSSHCommand
     do {
@@ -62,7 +65,7 @@ package struct ProductM2FreshSSHProver: Sendable {
       return unstarted(target: target, cancelled: false)
     }
     if Task.isCancelled { return unstarted(target: target, cancelled: true) }
-    var result = await execute(command)
+    var result = await execute(command, timeoutMilliseconds)
     if Task.isCancelled, !result.cancelled {
       result = ProductM2FreshSSHProcessResult(
         processStarted: result.processStarted,

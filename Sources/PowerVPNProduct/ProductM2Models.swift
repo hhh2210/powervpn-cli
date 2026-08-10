@@ -34,6 +34,7 @@ public enum ProductM2ConnectOutcome: String, Encodable, Equatable, Sendable {
   case vendorStatusUnproven = "vendor_status_unproven"
   case activeNetworkUnproven = "active_network_unproven"
   case sshProofRejected = "ssh_proof_rejected"
+  case deadlineExceeded = "deadline_exceeded"
   case cancelled
   case cleanupUnproven = "cleanup_unproven"
 }
@@ -54,6 +55,7 @@ public enum ProductM2BadEvent: String, Encodable, Equatable, Sendable {
   case vendorStatusUnproven = "vendor_status_unproven"
   case activeNetworkUnproven = "active_network_unproven"
   case sshProofRejected = "ssh_proof_rejected"
+  case deadlineExceeded = "deadline_exceeded"
   case cancelled
   case authorizationCloseRejected = "authorization_close_rejected"
   case cleanupVerificationRejected = "cleanup_verification_rejected"
@@ -237,7 +239,7 @@ public struct ProductM2ConnectRequest: Equatable, Sendable {
 }
 
 public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
-  public let schemaVersion = 6
+  public let schemaVersion = 7
   public let outcome: ProductM2ConnectOutcome
   public let finalState: ProductM2ConnectionState
   public let lastGoodState: ProductM2ConnectionState

@@ -1,31 +1,96 @@
+import Foundation
 import PowerVPNCore
 import PowerVPNPortal
 
 package struct ProductM2PortalAdapter: ProductM2AuthorizedResourceProviding {
-  package typealias AcquirePortal = @Sendable () async -> PortalSnapshotAcquisitionResult
+  package typealias AcquirePortal =
+    @Sendable (ProductM2AuthorizationBudget) async -> PortalSnapshotAcquisitionResult
+  package typealias BeforeTaskInstall = @Sendable () async -> Void
 
   package let source = ProductM2AuthorizationSource.nativePortal
   package let availabilityFailure: ProductM2AuthorizationFailure? = nil
   private let acquirePortal: AcquirePortal
+  private let beforeTaskInstall: BeforeTaskInstall
 
   package init(
-    acquirePortal: @escaping AcquirePortal = PortalLoginRuntime.acquireCurrentMachine
+    acquirePortal: @escaping AcquirePortal
   ) {
     self.acquirePortal = acquirePortal
+    beforeTaskInstall = {}
   }
 
-  package func acquire() async -> ProductM2AuthorizedResourceAcquisition {
-    switch await acquirePortal() {
+  package init(
+    acquirePortal: @escaping AcquirePortal,
+    beforeTaskInstall: @escaping BeforeTaskInstall
+  ) {
+    self.acquirePortal = acquirePortal
+    self.beforeTaskInstall = beforeTaskInstall
+  }
+
+  package func beginAcquire(
+    budget: ProductM2AuthorizationBudget
+  ) -> ProductM2AuthorizationAttempt {
+    let cancellation = ProductM2PortalAcquisitionCancellation()
+    let acquirePortal = self.acquirePortal
+    let beforeTaskInstall = self.beforeTaskInstall
+    return ProductM2AuthorizationAttempt(
+      source: .nativePortal,
+      operation: {
+        let startGate = ProductM2PortalAcquisitionStartGate()
+        let task = Task {
+          guard await startGate.waitForStartDecision() else {
+            return Self.cancelledAcquisition()
+          }
+          return await Self.acquire(acquirePortal: acquirePortal, budget: budget)
+        }
+        await beforeTaskInstall()
+        cancellation.install(task, startGate: startGate)
+        return await task.value
+      },
+      cancel: cancellation.cancel
+    )
+  }
+
+  private static func cancelledAcquisition() -> ProductM2AuthorizedResourceAcquisition {
+    .rejected(
+      source: .nativePortal,
+      failure: .cancelled,
+      cleanup: ProductM2AuthorizationCloseReceipt(
+        outcome: .notRequired,
+        ownedMaterialErased: true,
+        sourceCloseRequested: false,
+        serverContactRequested: false
+      )
+    )
+  }
+
+  private static func acquire(
+    acquirePortal: @escaping AcquirePortal,
+    budget: ProductM2AuthorizationBudget
+  ) async -> ProductM2AuthorizedResourceAcquisition {
+    guard budget.work.hasRemaining else {
+      return .rejected(
+        source: .nativePortal,
+        failure: .timedOut,
+        cleanup: ProductM2AuthorizationCloseReceipt(
+          outcome: .notRequired,
+          ownedMaterialErased: true,
+          sourceCloseRequested: false,
+          serverContactRequested: false
+        )
+      )
+    }
+    switch await acquirePortal(budget) {
     case .acquired(let portalLease):
       return .acquired(
-        source: source,
+        source: .nativePortal,
         lease: Self.authorizationLease(portalLease),
         serverContactRequested: true
       )
     case .rejected(let report):
       let operations = report.operations
       return .rejected(
-        source: source,
+        source: .nativePortal,
         failure: ProductM2AuthorizationFailure(report.status),
         cleanup: ProductM2AuthorizationCloseReceipt(
           outcome: operations.loginAccepted
@@ -41,10 +106,6 @@ package struct ProductM2PortalAdapter: ProductM2AuthorizedResourceProviding {
         )
       )
     }
-  }
-
-  package static func acquireCurrentMachine() async -> ProductM2AuthorizedResourceAcquisition {
-    await Self().acquire()
   }
 
   private static func authorizationLease(
@@ -66,7 +127,16 @@ package struct ProductM2PortalAdapter: ProductM2AuthorizedResourceProviding {
         portalLease.snapshot.erase()
         return portalLease.snapshot.isErased
       },
-      close: {
+      close: { deadline in
+        guard deadline.remainingMilliseconds(cappedAt: 20_000) == 20_000 else {
+          portalLease.snapshot.erase()
+          return ProductM2AuthorizationCloseReceipt(
+            outcome: .timedOut,
+            ownedMaterialErased: portalLease.snapshot.isErased,
+            sourceCloseRequested: false,
+            serverContactRequested: false
+          )
+        }
         let status = await portalLease.logoutAndErase()
         return ProductM2AuthorizationCloseReceipt(
           outcome: ProductM2AuthorizationCloseOutcome(status),

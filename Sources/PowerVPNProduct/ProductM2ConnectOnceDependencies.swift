@@ -2,12 +2,15 @@ import PowerVPNCore
 
 package struct ProductM2ConnectOnceDependencies: Sendable {
   package let controlRuntimePreflightAccepted: @Sendable () -> Bool
-  package let observeGeneration: @Sendable () async -> VendorHelperGenerationSnapshot
-  package let preflightAccepted: @Sendable (VendorHelperGenerationSnapshot) async -> Bool
+  package let observeGeneration:
+    @Sendable (ProductM2StageDeadline) async -> VendorHelperGenerationSnapshot
+  package let preflightAccepted:
+    @Sendable (VendorHelperGenerationSnapshot, ProductM2StageDeadline) async -> Bool
   package let captureNetworkBaseline:
     @Sendable (
       NetworkCleanupCaptureWindow,
-      VendorCharonSelectedRouteMatcher?
+      VendorCharonSelectedRouteMatcher?,
+      ProductM2StageDeadline
     ) async -> ProductM2NetworkBaseline?
   package let baselineStable: @Sendable (ProductM2NetworkBaseline, ProductM2NetworkBaseline) -> Bool
   package let assessActiveConnection:
@@ -17,28 +20,39 @@ package struct ProductM2ConnectOnceDependencies: Sendable {
     ) -> ProductM2ActiveNetworkEvidence
   package let authorizationSource: ProductM2AuthorizationSource
   package let authorizationAvailabilityFailure: ProductM2AuthorizationFailure?
-  package let acquireAuthorization: @Sendable () async -> ProductM2AuthorizedResourceAcquisition
+  package let beginAuthorization:
+    @Sendable (ProductM2AuthorizationBudget) -> ProductM2AuthorizationAttempt
   package let control: ProductM2ControlAdapter
-  package let proveFreshSSH: @Sendable (ProductM2SSHTarget) async -> ProductM2FreshSSHProofEvidence
+  package let proveFreshSSH:
+    @Sendable (
+      ProductM2SSHTarget,
+      ProductM2StageDeadline
+    ) async -> ProductM2FreshSSHProofEvidence
   package let verifyCleanup:
     @Sendable (
       ProductM2NetworkBaseline,
       NetworkCleanupCaptureWindow,
       VendorCharonSelectedRouteMatcher?,
-      Bool
+      Bool,
+      ProductM2StageDeadline
     ) async -> ProductM2CleanupEvidence
 
   package init(
     controlRuntimePreflightAccepted: @escaping @Sendable () -> Bool,
-    observeGeneration: @escaping @Sendable () async -> VendorHelperGenerationSnapshot,
+    observeGeneration:
+      @escaping @Sendable (
+        ProductM2StageDeadline
+      ) async -> VendorHelperGenerationSnapshot,
     preflightAccepted:
       @escaping @Sendable (
-        VendorHelperGenerationSnapshot
+        VendorHelperGenerationSnapshot,
+        ProductM2StageDeadline
       ) async -> Bool,
     captureNetworkBaseline:
       @escaping @Sendable (
         NetworkCleanupCaptureWindow,
-        VendorCharonSelectedRouteMatcher?
+        VendorCharonSelectedRouteMatcher?,
+        ProductM2StageDeadline
       ) async -> ProductM2NetworkBaseline?,
     baselineStable:
       @escaping @Sendable (
@@ -52,19 +66,23 @@ package struct ProductM2ConnectOnceDependencies: Sendable {
       ) -> ProductM2ActiveNetworkEvidence,
     authorizationSource: ProductM2AuthorizationSource = .nativePortal,
     authorizationAvailabilityFailure: ProductM2AuthorizationFailure? = nil,
-    acquireAuthorization:
-      @escaping @Sendable () async -> ProductM2AuthorizedResourceAcquisition,
+    beginAuthorization:
+      @escaping @Sendable (
+        ProductM2AuthorizationBudget
+      ) -> ProductM2AuthorizationAttempt,
     control: ProductM2ControlAdapter,
     proveFreshSSH:
       @escaping @Sendable (
-        ProductM2SSHTarget
+        ProductM2SSHTarget,
+        ProductM2StageDeadline
       ) async -> ProductM2FreshSSHProofEvidence,
     verifyCleanup:
       @escaping @Sendable (
         ProductM2NetworkBaseline,
         NetworkCleanupCaptureWindow,
         VendorCharonSelectedRouteMatcher?,
-        Bool
+        Bool,
+        ProductM2StageDeadline
       ) async -> ProductM2CleanupEvidence
   ) {
     self.controlRuntimePreflightAccepted = controlRuntimePreflightAccepted
@@ -75,7 +93,7 @@ package struct ProductM2ConnectOnceDependencies: Sendable {
     self.assessActiveConnection = assessActiveConnection
     self.authorizationSource = authorizationSource
     self.authorizationAvailabilityFailure = authorizationAvailabilityFailure
-    self.acquireAuthorization = acquireAuthorization
+    self.beginAuthorization = beginAuthorization
     self.control = control
     self.proveFreshSSH = proveFreshSSH
     self.verifyCleanup = verifyCleanup
@@ -95,14 +113,26 @@ package struct ProductM2ConnectOnceDependencies: Sendable {
   ) {
     self.init(
       controlRuntimePreflightAccepted: controlRuntimePreflightAccepted,
-      observeGeneration: generationObserver.observe,
-      preflightAccepted: { generation in
-        await preflightChecker.check(generation: generation).safeToProbe
+      observeGeneration: { deadline in
+        guard let timeout = deadline.remainingMilliseconds(cappedAt: 2_000) else {
+          return .unavailable
+        }
+        return await generationObserver.observe(timeoutMilliseconds: timeout)
       },
-      captureNetworkBaseline: { window, selectedRoutes in
+      preflightAccepted: { generation, deadline in
+        guard let timeout = deadline.remainingMilliseconds(cappedAt: 2_000) else {
+          return false
+        }
+        return await preflightChecker.check(
+          generation: generation,
+          timeoutMilliseconds: timeout
+        ).safeToProbe
+      },
+      captureNetworkBaseline: { window, selectedRoutes, deadline in
         let snapshot = await networkObserver.capture(
           window: window,
-          selectedRoutes: selectedRoutes
+          selectedRoutes: selectedRoutes,
+          timeoutMilliseconds: deadline.remainingMilliseconds(cappedAt: 24_000) ?? 0
         )
         return snapshot.complete ? ProductM2NetworkBaseline(snapshot: snapshot) : nil
       },
@@ -117,14 +147,20 @@ package struct ProductM2ConnectOnceDependencies: Sendable {
       },
       authorizationSource: authorizationProvider.source,
       authorizationAvailabilityFailure: authorizationProvider.availabilityFailure,
-      acquireAuthorization: authorizationProvider.acquire,
+      beginAuthorization: authorizationProvider.beginAcquire,
       control: control,
-      proveFreshSSH: freshSSHProver.prove,
-      verifyCleanup: { baseline, window, selectedRoutes, startRequestSent in
+      proveFreshSSH: { target, deadline in
+        guard let timeout = deadline.remainingMilliseconds(cappedAt: 15_000) else {
+          return ProductM2FreshSSHProofEvidence.timedOut(target: target)
+        }
+        return await freshSSHProver.prove(target, timeoutMilliseconds: timeout)
+      },
+      verifyCleanup: { baseline, window, selectedRoutes, startRequestSent, deadline in
         guard let before = baseline.snapshot else { return .unavailable }
         let after = await networkObserver.capture(
           window: window,
-          selectedRoutes: selectedRoutes
+          selectedRoutes: selectedRoutes,
+          timeoutMilliseconds: deadline.remainingMilliseconds(cappedAt: 24_000) ?? 0
         )
         return ProductM2CleanupEvidence(
           NetworkCleanupAssessment.assess(

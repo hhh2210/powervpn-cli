@@ -1,13 +1,13 @@
 package struct ProductM2ProvisionalStopCapability: Sendable {
-  private let stopOperation: @Sendable () async -> ProductM2ControlReceipt
+  private let stopOperation: @Sendable (Int) async -> ProductM2ControlReceipt
 
   init(
-    stopOperation: @escaping @Sendable () async -> ProductM2ControlReceipt
+    stopOperation: @escaping @Sendable (Int) async -> ProductM2ControlReceipt
   ) {
     self.stopOperation = stopOperation
   }
 
-  package func stop() async -> ProductM2ControlReceipt {
-    await stopOperation()
+  package func stop(timeoutMilliseconds: Int) async -> ProductM2ControlReceipt {
+    await stopOperation(timeoutMilliseconds)
   }
 }

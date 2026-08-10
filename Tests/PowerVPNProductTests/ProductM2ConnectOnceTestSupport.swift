@@ -104,7 +104,23 @@ func productM2TestDependencies(
   authorizationPrepare: ProductM2AuthorizedResourceLease.Prepare? = nil,
   controlRuntimePreflightAccepted: Bool = true,
   cancelDuringAcquire: Bool = false,
-  cancelDuringSSH: Bool = false
+  cancelDuringSSH: Bool = false,
+  generationObservationHonorsCancellation: Bool = false,
+  beginAuthorizationOverride:
+    (@Sendable (ProductM2AuthorizationBudget) -> ProductM2AuthorizationAttempt)? = nil,
+  onAuthorizationClose: @escaping @Sendable (ProductM2StageDeadline) -> Void = { _ in },
+  onCaptureBaseline:
+    @escaping @Sendable (
+      VendorCharonSelectedRouteMatcher?,
+      ProductM2NetworkBaseline?,
+      ProductM2StageDeadline
+    ) -> Void = { _, _, _ in },
+  onProveFreshSSH: @escaping @Sendable (ProductM2StageDeadline) -> Void = { _ in },
+  onVerifyCleanup: @escaping @Sendable (ProductM2StageDeadline) -> Void = { _ in },
+  onBeginStart: @escaping @Sendable (Int) -> Void = { _ in },
+  onAwaitStart: @escaping @Sendable () -> Void = {},
+  onStop: @escaping @Sendable (Int) -> Void = { _ in },
+  onEmergencyStop: @escaping @Sendable (Int) -> Void = { _ in }
 ) -> ProductM2ConnectOnceDependencies {
   let lease = ProductM2AuthorizedResourceLease(
     source: leaseAuthorizationSource,
@@ -126,8 +142,9 @@ func productM2TestDependencies(
       snapshot.erase()
       return snapshot.isErased
     },
-    close: {
+    close: { deadline in
       trace.record("logout")
+      onAuthorizationClose(deadline)
       return ProductM2AuthorizationCloseReceipt(
         outcome: logout,
         ownedMaterialErased: snapshot.isErased,
@@ -141,10 +158,18 @@ func productM2TestDependencies(
       trace.record("session_preflight")
       return controlRuntimePreflightAccepted
     },
-    observeGeneration: trace.observeGeneration,
-    preflightAccepted: { _ in trace.preflight() },
-    captureNetworkBaseline: { window, selectedRoutes in
-      trace.nextBaseline(window: window, selectedRoutes: selectedRoutes)
+    observeGeneration: { _ in
+      if generationObservationHonorsCancellation, Task.isCancelled {
+        trace.record("cancelled_observe_generation")
+        return m2UnavailableGeneration
+      }
+      return await trace.observeGeneration()
+    },
+    preflightAccepted: { _, _ in trace.preflight() },
+    captureNetworkBaseline: { window, selectedRoutes, deadline in
+      let result = trace.nextBaseline(window: window, selectedRoutes: selectedRoutes)
+      onCaptureBaseline(selectedRoutes, result, deadline)
+      return result
     },
     baselineStable: { _, _ in
       trace.record("baseline_stable")
@@ -155,22 +180,37 @@ func productM2TestDependencies(
       return activeNetwork
     },
     authorizationSource: dependencyAuthorizationSource,
-    acquireAuthorization: {
-      trace.record("acquire")
-      if cancelDuringAcquire { withUnsafeCurrentTask { $0?.cancel() } }
-      return .acquired(
+    beginAuthorization: beginAuthorizationOverride ?? { _ in
+      ProductM2AuthorizationAttempt(
         source: acquisitionAuthorizationSource,
-        lease: lease,
-        serverContactRequested: true
+        operation: {
+          trace.record("acquire")
+          if cancelDuringAcquire { withUnsafeCurrentTask { $0?.cancel() } }
+          return .acquired(
+            source: acquisitionAuthorizationSource,
+            lease: lease,
+            serverContactRequested: true
+          )
+        },
+        cancel: { trace.record("cancel_acquire") }
       )
     },
-    control: productM2TestControl(trace: trace, plan: plan),
-    proveFreshSSH: { target in
+    control: productM2TestControl(
+      trace: trace,
+      plan: plan,
+      onBeginStart: onBeginStart,
+      onAwaitStart: onAwaitStart,
+      onStop: onStop,
+      onEmergencyStop: onEmergencyStop
+    ),
+    proveFreshSSH: { target, deadline in
       trace.record("ssh")
+      onProveFreshSSH(deadline)
       if cancelDuringSSH { withUnsafeCurrentTask { $0?.cancel() } }
       return m2SSHEvidence(sshProof, target: sshEvidenceTarget ?? target)
     },
-    verifyCleanup: { baseline, window, selectedRoutes, startRequestSent in
+    verifyCleanup: { baseline, window, selectedRoutes, startRequestSent, deadline in
+      onVerifyCleanup(deadline)
       trace.markVerified(
         baseline,
         window: window,
@@ -180,6 +220,18 @@ func productM2TestDependencies(
       return cleanup
     }
   )
+}
+
+func m2TestBudget() -> ProductM2AbsoluteBudget {
+  .start()
+}
+
+extension ProductM2ConnectOnceCoordinator {
+  func run(
+    _ request: ProductM2ConnectRequest
+  ) async -> ProductM2ConnectReport {
+    await run(request, budget: m2TestBudget())
+  }
 }
 
 func m2ResourceXML(_ displayNames: [String]) -> String {

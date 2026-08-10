@@ -15,7 +15,10 @@ struct M2ConnectOnceCommandResult: Equatable, Sendable {
 }
 
 typealias M2ConnectOnceRuntimeOperation =
-  @Sendable (ProductM2ConnectRequest) async -> ProductM2ConnectReport
+  @Sendable (
+    ProductM2ConnectRequest,
+    ProductM2AbsoluteBudget
+  ) async -> ProductM2ConnectReport
 
 func runM2ConnectOnceCommand(
   _ arguments: [String],
@@ -25,11 +28,19 @@ func runM2ConnectOnceCommand(
   generateApprovalCode: @escaping @Sendable () throws -> String = M2TTYApproval.secureCode,
   approval: M2TTYApproval = M2TTYApproval(),
   signalMonitorFactory: CLISignalMonitorFactory = { DarwinCLISignalMonitor() },
-  runtimeDeadline: @escaping @Sendable () async -> Void = {
-    try? await Task.sleep(for: .seconds(120))
+  budgetFactory: @escaping @Sendable () -> ProductM2AbsoluteBudget = {
+    ProductM2AbsoluteBudget.start()
   },
-  runtime: @escaping M2ConnectOnceRuntimeOperation = { request in
-    await ProductM2CurrentMachineRuntime().run(request)
+  workCutoffAlarm: @escaping @Sendable (ProductM2AbsoluteBudget) async -> Void = { budget in
+    guard
+      let milliseconds = budget.work.remainingMilliseconds(
+        cappedAt: ProductM2AbsoluteBudget.workCutoffMilliseconds
+      )
+    else { return }
+    try? await Task.sleep(for: .milliseconds(milliseconds))
+  },
+  runtime: @escaping M2ConnectOnceRuntimeOperation = { request, budget in
+    await ProductM2CurrentMachineRuntime().run(request, budget: budget)
   }
 ) async throws -> M2ConnectOnceCommandResult {
   let request = try parseM2ConnectOnceArguments(arguments)
@@ -51,6 +62,7 @@ func runM2ConnectOnceCommand(
     return try approvalResult(approvalOutcome)
   }
 
+  let budget = budgetFactory()
   let cancellation = CLITaskCancellation<M2RuntimeExecution>()
   let monitor = signalMonitorFactory()
   monitor.start { cancellation.request() }
@@ -62,15 +74,15 @@ func runM2ConnectOnceCommand(
   let task = Task {
     await gate.wait()
     guard !Task.isCancelled else { return M2RuntimeExecution.cancelledBeforeRuntime }
-    return M2RuntimeExecution.report(await runtime(request))
+    return M2RuntimeExecution.report(await runtime(request, budget))
   }
   cancellation.install(task)
-  let deadlineTask = Task {
-    await runtimeDeadline()
+  let workCutoffTask = Task {
+    await workCutoffAlarm(budget)
     guard !Task.isCancelled else { return }
     cancellation.request()
   }
-  defer { deadlineTask.cancel() }
+  defer { workCutoffTask.cancel() }
   await gate.open()
   switch await task.value {
   case .cancelledBeforeRuntime:
@@ -106,6 +118,7 @@ func parseM2ConnectOnceArguments(
 func m2ConnectOnceExitCode(_ report: ProductM2ConnectReport) -> Int32 {
   if report.outcome == .cleanupUnproven { return 74 }
   if report.helperMutationRequested, !report.cleanupVerified { return 74 }
+  if report.outcome == .deadlineExceeded { return 124 }
   if report.outcome == .connectedAndCleanedUp {
     return report.finalState == .disconnected && report.cleanupVerified ? 0 : 1
   }

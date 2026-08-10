@@ -13,7 +13,7 @@ import Testing
       generateApprovalCode: { "A1B2C3D4" },
       approval: approval(trace: trace, response: .line("A1B2C3D4")),
       signalMonitorFactory: { monitor },
-      runtime: { _ in
+      runtime: { _, _ in
         trace.record("runtime")
         return successReport()
       }
@@ -49,7 +49,7 @@ import Testing
     #expect(monitor.stopCount == 1)
   }
 
-  @Test func totalDeadlineCancelsRuntimeAndAwaitsItsCleanupReport() async throws {
+  @Test func workCutoffCancelsRuntimeAndAwaitsItsCleanupReport() async throws {
     let monitor = M2ManualSignalMonitor()
     let runtime = M2CancellationRuntime()
     let deadline = M2ManualDeadline()
@@ -60,7 +60,7 @@ import Testing
         generateApprovalCode: { "A1B2C3D4" },
         approval: M2TTYApproval(exchange: { _ in .line("A1B2C3D4") }),
         signalMonitorFactory: { monitor },
-        runtimeDeadline: deadline.wait,
+        workCutoffAlarm: { _ in await deadline.wait() },
         runtime: runtime.run
       )
     }
@@ -87,6 +87,10 @@ import Testing
     #expect(
       m2ConnectOnceExitCode(
         report(outcome: .connectedAndCleanedUp, cleanup: false, mutated: true)) == 74)
+    #expect(
+      m2ConnectOnceExitCode(
+        report(outcome: .deadlineExceeded, cleanup: false, mutated: true)) == 74)
+    #expect(m2ConnectOnceExitCode(report(outcome: .deadlineExceeded)) == 124)
     #expect(m2ConnectOnceExitCode(report(outcome: .cancelled)) == 130)
     #expect(m2ConnectOnceExitCode(successReport(finalState: .connected)) == 1)
   }

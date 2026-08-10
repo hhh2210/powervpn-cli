@@ -50,23 +50,25 @@ package struct ProductM2ControlReceipt: Equatable, Sendable {
 }
 
 package struct ProductM2ControlLease: Sendable {
-  private let stopOperation: @Sendable () async -> ProductM2ControlReceipt
-  private let statusOperation: @Sendable () async -> ProductM2VendorStatusEvidence
+  private let stopOperation: @Sendable (Int) async -> ProductM2ControlReceipt
+  private let statusOperation: @Sendable (Int) async -> ProductM2VendorStatusEvidence
 
   init(
-    stopOperation: @escaping @Sendable () async -> ProductM2ControlReceipt,
-    statusOperation: @escaping @Sendable () async -> ProductM2VendorStatusEvidence
+    stopOperation: @escaping @Sendable (Int) async -> ProductM2ControlReceipt,
+    statusOperation: @escaping @Sendable (Int) async -> ProductM2VendorStatusEvidence
   ) {
     self.stopOperation = stopOperation
     self.statusOperation = statusOperation
   }
 
-  package func stop() async -> ProductM2ControlReceipt {
-    await stopOperation()
+  package func stop(timeoutMilliseconds: Int) async -> ProductM2ControlReceipt {
+    await stopOperation(timeoutMilliseconds)
   }
 
-  package func waitForConnectedStatus() async -> ProductM2VendorStatusEvidence {
-    await statusOperation()
+  package func waitForConnectedStatus(
+    timeoutMilliseconds: Int
+  ) async -> ProductM2VendorStatusEvidence {
+    await statusOperation(timeoutMilliseconds)
   }
 }
 
@@ -100,18 +102,21 @@ package struct ProductM2ControlAdapter: Sendable {
   private let beginOperation:
     @Sendable (
       VendorCharonStartSnapshot,
+      Int,
       @escaping @Sendable () async -> Bool
     ) -> ProductM2PendingStart
   private let emergencyOperation:
     @Sendable (
+      Int,
       @escaping @Sendable () async -> Bool,
       @escaping @Sendable () async -> Bool
     ) async -> ProductM2ControlReceipt
 
   package init(transport: RawVendorCharonControlTransport) {
-    beginOperation = { snapshot, validator in
+    beginOperation = { snapshot, timeoutMilliseconds, validator in
       let pending = transport.beginStart(
         snapshot: snapshot,
+        timeoutMilliseconds: timeoutMilliseconds,
         peerGenerationValidator: validator
       )
       return ProductM2PendingStart {
@@ -120,39 +125,35 @@ package struct ProductM2ControlAdapter: Sendable {
           receipt: ProductM2ControlReceipt(result.receipt),
           lease: result.lease.map { lease in
             ProductM2ControlLease(
-              stopOperation: {
+              stopOperation: { timeoutMilliseconds in
                 ProductM2ControlReceipt(
                   await lease.stop(
-                    timeoutMilliseconds: RawVendorCharonControlTransport
-                      .defaultTimeoutMilliseconds
+                    timeoutMilliseconds: timeoutMilliseconds
                   ))
               },
-              statusOperation: {
+              statusOperation: { timeoutMilliseconds in
                 ProductM2VendorStatusEvidence(
                   await lease.waitForConnectedStatus(
-                    timeoutMilliseconds: RawVendorCharonControlTransport
-                      .defaultTimeoutMilliseconds
+                    timeoutMilliseconds: timeoutMilliseconds
                   ))
               }
             )
           },
           provisionalStopCapability: result.provisionalStopCapability.map { capability in
-            ProductM2ProvisionalStopCapability {
+            ProductM2ProvisionalStopCapability { timeoutMilliseconds in
               ProductM2ControlReceipt(
                 await capability.stop(
-                  timeoutMilliseconds: RawVendorCharonControlTransport
-                    .defaultTimeoutMilliseconds
+                  timeoutMilliseconds: timeoutMilliseconds
                 ))
             }
           }
         )
       }
     }
-    emergencyOperation = { predicate, validator in
+    emergencyOperation = { timeoutMilliseconds, predicate, validator in
       ProductM2ControlReceipt(
         await transport.emergencyStop(
-          timeoutMilliseconds: RawVendorCharonControlTransport
-            .defaultTimeoutMilliseconds,
+          timeoutMilliseconds: timeoutMilliseconds,
           expectedRunningPredicate: predicate,
           peerGenerationValidator: validator
         ))
@@ -171,10 +172,12 @@ package struct ProductM2ControlAdapter: Sendable {
     beginStart:
       @escaping @Sendable (
         VendorCharonStartSnapshot,
+        Int,
         @escaping @Sendable () async -> Bool
       ) -> ProductM2PendingStart,
     emergencyStop:
       @escaping @Sendable (
+        Int,
         @escaping @Sendable () async -> Bool,
         @escaping @Sendable () async -> Bool
       ) async -> ProductM2ControlReceipt
@@ -185,16 +188,22 @@ package struct ProductM2ControlAdapter: Sendable {
 
   package func beginStart(
     snapshot: VendorCharonStartSnapshot,
+    timeoutMilliseconds: Int,
     peerGenerationValidator: @escaping @Sendable () async -> Bool
   ) -> ProductM2PendingStart {
-    beginOperation(snapshot, peerGenerationValidator)
+    beginOperation(snapshot, timeoutMilliseconds, peerGenerationValidator)
   }
 
   package func emergencyStop(
+    timeoutMilliseconds: Int,
     expectedRunningPredicate: @escaping @Sendable () async -> Bool,
     peerGenerationValidator: @escaping @Sendable () async -> Bool
   ) async -> ProductM2ControlReceipt {
-    await emergencyOperation(expectedRunningPredicate, peerGenerationValidator)
+    await emergencyOperation(
+      timeoutMilliseconds,
+      expectedRunningPredicate,
+      peerGenerationValidator
+    )
   }
 }
 

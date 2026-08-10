@@ -1,7 +1,13 @@
 import Foundation
 
 package protocol BoundedVendorHelperGenerationObserving: Sendable {
-  func observe() async -> VendorHelperGenerationSnapshot
+  func observe(timeoutMilliseconds: Int) async -> VendorHelperGenerationSnapshot
+}
+
+extension BoundedVendorHelperGenerationObserving {
+  package func observe() async -> VendorHelperGenerationSnapshot {
+    await observe(timeoutMilliseconds: 2_000)
+  }
 }
 
 /// Reads the fixed charon launchd service through the shared bounded command
@@ -20,8 +26,14 @@ package struct InstalledBoundedVendorHelperGenerationObserver:
     self.runner = runner
   }
 
-  package func observe() async -> VendorHelperGenerationSnapshot {
-    let result = await runner.run(.helperGeneration)
+  package func observe(
+    timeoutMilliseconds: Int
+  ) async -> VendorHelperGenerationSnapshot {
+    precondition((1...2_000).contains(timeoutMilliseconds))
+    let result = await runner.run(
+      .helperGeneration,
+      timeoutMilliseconds: timeoutMilliseconds
+    )
     guard result.succeeded,
       !result.stdout.contains(0),
       let output = String(data: result.stdout, encoding: .utf8)

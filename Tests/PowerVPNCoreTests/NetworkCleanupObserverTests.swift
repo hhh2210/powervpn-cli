@@ -9,10 +9,11 @@ import Testing
     let runner = FixtureNetworkCleanupRunner([.helperGeneration: [helper]])
     let generation = await InstalledBoundedVendorHelperGenerationObserver(
       runner: runner
-    ).observe()
+    ).observe(timeoutMilliseconds: 317)
 
     #expect(generation.exactInactive)
     #expect(runner.observedCommands == [.helperGeneration])
+    #expect(runner.observedTimeouts == [317])
   }
 
   @Test func boundedGenerationObserverFailsClosedWithoutOutput() async {
@@ -27,12 +28,12 @@ import Testing
       killRequested: false,
       reaped: true
     )
-    let observer = InstalledBoundedVendorHelperGenerationObserver(
-      runner: FixtureNetworkCleanupRunner([.helperGeneration: [failed]])
-    )
+    let runner = FixtureNetworkCleanupRunner([.helperGeneration: [failed]])
+    let observer = InstalledBoundedVendorHelperGenerationObserver(runner: runner)
     let generation = await observer.observe()
 
     #expect(!generation.launchdObserved)
+    #expect(runner.observedTimeouts == [2_000])
     #expect(!String(describing: generation).contains(marker))
   }
 
@@ -52,6 +53,7 @@ import Testing
     #expect(snapshot.vendorProcesses.isObserved)
     #expect(snapshot.vendorProcesses.charonProcessCount == 0)
     #expect(snapshot.helperGeneration.exactInactive)
+    #expect(runner.observedTimeouts == Array(repeating: 2_000, count: 9))
     #expect(
       runner.observedCommands == [
         .helperGeneration, .surgeProcesses, .defaultRoute, .dns, .interfaces,
@@ -72,6 +74,7 @@ import Testing
       #expect((1...8_388_608).contains(request.stdoutLimitBytes))
       #expect(request.stderrLimitBytes == 65_536)
       #expect(request.timeoutMilliseconds == 2_000)
+      #expect(command.request(timeoutMilliseconds: 317).timeoutMilliseconds == 317)
       #expect(!forbidden.contains(URL(fileURLWithPath: request.executable).lastPathComponent))
     }
   }
@@ -149,14 +152,19 @@ final class FixtureNetworkCleanupRunner: @unchecked Sendable,
   private let lock = NSLock()
   private var responses: [NetworkCleanupCommand: [BoundedCommandResult]]
   private var calls: [NetworkCleanupCommand] = []
+  private var timeouts: [Int] = []
 
   init(_ responses: [NetworkCleanupCommand: [BoundedCommandResult]]) {
     self.responses = responses
   }
 
-  func run(_ command: NetworkCleanupCommand) async -> BoundedCommandResult {
+  func run(
+    _ command: NetworkCleanupCommand,
+    timeoutMilliseconds: Int
+  ) async -> BoundedCommandResult {
     lock.withLock {
       calls.append(command)
+      timeouts.append(timeoutMilliseconds)
       guard var queue = responses[command], !queue.isEmpty else {
         return .immediate(.launchFailed)
       }
@@ -167,6 +175,7 @@ final class FixtureNetworkCleanupRunner: @unchecked Sendable,
   }
 
   var observedCommands: [NetworkCleanupCommand] { lock.withLock { calls } }
+  var observedTimeouts: [Int] { lock.withLock { timeouts } }
 }
 
 func networkCleanupSuccessfulResponses() -> [NetworkCleanupCommand: [BoundedCommandResult]] {

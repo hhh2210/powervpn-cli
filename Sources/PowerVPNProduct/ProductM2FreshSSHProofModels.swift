@@ -43,6 +43,21 @@ public struct ProductM2FreshSSHProofEvidence: Encodable, Equatable, Sendable {
     self.timedOut = timedOut
     self.cancelled = cancelled
   }
+
+  package static func timedOut(target: ProductM2SSHTarget) -> Self {
+    Self(
+      target: target,
+      outcome: .timedOut,
+      processStarted: false,
+      processReaped: false,
+      exitStatusZero: false,
+      challengeMatched: false,
+      standardOutputWithinLimit: true,
+      standardErrorWithinLimit: true,
+      timedOut: true,
+      cancelled: false
+    )
+  }
 }
 
 package struct ProductM2FreshSSHProcessResult: Sendable {

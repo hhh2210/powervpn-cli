@@ -62,7 +62,7 @@ On this Mac they currently establish:
   in cancellation, timeout or generation mismatch, Core now transfers an
   opaque cleanup-only capability over that same non-reconnecting XPC session.
   Product attempts its fixed `stop_connection` exactly once before considering
-  authenticated emergency cleanup; report schema 6 distinguishes this as
+  authenticated emergency cleanup; report schema 7 distinguishes this as
   `same_session_provisional_stop` rather than claiming an active lease.
 
 The four passive M1 commands contact no server, read no TTY credential and send
@@ -91,6 +91,18 @@ if a source wrapper subsequently invokes its callback again or throws. Close
 revokes the capability and erases app-owned material before its first await.
 The native Portal path exists only as an explicitly injected adapter.
 
+M2 now derives every stage from one monotonic budget created only after the
+TTY approval succeeds. New helper mutation is cut off at 65 seconds; control
+cleanup, authorization close, after-state verification and the final report
+have absolute cutoffs at 73, 94, 118 and 120 seconds. Each Core observation
+shrinks its command timeout from the same remaining stage budget. Cancellation
+before authorization result cannot start the provider, and the final
+`start_connection` gate is checked again inside the scoped snapshot borrow at
+the irreversible submission point. Cleanup is cancellation-shielded, retains
+the same-session provisional stop authority, and preserves late receipts while
+refusing to call them verified. A deadline report maps to exit `124`, while
+unproven cleanup retains the higher-priority exit `74`.
+
 The installed app currently supplies no legitimate `vendor_once` provider.
 Its signed bundle `resource.xml` contains static resource-shaped template data,
 but it is build-time material rather than a current-user authenticated
@@ -116,11 +128,13 @@ default-provider gate (`exit 69`, `outcome=provider_unavailable`,
 `runtimeInvoked=false`). No Portal request, `start_connection`, SSH connection
 or network mutation ran. The product is therefore not yet a usable VPN and the
 Goal remains **ACTIVE**. The first blocker is the missing authorized-resource
-provider. A second supervisor blocker is the lack of one monotonic absolute
-budget spanning acquisition, mutation, cleanup and report: the current
-120-second cancellation trigger is cooperative and is not claimed as a hard
-wall-clock guarantee. Fresh explicit approval will be required only after both
-offline blockers are closed and immediately before the first bounded M2 live
+provider. The staged supervisor budget is now implemented and synthetically
+verified; its 120-second guarantee requires every future production provider
+to satisfy the bounded/cancellable contract. The product intentionally does
+not use a hard process kill that could abandon cleanup, and cannot guarantee a
+report after `SIGKILL`, an uninterruptible kernel wait, or a dependency that
+violates that contract. Fresh explicit approval will be required only after a
+lawful provider exists and immediately before the first bounded M2 live
 transaction.
 
 ## Development
@@ -141,7 +155,9 @@ not choose or run a live operation by default.
 
 Product JSON commands use exit `0` when ready, `2` for a completed degraded
 observation, `64` for invalid product-command grammar, and `69` when a required
-local provider is unavailable.
+local provider is unavailable. The M2 command additionally uses `74` when
+cleanup is unproven and `124` when its absolute report deadline is exceeded
+without a higher-priority cleanup failure.
 
 ## Archived evidence history
 

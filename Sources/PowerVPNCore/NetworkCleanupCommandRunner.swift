@@ -10,7 +10,8 @@ enum NetworkCleanupCommand: Hashable, Sendable {
   case ipv6Routes
   case effectiveRoute(targetIPv4: UInt32)
 
-  var request: BoundedCommandRequest {
+  func request(timeoutMilliseconds: Int) -> BoundedCommandRequest {
+    precondition((1...2_000).contains(timeoutMilliseconds))
     let executable: String
     let arguments: [String]
     let stdoutLimit: Int
@@ -51,10 +52,14 @@ enum NetworkCleanupCommand: Hashable, Sendable {
     return BoundedCommandRequest(
       executable: executable,
       arguments: arguments,
-      timeoutMilliseconds: 2_000,
+      timeoutMilliseconds: timeoutMilliseconds,
       stdoutLimitBytes: stdoutLimit,
       stderrLimitBytes: 65_536
     )
+  }
+
+  var request: BoundedCommandRequest {
+    request(timeoutMilliseconds: 2_000)
   }
 
   static func canonicalIPv4(_ value: UInt32) -> String {
@@ -65,14 +70,26 @@ enum NetworkCleanupCommand: Hashable, Sendable {
 }
 
 protocol NetworkCleanupCommandRunning: Sendable {
-  func run(_ command: NetworkCleanupCommand) async -> BoundedCommandResult
+  func run(
+    _ command: NetworkCleanupCommand,
+    timeoutMilliseconds: Int
+  ) async -> BoundedCommandResult
+}
+
+extension NetworkCleanupCommandRunning {
+  func run(_ command: NetworkCleanupCommand) async -> BoundedCommandResult {
+    await run(command, timeoutMilliseconds: 2_000)
+  }
 }
 
 struct InstalledNetworkCleanupCommandRunner: NetworkCleanupCommandRunning {
   private let runner = BoundedCommandRunner()
 
-  func run(_ command: NetworkCleanupCommand) async -> BoundedCommandResult {
-    await runner.run(command.request)
+  func run(
+    _ command: NetworkCleanupCommand,
+    timeoutMilliseconds: Int
+  ) async -> BoundedCommandResult {
+    await runner.run(command.request(timeoutMilliseconds: timeoutMilliseconds))
   }
 }
 

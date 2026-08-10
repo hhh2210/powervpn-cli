@@ -12,6 +12,7 @@ package enum ProductM2AuthorizedResourceSelectionError: Error, Equatable, Sendab
   case catalogRejected
   case startSnapshotRejected
   case selectedRouteCoverageRejected
+  case workAborted
 }
 
 package struct ProductM2AuthorizationCloseReceipt: Equatable, Sendable {
@@ -64,15 +65,15 @@ package struct ProductM2PreparedAuthorizedResource: Sendable {
   }
 }
 
-/// Owns one immutable authorization generation. Selection and start are
-/// one-shot actor claims; provider-owned start material is erased before the
-/// first suspension in `closeAndErase()`.
+/// Owns one authorization generation; selection/start are one-shot, and close
+/// erases provider-owned material before its first suspension.
 package actor ProductM2AuthorizedResourceLease {
   package typealias Catalog = @Sendable () throws -> [ProductResourceCandidate]
   package typealias Prepare =
     @Sendable (String, UInt32) throws -> ProductM2PreparedAuthorizedResource
   package typealias EraseOwnedMaterial = @Sendable () -> Bool
-  package typealias Close = @Sendable () async -> ProductM2AuthorizationCloseReceipt
+  package typealias Close =
+    @Sendable (ProductM2StageDeadline) async -> ProductM2AuthorizationCloseReceipt
 
   private enum State { case open, closing, closed }
 
@@ -168,6 +169,7 @@ package actor ProductM2AuthorizedResourceLease {
   fileprivate func beginStart(
     selectionID: UUID,
     control: ProductM2ControlAdapter,
+    deadline: ProductM2StageDeadline,
     peerGenerationValidator: @escaping @Sendable () async -> Bool
   ) throws -> ProductM2PendingStart {
     guard state == .open else {
@@ -199,15 +201,23 @@ package actor ProductM2AuthorizedResourceLease {
         else {
           throw ProductM2AuthorizedResourceSelectionError.startSnapshotRejected
         }
+        guard !Task.isCancelled,
+          let timeoutMilliseconds = deadline.remainingMilliseconds(cappedAt: 2_000)
+        else {
+          throw ProductM2AuthorizedResourceSelectionError.workAborted
+        }
         pending = control.beginStart(
           snapshot: snapshot,
+          timeoutMilliseconds: timeoutMilliseconds,
           peerGenerationValidator: peerGenerationValidator
         )
       }
+    } catch let error as ProductM2AuthorizedResourceSelectionError {
+      // Submission linearizes mutation; wrapper replay/post-call throws cannot erase it.
+      if let pending { return pending }
+      if error == .workAborted { throw error }
+      throw ProductM2AuthorizedResourceSelectionError.startSnapshotRejected
     } catch {
-      // Submission is the irreversible linearization point. A source wrapper
-      // must not erase that fact by invoking the body again or throwing after
-      // the first successful invocation.
       if let pending { return pending }
       throw ProductM2AuthorizedResourceSelectionError.startSnapshotRejected
     }
@@ -217,7 +227,9 @@ package actor ProductM2AuthorizedResourceLease {
     return pending
   }
 
-  package func closeAndErase() async -> ProductM2AuthorizationCloseReceipt {
+  package func closeAndErase(
+    deadline: ProductM2StageDeadline
+  ) async -> ProductM2AuthorizationCloseReceipt {
     guard state == .open else { return .alreadyClosed }
     state = .closing
     readCatalog = nil
@@ -235,7 +247,7 @@ package actor ProductM2AuthorizedResourceLease {
     self.close = nil
 
     let sourceReceipt =
-      await close?()
+      await close?(deadline)
       ?? ProductM2AuthorizationCloseReceipt(
         outcome: .rejected,
         ownedMaterialErased: false,
@@ -273,11 +285,13 @@ package struct ProductM2AuthorizedResourceSelection: Sendable {
 
   package func beginStart(
     control: ProductM2ControlAdapter,
+    deadline: ProductM2StageDeadline,
     peerGenerationValidator: @escaping @Sendable () async -> Bool
   ) async throws -> ProductM2PendingStart {
     try await lease.beginStart(
       selectionID: selectionID,
       control: control,
+      deadline: deadline,
       peerGenerationValidator: peerGenerationValidator
     )
   }

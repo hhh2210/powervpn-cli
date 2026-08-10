@@ -16,7 +16,7 @@ import Testing
     let (report, trace) = try await run(plan: .submittedFailure(startOutcome))
 
     #expect(report.startOutcome == startOutcome)
-    #expect(report.outcome == .startRejected)
+    #expect(report.outcome == (startOutcome == .cancelled ? .cancelled : .startRejected))
     #expect(report.lastGoodState == .connecting)
     #expect(report.cleanupPath == .sameSessionProvisionalStop)
     #expect(report.stopOutcome == .transportAcknowledged)
@@ -65,6 +65,41 @@ import Testing
     #expect(trace.count("emergency_stop") == 0)
   }
 
+  @Test func cancelledParentStillClassifiesRunningHelperAndEmergencyStops() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+    let dependencies = productM2TestDependencies(
+      snapshot: fixture.snapshot,
+      trace: trace,
+      plan: .submittedFailure(
+        .cancelled,
+        generation: m2RunningGeneration,
+        stopOutcome: .connectionInvalid,
+        stopRequestSent: false
+      ),
+      generationObservationHonorsCancellation: true
+    )
+    let coordinator = ProductM2ConnectOnceCoordinator(dependencies: dependencies)
+    let operation = Task {
+      await coordinator.run(
+        ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21),
+        budget: m2TestBudget()
+      )
+    }
+    let report = await operation.value
+
+    #expect(report.outcome == .cancelled)
+    #expect(report.finalState == .disconnected)
+    #expect(report.cleanupVerified)
+    #expect(report.cleanupPath == .authenticatedEmergencyStop)
+    #expect(report.stopOutcome == .connectionInvalid)
+    #expect(report.emergencyStopOutcome == .transportAcknowledged)
+    #expect(trace.count("cancelled_observe_generation") == 0)
+    #expect(trace.count("stop") == 1)
+    #expect(trace.count("emergency_stop") == 1)
+  }
+
   @Test func cleanupPathJSONMappingIsClosedAndDistinguishesAuthority() throws {
     let rawValues = Set(ProductM2CleanupPath.allCases.map(\.rawValue))
     #expect(
@@ -95,7 +130,8 @@ import Testing
       plan: plan
     )
     let report = await ProductM2ConnectOnceCoordinator(dependencies: dependencies).run(
-      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21),
+      budget: m2TestBudget()
     )
     return (report, trace)
   }

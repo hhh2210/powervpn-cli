@@ -9,7 +9,8 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
   }
 
   package func run(
-    _ request: ProductM2ConnectRequest
+    _ request: ProductM2ConnectRequest,
+    budget: ProductM2AbsoluteBudget
   ) async -> ProductM2ConnectReport {
     var execution = ProductM2Execution(
       request: request,
@@ -26,23 +27,39 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
       )
       return execution.report()
     }
+    if applyWorkAbortIfNeeded(&execution, budget: budget) {
+      return execution.report()
+    }
     guard dependencies.controlRuntimePreflightAccepted() else {
       execution.fail(.preflightBlocked, event: .preflightRejected, state: .blocked)
       return execution.report()
     }
-    let coldGeneration = await dependencies.observeGeneration()
-    guard coldGeneration.exactInactive,
-      await dependencies.preflightAccepted(coldGeneration)
-    else {
+    let coldGeneration = await dependencies.observeGeneration(budget.work)
+    if applyWorkAbortIfNeeded(&execution, budget: budget) {
+      return execution.report()
+    }
+    guard coldGeneration.exactInactive else {
+      execution.fail(.preflightBlocked, event: .preflightRejected, state: .blocked)
+      return execution.report()
+    }
+    let preflightAccepted = await dependencies.preflightAccepted(coldGeneration, budget.work)
+    if applyWorkAbortIfNeeded(&execution, budget: budget) {
+      return execution.report()
+    }
+    guard preflightAccepted else {
       execution.fail(.preflightBlocked, event: .preflightRejected, state: .blocked)
       return execution.report()
     }
     guard
       let baseline = await dependencies.captureNetworkBaseline(
         execution.networkWindow,
-        nil
+        nil,
+        budget.work
       )
     else {
+      if applyWorkAbortIfNeeded(&execution, budget: budget) {
+        return execution.report()
+      }
       execution.fail(
         .networkBaselineUnavailable,
         event: .networkBaselineUnavailable,
@@ -63,17 +80,22 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
       )
       return execution.report()
     }
-    if Task.isCancelled {
-      execution.fail(.cancelled, event: .cancelled, state: .failed)
+    if applyWorkAbortIfNeeded(&execution, budget: budget) {
       return await finish(
         &execution,
         baseline: baseline,
-        coldGeneration: coldGeneration
+        coldGeneration: coldGeneration,
+        budget: budget
       )
     }
 
     execution.lastGoodState = .authenticating
-    let acquisition = await dependencies.acquireAuthorization()
+    let acquisitionAttempt = dependencies.beginAuthorization(budget.authorization)
+    let acquisition = await withTaskCancellationHandler {
+      await acquisitionAttempt.result()
+    } onCancel: {
+      acquisitionAttempt.cancel()
+    }
     let authorizationLease: ProductM2AuthorizedResourceLease?
     switch acquisition {
     case .acquired(let source, let lease, let contacted):
@@ -94,7 +116,8 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
           &execution,
           baseline: baseline,
           coldGeneration: coldGeneration,
-          authorizationLease: lease
+          authorizationLease: lease,
+          budget: budget
         )
       }
       execution.authorizationAcquisition = .acquired
@@ -108,15 +131,21 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
       execution.authorizationAcquisition =
         normalizedFailure == .cancelled ? .cancelled : .rejected
       execution.authorizationFailure = normalizedFailure
+      let deadlineExceeded = normalizedFailure == .timedOut || !budget.work.hasRemaining
       execution.fail(
-        normalizedFailure == .cancelled ? .cancelled : .authorizationAcquisitionRejected,
-        event: normalizedFailure == .cancelled ? .cancelled : .authorizationAcquisitionRejected,
-        state: normalizedFailure == .cancelled ? .failed : .blocked
+        deadlineExceeded
+          ? .deadlineExceeded
+          : (normalizedFailure == .cancelled ? .cancelled : .authorizationAcquisitionRejected),
+        event: deadlineExceeded
+          ? .deadlineExceeded
+          : (normalizedFailure == .cancelled ? .cancelled : .authorizationAcquisitionRejected),
+        state: deadlineExceeded || normalizedFailure == .cancelled ? .failed : .blocked
       )
       return await finish(
         &execution,
         baseline: baseline,
-        coldGeneration: coldGeneration
+        coldGeneration: coldGeneration,
+        budget: budget
       )
     }
 
@@ -129,161 +158,26 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
       return await finish(
         &execution,
         baseline: baseline,
-        coldGeneration: coldGeneration
+        coldGeneration: coldGeneration,
+        budget: budget
       )
     }
-    if Task.isCancelled {
-      execution.fail(.cancelled, event: .cancelled, state: .failed)
+    if applyWorkAbortIfNeeded(&execution, budget: budget) {
       return await finish(
         &execution,
         baseline: baseline,
-        coldGeneration: coldGeneration,
-        authorizationLease: authorizationLease
-      )
-    }
-
-    let selection: ProductM2AuthorizedResourceSelection
-    do {
-      selection = try await authorizationLease.selectUnique(
-        displayName: request.resourceDisplayName,
-        requiredTargetIPv4: request.sshTarget.requiredTargetIPv4
-      )
-    } catch ProductM2AuthorizedResourceSelectionError.resourceNotFound {
-      execution.fail(.resourceNotFound, event: .resourceNotFound, state: .blocked)
-      return await finish(
-        &execution,
-        baseline: baseline,
-        coldGeneration: coldGeneration,
-        authorizationLease: authorizationLease
-      )
-    } catch ProductM2AuthorizedResourceSelectionError.resourceAmbiguous {
-      execution.fail(.resourceAmbiguous, event: .resourceAmbiguous, state: .blocked)
-      return await finish(
-        &execution,
-        baseline: baseline,
-        coldGeneration: coldGeneration,
-        authorizationLease: authorizationLease
-      )
-    } catch ProductM2AuthorizedResourceSelectionError.selectedRouteCoverageRejected {
-      execution.fail(
-        .selectedRouteCoverageRejected,
-        event: .selectedRouteCoverageRejected,
-        state: .blocked
-      )
-      return await finish(
-        &execution,
-        baseline: baseline,
-        coldGeneration: coldGeneration,
-        authorizationLease: authorizationLease
-      )
-    } catch ProductM2AuthorizedResourceSelectionError.startSnapshotRejected {
-      execution.fail(
-        .startSnapshotRejected,
-        event: .startSnapshotRejected,
-        state: .blocked
-      )
-      return await finish(
-        &execution,
-        baseline: baseline,
-        coldGeneration: coldGeneration,
-        authorizationLease: authorizationLease
-      )
-    } catch {
-      execution.fail(
-        .resourceCatalogRejected,
-        event: .resourceCatalogRejected,
-        state: .blocked
-      )
-      return await finish(
-        &execution,
-        baseline: baseline,
-        coldGeneration: coldGeneration,
-        authorizationLease: authorizationLease
-      )
-    }
-
-    execution.lastGoodState = .ready
-    if Task.isCancelled {
-      execution.fail(.cancelled, event: .cancelled, state: .failed)
-      return await finish(
-        &execution,
-        baseline: baseline,
-        coldGeneration: coldGeneration,
-        authorizationLease: authorizationLease
-      )
-    }
-
-    let selectedRoutes = selection.selectedRoutes
-
-    guard
-      let preStartBaseline = await dependencies.captureNetworkBaseline(
-        execution.networkWindow,
-        selectedRoutes
-      )
-    else {
-      execution.fail(
-        .networkBaselineUnavailable,
-        event: .networkBaselineUnavailable,
-        state: .blocked
-      )
-      return await finish(
-        &execution,
-        baseline: baseline,
-        coldGeneration: coldGeneration,
-        authorizationLease: authorizationLease
-      )
-    }
-    guard dependencies.baselineStable(baseline, preStartBaseline) else {
-      execution.fail(
-        .networkBaselineChanged,
-        event: .networkBaselineChanged,
-        state: .blocked
-      )
-      return await finish(
-        &execution,
-        baseline: preStartBaseline,
         coldGeneration: coldGeneration,
         authorizationLease: authorizationLease,
-        selectedRoutes: selectedRoutes
-      )
-    }
-    let recheckedGeneration = await dependencies.observeGeneration()
-    guard
-      ProductM2GenerationFence.sameColdGeneration(
-        coldGeneration,
-        recheckedGeneration
-      ), await dependencies.preflightAccepted(recheckedGeneration)
-    else {
-      execution.fail(
-        .generationFenceRejected,
-        event: .generationFenceRejected,
-        state: .blocked
-      )
-      return await finish(
-        &execution,
-        baseline: preStartBaseline,
-        coldGeneration: coldGeneration,
-        authorizationLease: authorizationLease,
-        selectedRoutes: selectedRoutes
-      )
-    }
-    if Task.isCancelled {
-      execution.fail(.cancelled, event: .cancelled, state: .failed)
-      return await finish(
-        &execution,
-        baseline: preStartBaseline,
-        coldGeneration: coldGeneration,
-        authorizationLease: authorizationLease,
-        selectedRoutes: selectedRoutes
+        budget: budget
       )
     }
 
-    return await startProveAndFinish(
+    return await selectPrepareAndRun(
       &execution,
-      baseline: preStartBaseline,
+      baseline: baseline,
       coldGeneration: coldGeneration,
       authorizationLease: authorizationLease,
-      selection: selection
+      budget: budget
     )
   }
 

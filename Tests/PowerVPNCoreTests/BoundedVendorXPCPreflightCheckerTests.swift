@@ -11,11 +11,13 @@ import Testing
     ])
     let runner = PreflightCommandRunner([success(preflightPS("/usr/bin/other"))])
     let evidence = await checker(runner: runner, paths: paths).check(
-      generation: preflightColdGeneration
+      generation: preflightColdGeneration,
+      timeoutMilliseconds: 613
     )
 
     #expect(evidence.safeToProbe)
     #expect(runner.commands == [.surgeProcesses])
+    #expect(runner.timeouts == [613])
     #expect(NetworkCleanupCommand.surgeProcesses.request.executable == "/bin/ps")
     #expect(
       NetworkCleanupCommand.surgeProcesses.request.arguments
@@ -28,6 +30,10 @@ import Testing
         InstalledBoundedVendorXPCPreflightChecker.dnsRecoveryPath,
         InstalledBoundedVendorXPCPreflightChecker.vendorLogPath,
       ])
+
+    let legacyRunner = PreflightCommandRunner([success(preflightPS("/usr/bin/other"))])
+    _ = await checker(runner: legacyRunner).check(generation: preflightColdGeneration)
+    #expect(legacyRunner.timeouts == [2_000])
   }
 
   @Test func exactExecutableNamesDetectGUIAndEveryVendorHelper() async {
@@ -128,17 +134,23 @@ private final class PreflightCommandRunner: @unchecked Sendable,
   private let lock = NSLock()
   private var results: [BoundedCommandResult]
   private var storedCommands: [NetworkCleanupCommand] = []
+  private var storedTimeouts: [Int] = []
 
   init(_ results: [BoundedCommandResult]) { self.results = results }
 
-  func run(_ command: NetworkCleanupCommand) async -> BoundedCommandResult {
+  func run(
+    _ command: NetworkCleanupCommand,
+    timeoutMilliseconds: Int
+  ) async -> BoundedCommandResult {
     lock.withLock {
       storedCommands.append(command)
+      storedTimeouts.append(timeoutMilliseconds)
       return results.isEmpty ? .immediate(.launchFailed) : results.removeFirst()
     }
   }
 
   var commands: [NetworkCleanupCommand] { lock.withLock { storedCommands } }
+  var timeouts: [Int] { lock.withLock { storedTimeouts } }
 }
 
 private final class PreflightPathTrace: @unchecked Sendable {

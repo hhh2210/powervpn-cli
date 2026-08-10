@@ -65,7 +65,10 @@ final class M2CancellationRuntime: @unchecked Sendable {
   private var invocations = 0
   private var cancellations = 0
 
-  func run(_ request: ProductM2ConnectRequest) async -> ProductM2ConnectReport {
+  func run(
+    _ request: ProductM2ConnectRequest,
+    budget _: ProductM2AbsoluteBudget
+  ) async -> ProductM2ConnectReport {
     lock.withLock { invocations += 1 }
     started.signal()
     do { try await Task.sleep(for: .seconds(5)) } catch {

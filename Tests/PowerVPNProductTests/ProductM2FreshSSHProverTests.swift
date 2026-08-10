@@ -11,7 +11,7 @@ import Testing
     let prover = ProductM2FreshSSHProver(
       homeDirectory: "/Users/tester",
       generateChallenge: { challenge },
-      execute: { command in
+      execute: { command, _ in
         await trace.record(command)
         return ProductM2FreshSSHProcessResult(
           processStarted: true,
@@ -20,7 +20,7 @@ import Testing
         )
       }
     )
-    let evidence = await prover.prove(.thu52)
+    let evidence = await prover.prove(.thu52, timeoutMilliseconds: 15_000)
     #expect(evidence.outcome == .proven)
     #expect(await trace.count == 1)
     #expect(await trace.targets == [.thu52])
@@ -31,13 +31,13 @@ import Testing
     let prover = ProductM2FreshSSHProver(
       homeDirectory: "/Users/tester",
       generateChallenge: { challenge },
-      execute: { command in
+      execute: { command, _ in
         await trace.record(command)
         return ProductM2FreshSSHProcessResult(
           processStarted: true, exitStatus: 255)
       }
     )
-    let evidence = await prover.prove(.thu21)
+    let evidence = await prover.prove(.thu21, timeoutMilliseconds: 15_000)
     #expect(evidence.outcome == .rejected)
     #expect(evidence.automaticRetryCount == 0)
     #expect(await trace.count == 1)
@@ -53,11 +53,11 @@ import Testing
           Issue.record("challenge generation must not run")
           return self.challenge
         },
-        execute: { command in
+        execute: { command, _ in
           await trace.record(command)
           return ProductM2FreshSSHProcessResult(processStarted: true, exitStatus: 0)
         }
-      ).prove(.thu21)
+      ).prove(.thu21, timeoutMilliseconds: 15_000)
     }
     let evidence = await task.value
     #expect(evidence.outcome == .cancelled)
@@ -69,12 +69,12 @@ import Testing
     let prover = ProductM2FreshSSHProver(
       homeDirectory: "/Users/tester",
       generateChallenge: { throw FreshSSHTestError.failed },
-      execute: { command in
+      execute: { command, _ in
         await trace.record(command)
         return ProductM2FreshSSHProcessResult(processStarted: true, exitStatus: 0)
       }
     )
-    let evidence = await prover.prove(.thu21)
+    let evidence = await prover.prove(.thu21, timeoutMilliseconds: 15_000)
     #expect(evidence.outcome == .rejected)
     #expect(!evidence.processStarted)
     #expect(!evidence.challengeMatched)
@@ -87,7 +87,7 @@ import Testing
     let evidence = await ProductM2FreshSSHProver(
       homeDirectory: "/Users/tester",
       sshAuthSocket: "relative-agent-socket"
-    ).prove(.thu21)
+    ).prove(.thu21, timeoutMilliseconds: 15_000)
     #expect(evidence.outcome == .rejected)
     #expect(!evidence.processStarted)
     #expect(!evidence.processReaped)

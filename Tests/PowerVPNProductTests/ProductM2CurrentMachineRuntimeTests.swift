@@ -17,7 +17,7 @@ import Testing
       generationObserver: CurrentMachineGenerationObserver(trace: trace),
       preflightChecker: CurrentMachinePreflightChecker(trace: trace, accepted: false),
       networkObserver: CurrentMachineNetworkObserver(trace: trace),
-      authorizationProvider: ProductM2PortalAdapter {
+      authorizationProvider: ProductM2PortalAdapter { _ in
         trace.record("portal")
         fatalError("preflight rejection must not acquire native authorization")
       },
@@ -25,7 +25,7 @@ import Testing
       freshSSHProver: ProductM2FreshSSHProver(
         homeDirectory: "/tmp",
         generateChallenge: { "00000000000000000000000000000000" },
-        execute: { _ in
+        execute: { _, _ in
           trace.record("ssh")
           return ProductM2FreshSSHProcessResult(processStarted: false, exitStatus: nil)
         }
@@ -34,7 +34,8 @@ import Testing
 
     #expect(trace.events.isEmpty)
     let report = await runtime.run(
-      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21),
+      budget: m2TestBudget()
     )
 
     #expect(report.outcome == .preflightBlocked)
@@ -61,7 +62,7 @@ import Testing
       freshSSHProver: ProductM2FreshSSHProver(
         homeDirectory: "/tmp",
         generateChallenge: { "00000000000000000000000000000000" },
-        execute: { _ in
+        execute: { _, _ in
           trace.record("ssh")
           return ProductM2FreshSSHProcessResult(processStarted: false, exitStatus: nil)
         }
@@ -69,10 +70,11 @@ import Testing
     )
 
     let report = await runtime.run(
-      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21),
+      budget: m2TestBudget()
     )
 
-    #expect(report.schemaVersion == 6)
+    #expect(report.schemaVersion == 7)
     #expect(report.outcome == .authorizationAcquisitionRejected)
     #expect(report.firstBadEvent == .authorizationAcquisitionRejected)
     #expect(report.authorizationSource == .vendorOnce)
@@ -104,7 +106,7 @@ private final class CurrentMachineRuntimeTrace: @unchecked Sendable {
 private struct CurrentMachineGenerationObserver: BoundedVendorHelperGenerationObserving {
   let trace: CurrentMachineRuntimeTrace
 
-  func observe() async -> VendorHelperGenerationSnapshot {
+  func observe(timeoutMilliseconds: Int) async -> VendorHelperGenerationSnapshot {
     trace.record("generation")
     return m2ColdGeneration
   }
@@ -115,7 +117,8 @@ private struct CurrentMachinePreflightChecker: BoundedVendorXPCPreflightChecking
   let accepted: Bool
 
   func check(
-    generation: VendorHelperGenerationSnapshot
+    generation: VendorHelperGenerationSnapshot,
+    timeoutMilliseconds: Int
   ) async -> VendorXPCPreflightEvidence {
     trace.record("preflight")
     return VendorXPCPreflightEvidence(
@@ -134,7 +137,8 @@ private struct CurrentMachineNetworkObserver: NetworkCleanupObserving {
 
   func capture(
     window: NetworkCleanupCaptureWindow,
-    selectedRoutes: VendorCharonSelectedRouteMatcher?
+    selectedRoutes: VendorCharonSelectedRouteMatcher?,
+    timeoutMilliseconds: Int
   ) async -> NetworkCleanupSnapshot {
     trace.record("network")
     fatalError("preflight rejection must not capture network state")

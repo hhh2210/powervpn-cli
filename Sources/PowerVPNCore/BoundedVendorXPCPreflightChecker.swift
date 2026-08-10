@@ -4,8 +4,17 @@ import Foundation
 
 package protocol BoundedVendorXPCPreflightChecking: Sendable {
   func check(
-    generation: VendorHelperGenerationSnapshot
+    generation: VendorHelperGenerationSnapshot,
+    timeoutMilliseconds: Int
   ) async -> VendorXPCPreflightEvidence
+}
+
+extension BoundedVendorXPCPreflightChecking {
+  package func check(
+    generation: VendorHelperGenerationSnapshot
+  ) async -> VendorXPCPreflightEvidence {
+    await check(generation: generation, timeoutMilliseconds: 2_000)
+  }
 }
 
 package enum VendorXPCPreflightPathObservation: Equatable, Sendable {
@@ -47,9 +56,14 @@ package struct InstalledBoundedVendorXPCPreflightChecker:
   }
 
   package func check(
-    generation: VendorHelperGenerationSnapshot
+    generation: VendorHelperGenerationSnapshot,
+    timeoutMilliseconds: Int
   ) async -> VendorXPCPreflightEvidence {
-    let processResult = await runner.run(.surgeProcesses)
+    precondition((1...2_000).contains(timeoutMilliseconds))
+    let processResult = await runner.run(
+      .surgeProcesses,
+      timeoutMilliseconds: timeoutMilliseconds
+    )
     let presence = Self.processPresence(processResult)
     let guiAbsent = presence.map { !$0.gui } ?? false
     let helperAbsent = presence.map { !$0.charon } ?? false
