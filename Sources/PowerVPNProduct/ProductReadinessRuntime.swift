@@ -90,7 +90,7 @@ public struct InstalledProductReadinessObserver: ProductReadinessObserving {
 }
 
 public struct ProductReadinessRuntime: Sendable {
-  private let observer: any ProductReadinessObserving
+  let observer: any ProductReadinessObserving
 
   public init(
     observer: any ProductReadinessObserving = InstalledProductReadinessObserver()
@@ -159,7 +159,7 @@ public struct ProductReadinessRuntime: Sendable {
 
   public func resources() -> ProductResourcesReport {
     let observation = observer.observe()
-    let names = observation.resourceCandidates.map(\.name)
+    let resources = observation.resourceCandidates.map(\.summary)
     let validCatalog = resourceCatalogValid(observation.resourceCandidates)
     let available =
       observation.resourceSource == .authenticatedPortalSnapshot
@@ -168,12 +168,12 @@ public struct ProductReadinessRuntime: Sendable {
       productState: available ? .ready : .blocked,
       profileSource: observation.profileSource,
       resourceSource: observation.resourceSource,
-      selectableResourceCount: names.count,
-      selectableResources: names,
+      selectableResourceCount: resources.count,
+      selectableResources: resources,
       blocker: available
         ? nil
         : (observation.resourceSource == .unavailable
-          ? .authenticatedPortalSnapshotNotExposed : .resourceCatalogInvalid)
+          ? .authenticatedPortalSnapshotUnavailable : .resourceCatalogInvalid)
     )
   }
 
@@ -189,29 +189,32 @@ public struct ProductReadinessRuntime: Sendable {
       observation.resourceSource == .authenticatedPortalSnapshot
         && catalogValid && observation.resourceCandidates.count == 1
       ? observation.resourceCandidates[0] : nil
-    let fields = VendorSnapshotField.allCases.map { field in
-      let available = candidate?.availableSnapshotFields.contains(field) == true
-      return VendorSnapshotFieldReport(
-        field: field,
-        required: field.required,
-        availability: field.generatedEnvelope ? .generated : (available ? .available : .missing),
-        source: field.generatedEnvelope
-          ? .generatedConstant
-          : (available ? .authenticatedPortalSnapshot : .unavailable)
+    let readiness =
+      candidate?.fieldReports
+      ?? VendorCharonStartValidator.validate(VendorCharonStartCandidate()).fieldReports
+    let fields = readiness.map { report in
+      VendorSnapshotFieldReport(
+        field: report.field,
+        requirement: report.requirement,
+        availability: report.availability,
+        sources: report.sources,
+        firstIssuePath: report.firstIssuePath
       )
     }
-    let firstMissing = fields.first { $0.required && $0.availability == .missing }?.field
+    let firstMissing =
+      candidate?.firstMissingField
+      ?? readiness.first { $0.availability.blocksSnapshot }?.field
     let complete =
-      firstMissing == nil
+      candidate?.snapshotComplete == true
       && observation.resourceSource == .authenticatedPortalSnapshot
       && candidate != nil
     let blocker: ProductBlocker?
     if complete {
       blocker = nil
     } else if observation.resourceSource == .unavailable {
-      blocker = .authenticatedPortalSnapshotNotExposed
+      blocker = .authenticatedPortalSnapshotUnavailable
     } else if observation.resourceCandidates.isEmpty {
-      blocker = .authenticatedPortalSnapshotNotExposed
+      blocker = .authenticatedPortalSnapshotUnavailable
     } else if !catalogValid {
       blocker = .resourceCatalogInvalid
     } else if observation.resourceCandidates.count != 1 {
@@ -223,7 +226,7 @@ public struct ProductReadinessRuntime: Sendable {
       productState: complete ? .ready : .blocked,
       profileSource: observation.profileSource,
       resourceSource: observation.resourceSource,
-      selectedResource: candidate?.name,
+      selectedResource: candidate?.summary,
       fields: fields,
       snapshotComplete: complete,
       firstMissingField: firstMissing,
@@ -267,8 +270,13 @@ public struct ProductReadinessRuntime: Sendable {
     _ candidates: [ProductResourceCandidate]
   ) -> Bool {
     guard !candidates.isEmpty,
-      candidates.allSatisfy({ !$0.name.isEmpty && $0.name.utf8.count <= 256 })
+      candidates.allSatisfy({
+        !$0.summary.handle.isEmpty
+          && $0.summary.handle.utf8.count <= 256
+          && !$0.summary.displayName.isEmpty
+          && $0.summary.displayName.utf8.count <= 256
+      })
     else { return false }
-    return Set(candidates.map(\.name)).count == candidates.count
+    return Set(candidates.map(\.summary.handle)).count == candidates.count
   }
 }

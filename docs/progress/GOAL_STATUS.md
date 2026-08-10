@@ -990,26 +990,36 @@ profile, zero selectable production resources, and `common.sessionid` as the
 first missing required vendor-snapshot field.
 
 Production code changed: active development moved to `rescue-mvp`; the frozen
-evidence branch remains `rescue-state-machine@b1908f2`. A new
-`PowerVPNProduct` target combines Core installation/helper inspection with
-Portal installed-profile discovery. CLI parsing accepts only the four exact M1
-argument sequences and outputs sorted, value-free JSON. Pure installation
-inspection no longer reads the historical tunnel log. Snapshot completeness is
-scoped to exactly one authorized resource candidate rather than a cross-resource
-field union, and `doctor=ready` additionally requires GUI absence, observable
-helper generation, safe preflight and current direct-XPC reachability.
+evidence branch remains `rescue-state-machine@b1908f2`. Portal now exposes a
+generation-bound, memory-only authenticated lease and a scoped resource-tree
+borrow. Product retains only the exact `NC_RESOURCE/name` catalog label as a
+display name and binds it to a snapshot-stable opaque handle; helper/session,
+route and PSK values are not serialized. Core now owns the nested typed charon
+start contract, ordered value-free field reports, an opaque non-Codable
+snapshot proof and a package-only lineage token. Every value in a complete
+candidate must share that same resource lineage. This replaces the former
+`Set(allCases)` readiness model: every tunnel and every materialized route must
+be complete within one candidate. Product maps candidates independently from
+single `NC_RESOURCE` nodes and never unions sibling resources. CLI parsing
+continues to accept only the four exact M1 argument sequences, and
+`doctor=ready` still additionally requires GUI absence, observable helper
+generation, safe preflight and current direct-XPC reachability.
 
-Live result: all four M1 observation commands ran locally. No direct XPC probe,
-helper launch, portal request, login, SSH probe, `start_connection`, route,
-DNS, interface, utun, or SA mutation ran. `doctor` and `helper status` returned
-completed degraded state; `resources` and `snapshot --dry-run` returned the
-expected unavailable-provider result.
+Live result: all four M1 observation commands ran locally. No live action,
+network request, TTY input, direct XPC probe, helper launch, login, SSH probe,
+`start_connection`, route, DNS, interface, utun, or SA mutation ran. `doctor`
+and `helper status` returned completed degraded state; `resources` and
+`snapshot --dry-run` returned the expected unavailable-provider result.
 
-Current blocker: the owned portal workflow accepts and then erases its
-authenticated response; it exposes neither a typed resource catalog nor the
-memory-only session/resource material needed by the helper. Synthetic
-correlation fixtures contain field metadata only and cannot supply
-`common.sessionid`.
+Current blocker: the default commands have no authenticated snapshot provider,
+so their first missing field remains `common.sessionid`. In the offline
+authenticated synthetic path, Product derives that field only from
+`NC_RESOURCE.TUNNEL.IKE.CLIENT.id` in the same resource generation; the Portal
+`VSG_SESSIONID` cookie is neither exposed nor used as helper material. That
+dry-run advances to the next exact missing field, `common.gateway`. The current
+resource-tree seam does not prove the raw gateway, major-version or DNS-derived
+mapping, so no complete vendor snapshot can yet be constructed. M1 is blocked
+on this product mapping and the Goal remains ACTIVE.
 
 Cleanup status: no helper process was started, launchd remained inactive, and
 the commands wrote no runtime artifact or secret-bearing file.
@@ -1017,11 +1027,12 @@ the commands wrote no runtime artifact or secret-bearing file.
 Deferred debt: remaining R2 TLS evidence findings are frozen in
 `docs/debt/R2_TLS_EVIDENCE_BACKLOG.md`; they are not M1 product gates.
 
-Next end-to-end action: design the non-Codable, explicitly erasable
-authenticated portal/resource snapshot and its Portal-to-Core mapping, or use
-one explicitly approved `onboardingMode=vendor_once` observation to identify a
-lawful installed source. Do not send a server request or start a helper until
-that action is separately approved.
+Next end-to-end action: extend the same-resource Portal-to-Core mapper only for
+newly proven raw sources, beginning with `common.gateway`, until Core returns
+one complete in-memory snapshot. If the owned response cannot prove those
+sources, use one explicitly approved `onboardingMode=vendor_once` observation
+instead of guessing. Do not send a server request or start a helper until that
+action is separately approved.
 
 Approval required: yes, immediately before any official-GUI onboarding,
 portal request, direct XPC probe, `start_connection`, SSH proof, or network

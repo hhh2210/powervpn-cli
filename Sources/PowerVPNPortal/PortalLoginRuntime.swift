@@ -6,6 +6,13 @@ public enum PortalLoginRuntime {
   public static func runCurrentMachine() async -> PortalLoginReport {
     await PortalLoginRuntimeRunner(dependencies: .currentMachine).run()
   }
+
+  /// Acquires a live, memory-only portal lease without starting a helper.
+  /// Calling this performs TTY credential input and portal network requests;
+  /// the product must obtain explicit user approval immediately beforehand.
+  package static func acquireCurrentMachine() async -> PortalSnapshotAcquisitionResult {
+    await PortalLoginRuntimeRunner(dependencies: .currentMachine).acquire()
+  }
 }
 
 struct PortalLoginRuntimeDependencies: Sendable {
@@ -48,24 +55,15 @@ struct PortalLoginRuntimeRunner: Sendable {
   let dependencies: PortalLoginRuntimeDependencies
 
   func run() async -> PortalLoginReport {
-    let factory: PortalRequestFactory
-    let transport: any PortalTransporting
-    let serial: SecureBytes
+    let prepared: PreparedPortalRuntime
     do {
-      let profile = try dependencies.discoverProfile()
-      factory = try PortalRequestFactory(
-        profile: profile,
-        operatingSystemVersion: dependencies.operatingSystemVersion()
-      )
-      transport = try dependencies.makeTransport(profile)
-      serial = try dependencies.serialReader.read()
+      prepared = try prepare()
     } catch {
       return closedReport(status: .configurationRejected)
     }
 
     if Task.isCancelled {
-      serial.erase()
-      factory.eraseSession()
+      prepared.erase()
       return closedReport(status: .cancelled)
     }
 
@@ -73,31 +71,80 @@ struct PortalLoginRuntimeRunner: Sendable {
     do {
       credentials = try dependencies.credentialReader.readCredentials()
     } catch SecureTerminalCredentialError.cancelled {
-      serial.erase()
-      factory.eraseSession()
+      prepared.erase()
       return closedReport(status: .cancelled)
     } catch {
-      serial.erase()
-      factory.eraseSession()
+      prepared.erase()
       return closedReport(status: .credentialInputRejected)
     }
 
     do {
       let workflow = try PortalLoginWorkflow(
-        factory: factory,
-        transport: transport,
+        factory: prepared.factory,
+        transport: prepared.transport,
         sleeper: dependencies.sleeper
       )
       return await workflow.run(
         credentials: credentials,
-        platformSerial: serial
+        platformSerial: prepared.serial
       )
     } catch {
       credentials.erase()
-      serial.erase()
-      factory.eraseSession()
+      prepared.erase()
       return closedReport(status: .internalFailure)
     }
+  }
+
+  func acquire() async -> PortalSnapshotAcquisitionResult {
+    let prepared: PreparedPortalRuntime
+    do {
+      prepared = try prepare()
+    } catch {
+      return .rejected(closedReport(status: .configurationRejected))
+    }
+    if Task.isCancelled {
+      prepared.erase()
+      return .rejected(closedReport(status: .cancelled))
+    }
+
+    let credentials: PortalCredentials
+    do {
+      credentials = try dependencies.credentialReader.readCredentials()
+    } catch SecureTerminalCredentialError.cancelled {
+      prepared.erase()
+      return .rejected(closedReport(status: .cancelled))
+    } catch {
+      prepared.erase()
+      return .rejected(closedReport(status: .credentialInputRejected))
+    }
+
+    do {
+      let workflow = try PortalLoginWorkflow(
+        factory: prepared.factory,
+        transport: prepared.transport,
+        sleeper: dependencies.sleeper
+      )
+      return await workflow.acquire(
+        credentials: credentials,
+        platformSerial: prepared.serial
+      )
+    } catch {
+      credentials.erase()
+      prepared.erase()
+      return .rejected(closedReport(status: .internalFailure))
+    }
+  }
+
+  private func prepare() throws -> PreparedPortalRuntime {
+    let profile = try dependencies.discoverProfile()
+    return PreparedPortalRuntime(
+      factory: try PortalRequestFactory(
+        profile: profile,
+        operatingSystemVersion: dependencies.operatingSystemVersion()
+      ),
+      transport: try dependencies.makeTransport(profile),
+      serial: try dependencies.serialReader.read()
+    )
   }
 
   private func closedReport(status: PortalLoginStatus) -> PortalLoginReport {
@@ -120,5 +167,17 @@ struct PortalLoginRuntimeRunner: Sendable {
         sessionMaterialErased: true
       )
     )
+  }
+}
+
+private struct PreparedPortalRuntime: Sendable {
+  let factory: PortalRequestFactory
+  let transport: any PortalTransporting
+  let serial: SecureBytes
+
+  func erase() {
+    serial.erase()
+    factory.eraseSession()
+    transport.cancel()
   }
 }

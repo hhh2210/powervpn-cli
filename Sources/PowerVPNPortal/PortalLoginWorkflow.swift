@@ -1,20 +1,5 @@
 import Foundation
 
-private enum PortalWorkflowStage {
-  case login, resource, delay, session, logout
-}
-
-private enum PortalWorkflowStop: Error {
-  case status(PortalLoginStatus)
-}
-
-private enum PortalPasswordOutcome {
-  case accepted
-  case acceptedWithoutUsableSession
-  case challengeRequired
-  case rejected
-}
-
 struct PortalLoginWorkflow: Sendable {
   static let sessionCheckDelaySeconds: UInt64 = 60
 
@@ -22,19 +7,26 @@ struct PortalLoginWorkflow: Sendable {
   private let transport: any PortalTransporting
   private let sleeper: any PortalSleeping
   private let logoutBounder: any PortalLogoutBounding
-  private let parser: PortalXMLStructuralParser
+  private let snapshotConsumer: any AuthenticatedPortalSnapshotConsuming
+  private let authenticationFlow: PortalAuthenticationFlow
 
   init(
     factory: PortalRequestFactory,
     transport: any PortalTransporting,
     sleeper: any PortalSleeping = ContinuousPortalSleeper(),
-    logoutBounder: any PortalLogoutBounding = TimedDetachedPortalLogoutBounder()
+    logoutBounder: any PortalLogoutBounding = TimedDetachedPortalLogoutBounder(),
+    snapshotConsumer: any AuthenticatedPortalSnapshotConsuming =
+      DiscardingAuthenticatedPortalSnapshotConsumer()
   ) throws {
     self.factory = factory
     self.transport = transport
     self.sleeper = sleeper
     self.logoutBounder = logoutBounder
-    parser = try PortalXMLStructuralParser()
+    self.snapshotConsumer = snapshotConsumer
+    authenticationFlow = try PortalAuthenticationFlow(
+      factory: factory,
+      transport: transport
+    )
   }
 
   func run(
@@ -42,48 +34,27 @@ struct PortalLoginWorkflow: Sendable {
     platformSerial: SecureBytes
   ) async -> PortalLoginReport {
     var progress = PortalWorkflowProgress()
-    var stage = PortalWorkflowStage.login
-    var authenticated = false
+    var stage = PortalWorkflowStage.authenticatedSnapshot
     var logoutAttempted = false
     var finalStatus = PortalLoginStatus.internalFailure
     let materialTracker = PortalOwnedMaterialTracker()
 
     do {
-      try Task.checkCancellation()
-      let passwordRequest = try factory.makePasswordRequest(
+      let snapshot = try await authenticationFlow.authenticateThroughResource(
         credentials: credentials,
-        platformSerial: platformSerial
-      )
-      credentials.erase()
-      platformSerial.erase()
-      progress.loginRequested = true
-      let passwordResponse = try await perform(passwordRequest, tracker: materialTracker)
-      switch try passwordOutcome(
-        passwordResponse,
-        requestURL: passwordRequest.url,
+        platformSerial: platformSerial,
+        progress: &progress,
         tracker: materialTracker
-      ) {
-      case .accepted:
-        progress.loginAccepted = true
-        authenticated = true
-      case .acceptedWithoutUsableSession:
-        progress.loginAccepted = true
-        authenticated = true
-        throw PortalWorkflowStop.status(.loginResponseRejected)
-      case .challengeRequired:
-        throw PortalWorkflowStop.status(.challengeRequired)
-      case .rejected:
-        throw PortalWorkflowStop.status(.loginRejected)
-      }
+      )
 
-      stage = .resource
-      let resourceRequest = try factory.makeResourceRequest()
-      progress.resourceListRequested = true
-      let resourceResponse = try await perform(resourceRequest, tracker: materialTracker)
-      guard try resourceAccepted(resourceResponse, tracker: materialTracker) else {
-        throw PortalWorkflowStop.status(.resourceListRejected)
+      stage = .authenticatedSnapshot
+      do {
+        try await consumeAuthenticatedSnapshot(snapshot)
+      } catch is CancellationError {
+        throw CancellationError()
+      } catch {
+        throw PortalWorkflowStop.status(.authenticatedSnapshotRejected)
       }
-      progress.resourceListAccepted = true
 
       stage = .delay
       try await sleeper.sleep(seconds: Self.sessionCheckDelaySeconds)
@@ -91,7 +62,10 @@ struct PortalLoginWorkflow: Sendable {
       stage = .session
       let sessionRequest = try factory.makeSessionCheckRequest()
       progress.sessionCheckRequested = true
-      let sessionResponse = try await perform(sessionRequest, tracker: materialTracker)
+      let sessionResponse = try await authenticationFlow.perform(
+        sessionRequest,
+        tracker: materialTracker
+      )
       guard try sessionAccepted(sessionResponse, tracker: materialTracker) else {
         throw PortalWorkflowStop.status(.sessionRejected)
       }
@@ -112,10 +86,10 @@ struct PortalLoginWorkflow: Sendable {
     } catch PortalWorkflowStop.status(let status) {
       finalStatus = status
     } catch {
-      finalStatus = status(for: error, at: stage)
+      finalStatus = PortalWorkflowErrorNormalizer.status(for: error, at: stage)
     }
 
-    if authenticated && !logoutAttempted {
+    if progress.loginAccepted && !logoutAttempted {
       logoutAttempted = true
       let cleanup = await boundedLogoutAttempt(tracker: materialTracker)
       progress.logoutRequested = cleanup.requested
@@ -125,9 +99,113 @@ struct PortalLoginWorkflow: Sendable {
     credentials.erase()
     platformSerial.erase()
     factory.eraseSession()
-    let cleanup = materialTracker.snapshot
-    return PortalLoginReport(
+    return makeReport(
       status: finalStatus,
+      progress: progress,
+      credentials: credentials,
+      platformSerial: platformSerial,
+      tracker: materialTracker
+    )
+  }
+
+  func acquire(
+    credentials: PortalCredentials,
+    platformSerial: SecureBytes
+  ) async -> PortalSnapshotAcquisitionResult {
+    var progress = PortalWorkflowProgress()
+    let tracker = PortalOwnedMaterialTracker()
+    do {
+      let snapshot = try await authenticationFlow.authenticateThroughResource(
+        credentials: credentials,
+        platformSerial: platformSerial,
+        progress: &progress,
+        tracker: tracker
+      )
+      credentials.erase()
+      platformSerial.erase()
+      let cleanup = tracker.snapshot
+      guard !Task.isCancelled,
+        credentials.usernameByteCount == 0,
+        credentials.passwordByteCount == 0,
+        platformSerial.count == 0,
+        cleanup.requests,
+        cleanup.responses,
+        factory.retainedSessionByteCount > 0,
+        snapshot.isAccessible
+      else {
+        snapshot.erase()
+        let logout = await boundedLogoutAttempt(tracker: tracker)
+        progress.logoutRequested = logout.requested
+        progress.logoutAccepted = logout.accepted
+        factory.eraseSession()
+        return .rejected(
+          makeReport(
+            status: Task.isCancelled ? .cancelled : .internalFailure,
+            progress: progress,
+            credentials: credentials,
+            platformSerial: platformSerial,
+            tracker: tracker
+          )
+        )
+      }
+      return .acquired(
+        AuthenticatedPortalLease(
+          snapshot: snapshot,
+          factory: factory,
+          transport: transport,
+          logoutBounder: logoutBounder
+        )
+      )
+    } catch PortalWorkflowStop.status(let status) {
+      credentials.erase()
+      platformSerial.erase()
+      if progress.loginAccepted {
+        let logout = await boundedLogoutAttempt(tracker: tracker)
+        progress.logoutRequested = logout.requested
+        progress.logoutAccepted = logout.accepted
+      }
+      factory.eraseSession()
+      return .rejected(
+        makeReport(
+          status: status,
+          progress: progress,
+          credentials: credentials,
+          platformSerial: platformSerial,
+          tracker: tracker
+        )
+      )
+    } catch {
+      credentials.erase()
+      platformSerial.erase()
+      if progress.loginAccepted {
+        let logout = await boundedLogoutAttempt(tracker: tracker)
+        progress.logoutRequested = logout.requested
+        progress.logoutAccepted = logout.accepted
+      }
+      factory.eraseSession()
+      let stage: PortalWorkflowStage = progress.loginAccepted ? .resource : .login
+      return .rejected(
+        makeReport(
+          status: PortalWorkflowErrorNormalizer.status(for: error, at: stage),
+          progress: progress,
+          credentials: credentials,
+          platformSerial: platformSerial,
+          tracker: tracker
+        )
+      )
+    }
+  }
+
+  private func makeReport(
+    status: PortalLoginStatus,
+    progress: PortalWorkflowProgress,
+    credentials: PortalCredentials,
+    platformSerial: SecureBytes,
+    tracker: PortalOwnedMaterialTracker
+  ) -> PortalLoginReport {
+    let cleanup = tracker.snapshot
+    return PortalLoginReport(
+      status: status,
       operations: progress.evidence,
       ownedMaterial: PortalOwnedMaterialEvidence(
         credentialsErased: credentials.usernameByteCount == 0
@@ -140,65 +218,11 @@ struct PortalLoginWorkflow: Sendable {
     )
   }
 
-  private func perform(
-    _ request: PortalHTTPRequest,
-    tracker: PortalOwnedMaterialTracker
-  ) async throws -> PortalHTTPResponse {
-    tracker.beginRequest(request)
-    do {
-      let response = try await transport.perform(request)
-      request.erase()
-      tracker.observeErasedRequest(request)
-      tracker.beginResponse(response)
-      return response
-    } catch {
-      request.erase()
-      tracker.observeErasedRequest(request)
-      throw error
-    }
-  }
-
-  private func passwordOutcome(
-    _ response: PortalHTTPResponse,
-    requestURL: URL,
-    tracker: PortalOwnedMaterialTracker
-  ) throws -> PortalPasswordOutcome {
-    defer {
-      response.erase()
-      tracker.observeErasedResponse(response)
-    }
-    guard response.statusCode == 200 else {
-      throw PortalWorkflowStop.status(.loginResponseRejected)
-    }
-    let document = try parse(response)
-    defer { document.erase() }
-    switch try LeadSecPortalProfile.passwordDecision(document) {
-    case .accepted:
-      do {
-        try factory.acceptPasswordSession(from: response, passwordURL: requestURL)
-        return .accepted
-      } catch {
-        return .acceptedWithoutUsableSession
-      }
-    case .challengeRequired:
-      return .challengeRequired
-    case .rejected:
-      return .rejected
-    }
-  }
-
-  private func resourceAccepted(
-    _ response: PortalHTTPResponse,
-    tracker: PortalOwnedMaterialTracker
-  ) throws -> Bool {
-    defer {
-      response.erase()
-      tracker.observeErasedResponse(response)
-    }
-    guard response.statusCode == 200 else { return false }
-    let document = try parse(response)
-    defer { document.erase() }
-    return try LeadSecPortalProfile.resourceAccepted(document)
+  private func consumeAuthenticatedSnapshot(
+    _ snapshot: AuthenticatedPortalSnapshot
+  ) async throws {
+    defer { snapshot.erase() }
+    try await snapshotConsumer.consume(snapshot)
   }
 
   private func sessionAccepted(
@@ -210,14 +234,9 @@ struct PortalLoginWorkflow: Sendable {
       tracker.observeErasedResponse(response)
     }
     guard response.statusCode == 200 else { return false }
-    let document = try parse(response)
+    let document = try authenticationFlow.parse(response)
     defer { document.erase() }
     return try LeadSecPortalProfile.sessionDecision(document) == .accepted
-  }
-
-  private func parse(_ response: PortalHTTPResponse) throws -> PortalXMLDocument {
-    let body = try response.withBodyBytes { try SecureBytes(copying: $0) }
-    return try parser.parse(consuming: body)
   }
 
   private func boundedLogoutAttempt(
@@ -257,7 +276,7 @@ struct PortalLoginWorkflow: Sendable {
       return
     }
     do {
-      let response = try await perform(request, tracker: tracker)
+      let response = try await authenticationFlow.perform(request, tracker: tracker)
       response.erase()
       tracker.observeErasedResponse(response)
       if response.statusCode == 200 { observation.markAccepted() }
@@ -270,25 +289,4 @@ struct PortalLoginWorkflow: Sendable {
     }
   }
 
-  private func status(
-    for error: Error,
-    at stage: PortalWorkflowStage
-  ) -> PortalLoginStatus {
-    if Task.isCancelled || error is CancellationError { return .cancelled }
-    if let transportError = error as? PortalTransportError {
-      switch transportError {
-      case .cancelled: return .cancelled
-      case .trustRejected: return .tlsRejected
-      case .redirectRejected, .originMismatch: return .redirectRejected
-      default: break
-      }
-    }
-    switch stage {
-    case .login: return error is PortalTransportError ? .transportRejected : .loginResponseRejected
-    case .resource: return .resourceListRejected
-    case .delay: return .cancelled
-    case .session: return .sessionRejected
-    case .logout: return .logoutRejected
-    }
-  }
 }

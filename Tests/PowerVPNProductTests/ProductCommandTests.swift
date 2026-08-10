@@ -21,7 +21,13 @@ import Testing
         as? [String: Any]
     )
 
-    #expect(object["schemaVersion"] as? Int == 1)
+    let expectedSchemaVersion =
+      switch arguments.first {
+      case "resources": 2
+      case "snapshot": 3
+      default: 1
+      }
+    #expect(object["schemaVersion"] as? Int == expectedSchemaVersion)
     #expect(object["productState"] as? String != nil)
     #expect(result.standardOutput.first == "{")
     #expect(result.standardOutput.contains("synthetic-secret") == false)

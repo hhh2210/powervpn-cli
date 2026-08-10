@@ -109,6 +109,24 @@ order. It does not yet prove which raw portal response field produced every
 helper field, or that a particular runtime session successfully traversed the
 path.
 
+Subsequent static reconstruction of
+`+[VSGParseDiffSource parseSp2SourceWithGeteway:dns:majorVersion:property:]`
+at `0x100068210` narrows this boundary without reading any values:
+
+- charon `common.sessionid` is read at `0x10006876b..0x1000687d3` from
+  `NC_RESOURCE.TUNNEL.IKE.CLIENT.id` in the same resource object. It is not the
+  Portal `VSG_SESSIONID` cookie;
+- `common.psk` is sourced from `TUNNEL.IKE.PSK.key`, while the IKE subtree also
+  supplies the proposal, lifetime and port inputs consumed by the builder;
+- `common.gateway` comes from the builder's `VSGResourceRule.vpnAddress`
+  argument, while DNS and major version arrive as separate arguments.
+
+Only the first mapping is currently promoted by the owned Product mapper. The
+generation-bound resource-tree borrow cannot by itself prove how to obtain the
+gateway, DNS or major-version arguments, so those fields remain unavailable in
+the offline Product dry-run. This static narrowing does not prove a live
+`start_connection` or authorize one.
+
 ## Charon helper consumer schema
 
 Binary:

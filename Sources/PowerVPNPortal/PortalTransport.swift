@@ -132,6 +132,12 @@ final class PortalHTTPRequest: @unchecked Sendable {
     operationProof?.matches(operation) == true
   }
 
+  func authenticationGeneration(
+    for operation: PortalRequestOperation
+  ) -> PortalAuthenticationGeneration? {
+    operationProof?.generation(for: operation)
+  }
+
   func begin() -> Bool {
     lock.withLock {
       guard !consumed else { return false }

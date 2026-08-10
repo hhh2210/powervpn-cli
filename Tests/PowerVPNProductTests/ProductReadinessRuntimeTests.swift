@@ -16,7 +16,7 @@ import Testing
     #expect(doctor.profileSource == .sealedInstalledConfiguration)
     #expect(doctor.resourceSource == .unavailable)
     #expect(doctor.firstMissingField == .sessionID)
-    #expect(doctor.blocker == .authenticatedPortalSnapshotNotExposed)
+    #expect(doctor.blocker == .authenticatedPortalSnapshotUnavailable)
     #expect(!doctor.networkRequested)
     #expect(!doctor.helperMutationRequested)
 
@@ -24,7 +24,7 @@ import Testing
     #expect(resources.productState == .blocked)
     #expect(resources.selectableResourceCount == 0)
     #expect(resources.selectableResources.isEmpty)
-    #expect(resources.blocker == .authenticatedPortalSnapshotNotExposed)
+    #expect(resources.blocker == .authenticatedPortalSnapshotUnavailable)
 
     let snapshot = runtime.snapshotDryRun()
     #expect(!snapshot.snapshotComplete)
@@ -34,7 +34,7 @@ import Testing
         .generated, .generated, .generated, .generated,
       ])
     #expect(snapshot.fields[4].field == .sessionID)
-    #expect(snapshot.fields[4].availability == .missing)
+    #expect(snapshot.fields[4].availability == .missingRequired)
     #expect(!snapshot.snapshotSerialized)
     #expect(!snapshot.containsSecrets)
 
@@ -63,15 +63,14 @@ import Testing
   }
 
   @Test func completeAuthorizedSnapshotBecomesReadyWithoutSerializingIt() {
+    let candidate = ProductResourceCandidate(
+      summary: productSummary("resource"),
+      validation: completeValidation()
+    )
     let observation = makeObservation(
       directXPCStatus: .currentReachable,
       resourceSource: .authenticatedPortalSnapshot,
-      resourceCandidates: [
-        ProductResourceCandidate(
-          name: "synthetic-resource",
-          availableSnapshotFields: Set(VendorSnapshotField.allCases)
-        )
-      ]
+      resourceCandidates: [candidate]
     )
     let runtime = ProductReadinessRuntime(observer: FixedProductObservation(observation))
 
@@ -84,13 +83,13 @@ import Testing
     let resources = runtime.resources()
     #expect(resources.productState == .ready)
     #expect(resources.selectableResourceCount == 1)
-    #expect(resources.selectableResources == ["synthetic-resource"])
+    #expect(resources.selectableResources == [candidate.summary])
 
     let snapshot = runtime.snapshotDryRun()
     #expect(snapshot.productState == .ready)
     #expect(snapshot.snapshotComplete)
     #expect(snapshot.firstMissingField == nil)
-    #expect(snapshot.selectedResource == "synthetic-resource")
+    #expect(snapshot.selectedResource == candidate.summary)
     #expect(!snapshot.snapshotSerialized)
   }
 
@@ -124,8 +123,8 @@ import Testing
 
   @Test func doctorCannotBecomeReadyWithoutCurrentHelperControl() {
     let candidate = ProductResourceCandidate(
-      name: "synthetic-resource",
-      availableSnapshotFields: Set(VendorSnapshotField.allCases)
+      summary: productSummary("resource"),
+      validation: completeValidation()
     )
     let observation = makeObservation(
       resourceSource: .authenticatedPortalSnapshot,
@@ -141,15 +140,25 @@ import Testing
   }
 
   @Test func snapshotFieldsCannotBeUnionedAcrossResources() {
-    let all = VendorSnapshotField.allCases.filter { !$0.generatedEnvelope }
-    let midpoint = all.count / 2
+    let firstLineage = VendorCharonStartLineage()
     let first = ProductResourceCandidate(
-      name: "synthetic-one",
-      availableSnapshotFields: Set(all[..<midpoint])
+      summary: productSummary("one"),
+      validation: VendorCharonStartValidator.validate(
+        VendorCharonStartCandidate(
+          lineage: firstLineage,
+          common: completeCommonCandidate(lineage: firstLineage)
+        )
+      )
     )
+    let secondLineage = VendorCharonStartLineage()
     let second = ProductResourceCandidate(
-      name: "synthetic-two",
-      availableSnapshotFields: Set(all[midpoint...])
+      summary: productSummary("two"),
+      validation: VendorCharonStartValidator.validate(
+        VendorCharonStartCandidate(
+          lineage: secondLineage,
+          tunnels: completeTunnelCandidates(lineage: secondLineage)
+        )
+      )
     )
     let observation = makeObservation(
       directXPCStatus: .currentReachable,
@@ -194,14 +203,4 @@ import Testing
       resourceCandidates: resourceCandidates
     )
   }
-}
-
-private struct FixedProductObservation: ProductReadinessObserving {
-  let value: ProductReadinessObservation
-
-  init(_ value: ProductReadinessObservation) {
-    self.value = value
-  }
-
-  func observe() -> ProductReadinessObservation { value }
 }

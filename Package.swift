@@ -42,7 +42,7 @@ let package = Package(
     ),
     .testTarget(
       name: "PowerVPNProductTests",
-      dependencies: ["PowerVPNProduct", "PowerVPNCLI"]
+      dependencies: ["PowerVPNCore", "PowerVPNPortal", "PowerVPNProduct", "PowerVPNCLI"]
     ),
     .testTarget(
       name: "PowerVPNTLSEvidenceTests",

@@ -4,7 +4,7 @@ import Foundation
 enum LeadSecPortalCookieJarError: Error, Equatable, Sendable {
   case ambiguousSetCookieFraming, erased, invalidLanguageState
   case invalidPasswordURL, invalidSetCookieBytes, missingSetCookie
-  case sessionAlreadyStored, sizeOverflow, unsupportedSetCookie, writeMismatch
+  case generationMismatch, sessionAlreadyStored, sizeOverflow, unsupportedSetCookie, writeMismatch
 }
 
 enum LeadSecSetCookieProjection: Equatable, Sendable {
@@ -34,6 +34,7 @@ final class LeadSecPortalCookieJar: @unchecked Sendable {
   private let lock = NSLock()
   private let languageIndex: Int
   private var sessionEntry: SecureBytes?
+  private var authenticationGeneration: PortalAuthenticationGeneration?
   private var isErased = false
 
   convenience init(profile: InstalledPortalProfile) throws {
@@ -49,6 +50,17 @@ final class LeadSecPortalCookieJar: @unchecked Sendable {
 
   var retainedSessionByteCount: Int {
     lock.withLock { sessionEntry?.count ?? 0 }
+  }
+
+  func currentAuthenticationGeneration() throws -> PortalAuthenticationGeneration {
+    try lock.withLock {
+      guard !isErased, let authenticationGeneration,
+        authenticationGeneration.isActive
+      else {
+        throw LeadSecPortalCookieJarError.missingSetCookie
+      }
+      return authenticationGeneration
+    }
   }
 
   func acceptPasswordResponse(
@@ -69,6 +81,7 @@ final class LeadSecPortalCookieJar: @unchecked Sendable {
         setCookieHeader: setCookieHeader,
         passwordURL: passwordURL
       )
+      authenticationGeneration = PortalAuthenticationGeneration()
     }
   }
 
@@ -85,7 +98,7 @@ final class LeadSecPortalCookieJar: @unchecked Sendable {
         appendFallback ? Self.chineseFallback.count : 0
       )
       let base = try SecureBytes.allocate(count: baseCount) { output in
-        var writer = ByteWriter(output)
+        var writer = PortalCookieByteWriter(output)
         if let sessionEntry {
           try sessionEntry.withUnsafeBytes { try writer.write($0) }
         }
@@ -104,7 +117,7 @@ final class LeadSecPortalCookieJar: @unchecked Sendable {
         let growth = try Self.multiplying(occurrences, replacement.count - source.count)
         let outputCount = try Self.adding(bytes.count, growth)
         return try SecureBytes.allocate(count: outputCount) { output in
-          var writer = ByteWriter(output)
+          var writer = PortalCookieByteWriter(output)
           try writer.writeReplacing(bytes, source: source, replacement: replacement)
           guard writer.remaining == 0 else {
             throw LeadSecPortalCookieJarError.writeMismatch
@@ -119,6 +132,8 @@ final class LeadSecPortalCookieJar: @unchecked Sendable {
       guard !isErased else { return }
       sessionEntry?.erase()
       sessionEntry = nil
+      authenticationGeneration?.invalidate()
+      authenticationGeneration = nil
       isErased = true
     }
   }
@@ -140,6 +155,11 @@ final class LeadSecPortalCookieJar: @unchecked Sendable {
         countOccurrences(of: sessionNamePrefix, in: header) == 1
       else { throw LeadSecPortalCookieJarError.unsupportedSetCookie }
 
+      let sessionStart = sessionPrefix.count
+      let sessionEnd = header[sessionStart...].firstIndex(of: 0x3b) ?? header.endIndex
+      guard sessionStart < sessionEnd,
+        header[sessionStart..<sessionEnd].allSatisfy(isCookieOctet)
+      else { throw LeadSecPortalCookieJarError.unsupportedSetCookie }
       return try passwordURL.withUnsafeBytes { url in
         guard isPasswordURL(url) else {
           throw LeadSecPortalCookieJarError.invalidPasswordURL
@@ -147,7 +167,7 @@ final class LeadSecPortalCookieJar: @unchecked Sendable {
         let fixedCount = try adding(originPrefix.count, entrySuffix.count)
         let total = try adding(try adding(header.count, url.count), fixedCount)
         return try SecureBytes.allocate(count: total) { output in
-          var writer = ByteWriter(output)
+          var writer = PortalCookieByteWriter(output)
           try writer.write(header)
           try writer.write(originPrefix)
           try writer.write(url)
@@ -170,12 +190,12 @@ final class LeadSecPortalCookieJar: @unchecked Sendable {
   }
 
   private static func hasPrefix(_ bytes: UnsafeRawBufferPointer, _ prefix: [UInt8]) -> Bool {
-    matches(bytes, prefix, at: 0)
+    portalBytesMatch(bytes, prefix, at: 0)
   }
 
   private static func hasSuffix(_ bytes: UnsafeRawBufferPointer, _ suffix: [UInt8]) -> Bool {
     guard suffix.count <= bytes.count else { return false }
-    return matches(bytes, suffix, at: bytes.count - suffix.count)
+    return portalBytesMatch(bytes, suffix, at: bytes.count - suffix.count)
   }
 
   private static func contains(_ bytes: UnsafeRawBufferPointer, _ needle: [UInt8]) -> Bool {
@@ -190,7 +210,7 @@ final class LeadSecPortalCookieJar: @unchecked Sendable {
     var count = 0
     var index = 0
     while index <= bytes.count - needle.count {
-      if matches(bytes, needle, at: index) {
+      if portalBytesMatch(bytes, needle, at: index) {
         count += 1
         index += needle.count
       } else {
@@ -200,16 +220,9 @@ final class LeadSecPortalCookieJar: @unchecked Sendable {
     return count
   }
 
-  private static func matches(
-    _ bytes: UnsafeRawBufferPointer,
-    _ needle: [UInt8],
-    at index: Int
-  ) -> Bool {
-    guard index >= 0, index + needle.count <= bytes.count else { return false }
-    for offset in needle.indices where bytes[index + offset] != needle[offset] {
-      return false
-    }
-    return true
+  private static func isCookieOctet(_ byte: UInt8) -> Bool {
+    byte == 0x21 || (0x23...0x2b).contains(byte) || (0x2d...0x3a).contains(byte)
+      || (0x3c...0x5b).contains(byte) || (0x5d...0x7e).contains(byte)
   }
 
   private static func adding(_ lhs: Int, _ rhs: Int) throws -> Int {
@@ -224,45 +237,4 @@ final class LeadSecPortalCookieJar: @unchecked Sendable {
     return result
   }
 
-  private struct ByteWriter {
-    private let output: UnsafeMutableRawBufferPointer
-    private var offset = 0
-
-    init(_ output: UnsafeMutableRawBufferPointer) {
-      self.output = output
-    }
-
-    var remaining: Int { output.count - offset }
-
-    mutating func write(_ bytes: UnsafeRawBufferPointer) throws {
-      guard bytes.count <= remaining else { throw LeadSecPortalCookieJarError.writeMismatch }
-      if !bytes.isEmpty {
-        _ = memcpy(output.baseAddress!.advanced(by: offset), bytes.baseAddress!, bytes.count)
-      }
-      offset += bytes.count
-    }
-
-    mutating func write(_ bytes: [UInt8]) throws {
-      try bytes.withUnsafeBytes { try write($0) }
-    }
-
-    mutating func writeReplacing(
-      _ bytes: UnsafeRawBufferPointer,
-      source: [UInt8],
-      replacement: [UInt8]
-    ) throws {
-      var index = 0
-      while index < bytes.count {
-        if LeadSecPortalCookieJar.matches(bytes, source, at: index) {
-          try write(replacement)
-          index += source.count
-        } else {
-          guard remaining > 0 else { throw LeadSecPortalCookieJarError.writeMismatch }
-          output[offset] = bytes[index]
-          offset += 1
-          index += 1
-        }
-      }
-    }
-  }
 }

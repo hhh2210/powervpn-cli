@@ -52,6 +52,39 @@ import Testing
     #expect(!report.safety.ikeTrafficRequested)
   }
 
+  @Test func acquisitionRuntimeStopsAfterResourceUntilExplicitLogout() async throws {
+    let trace = RuntimeTrace()
+    let transport = SyntheticPortalTransport([
+      .response(status: 200, body: acceptedLoginXML, setCookie: syntheticSessionCookie),
+      .response(status: 200, body: acceptedResourceXML),
+      .response(status: 200, body: ""),
+    ])
+    let runner = PortalLoginRuntimeRunner(
+      dependencies: runtimeDependencies(
+        trace: trace,
+        transport: transport,
+        sleeper: SyntheticPortalSleeper(),
+        credentialOutcome: .success
+      )
+    )
+
+    let result = await runner.acquire()
+    guard case .acquired(let lease) = result else {
+      Issue.record("unexpected acquisition rejection")
+      return
+    }
+
+    #expect(
+      trace.snapshot == [
+        "discover_profile", "operating_system", "make_transport", "read_serial",
+        "read_credentials",
+      ]
+    )
+    #expect(await transport.snapshots().map(\.method) == [.post, .get])
+    #expect(await lease.logoutAndErase() == .accepted)
+    #expect(await transport.snapshots().map(\.method) == [.post, .get, .post])
+  }
+
   @Test func discoveryFailureNeverReadsSerialCredentialsOrCreatesTransport() async {
     let trace = RuntimeTrace()
     let dependencies = PortalLoginRuntimeDependencies(

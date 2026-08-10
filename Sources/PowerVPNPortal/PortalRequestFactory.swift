@@ -17,13 +17,22 @@ enum PortalRequestOperation: Sendable {
 /// request. Structural similarity alone must never select a compatibility lane.
 struct PortalRequestOperationProof: Sendable {
   private let operation: PortalRequestOperation
+  private let authenticationGeneration: PortalAuthenticationGeneration?
 
-  fileprivate init(_ operation: PortalRequestOperation) {
+  fileprivate init(
+    _ operation: PortalRequestOperation,
+    authenticationGeneration: PortalAuthenticationGeneration? = nil
+  ) {
     self.operation = operation
+    self.authenticationGeneration = authenticationGeneration
   }
 
   func matches(_ expected: PortalRequestOperation) -> Bool {
     operation == expected
+  }
+
+  func generation(for expected: PortalRequestOperation) -> PortalAuthenticationGeneration? {
+    operation == expected ? authenticationGeneration : nil
   }
 }
 
@@ -139,6 +148,24 @@ struct PortalRequestFactory: Sendable {
     cookieJar.erase()
   }
 
+  func mintAuthenticatedSnapshot(
+    resourceRequest: PortalHTTPRequest,
+    resourceDocument: PortalXMLDocument
+  ) throws -> AuthenticatedPortalSnapshot {
+    guard let requestGeneration = resourceRequest.authenticationGeneration(for: .resource) else {
+      throw LeadSecPortalCookieJarError.generationMismatch
+    }
+    guard let currentGeneration = try? cookieJar.currentAuthenticationGeneration(),
+      requestGeneration === currentGeneration
+    else {
+      throw LeadSecPortalCookieJarError.generationMismatch
+    }
+    return try AuthenticatedPortalSnapshot(
+      resourceDocument: resourceDocument,
+      authenticationGeneration: requestGeneration
+    )
+  }
+
   var retainedSessionByteCount: Int {
     cookieJar.retainedSessionByteCount
   }
@@ -149,12 +176,24 @@ struct PortalRequestFactory: Sendable {
     path: String,
     query: String?
   ) throws -> PortalHTTPRequest {
-    PortalHTTPRequest(
+    let generation: PortalAuthenticationGeneration?
+    switch operation {
+    case .resource, .session:
+      generation = try cookieJar.currentAuthenticationGeneration()
+    case .logout:
+      generation = try? cookieJar.currentAuthenticationGeneration()
+    case .password:
+      generation = nil
+    }
+    return PortalHTTPRequest(
       method: method,
       url: try makeURL(path: path, query: query),
       headers: headers,
       cookieHeader: try cookieJar.makeOutgoingCookieHeader(),
-      operationProof: PortalRequestOperationProof(operation)
+      operationProof: PortalRequestOperationProof(
+        operation,
+        authenticationGeneration: generation
+      )
     )
   }
 

@@ -10,6 +10,7 @@ public enum PortalLoginStatus: String, Encodable, Equatable, Sendable {
   case loginResponseRejected = "login_response_rejected"
   case sessionRejected = "session_rejected"
   case resourceListRejected = "resource_list_rejected"
+  case authenticatedSnapshotRejected = "authenticated_snapshot_rejected"
   case logoutRejected = "logout_rejected"
   case cancelled
   case internalFailure = "internal_failure"

@@ -36,63 +36,10 @@ public enum ProductBlocker: String, Codable, Equatable, Sendable {
   case directXPCNotProbed = "direct_xpc_not_probed"
   case directXPCUnreachable = "direct_xpc_unreachable"
   case directXPCPreflightUnsafe = "direct_xpc_preflight_unsafe"
-  case authenticatedPortalSnapshotNotExposed = "authenticated_portal_snapshot_not_exposed"
+  case authenticatedPortalSnapshotUnavailable = "authenticated_portal_snapshot_unavailable"
   case authorizedResourceSnapshotIncomplete = "authorized_resource_snapshot_incomplete"
   case resourceCatalogInvalid = "resource_catalog_invalid"
   case resourceSelectionRequired = "resource_selection_required"
-}
-
-public enum VendorSnapshotField: String, Codable, CaseIterable, Equatable, Sendable {
-  case type
-  case rpc
-  case common
-  case tunnels
-  case sessionID = "common.sessionid"
-  case vip = "common.vip"
-  case vipv6 = "common.vipv6"
-  case gateway = "common.gateway"
-  case ikePort = "common.ike_port"
-  case majorVersion = "common.majorVersion"
-  case ike = "common.ike"
-  case esp = "common.esp"
-  case psk = "common.psk"
-  case ikeLifetime = "common.ike_life_time"
-  case ipsecLifetime = "common.ipsec_life_time"
-  case hostItem = "common.hostItem"
-  case authority = "tunnels[].authority"
-  case status = "tunnels[].status"
-  case tunnelName = "tunnels[].tunnel-name"
-  case family = "tunnels[].family"
-  case resourceFlag = "tunnels[].rflag"
-  case name = "tunnels[].name"
-  case routes = "tunnels[].routes"
-  case mapID = "tunnels[].mapid"
-  case negotiateMode = "tunnels[].negotiate-mode"
-  case routeNetwork = "tunnels[].routes[].net"
-  case routePrefix = "tunnels[].routes[].prfix"
-
-  public var required: Bool {
-    switch self {
-    case .vip, .vipv6, .hostItem, .negotiateMode: false
-    default: true
-    }
-  }
-
-  public var generatedEnvelope: Bool {
-    self == .type || self == .rpc || self == .common || self == .tunnels
-  }
-}
-
-public enum SnapshotFieldAvailability: String, Codable, Equatable, Sendable {
-  case generated
-  case available
-  case missing
-}
-
-public enum SnapshotFieldSource: String, Codable, Equatable, Sendable {
-  case generatedConstant = "generated_constant"
-  case authenticatedPortalSnapshot = "authenticated_portal_snapshot"
-  case unavailable
 }
 
 public struct ProductHelperGeneration: Encodable, Equatable, Sendable {
@@ -123,7 +70,7 @@ public struct ProductDoctorReport: Encodable, Equatable, Sendable {
   public let profileSource: ProductProfileSource
   public let resourceSource: ProductResourceSource
   public let snapshotComplete: Bool
-  public let firstMissingField: VendorSnapshotField?
+  public let firstMissingField: VendorCharonStartField?
   public let blocker: ProductBlocker?
   public let containsSecrets = false
   public let networkRequested = false
@@ -146,47 +93,59 @@ public struct ProductHelperStatusReport: Encodable, Equatable, Sendable {
 }
 
 public struct ProductResourcesReport: Encodable, Equatable, Sendable {
-  public let schemaVersion = 1
+  public let schemaVersion = 2
   public let productState: ProductState
   public let onboardingMode = ProductOnboardingMode.vendorOnce
   public let profileSource: ProductProfileSource
   public let resourceSource: ProductResourceSource
   public let selectableResourceCount: Int
-  public let selectableResources: [String]
+  public let selectableResources: [ProductResourceSummary]
   public let blocker: ProductBlocker?
   public let containsSecrets = false
   public let serverContactRequested = false
 }
 
-public struct ProductResourceCandidate: Equatable, Sendable {
-  public let name: String
-  public let availableSnapshotFields: Set<VendorSnapshotField>
+public struct ProductResourceSummary: Encodable, Equatable, Sendable {
+  public let handle: String
+  public let displayName: String
+}
 
-  public init(
-    name: String,
-    availableSnapshotFields: Set<VendorSnapshotField>
+public struct ProductResourceCandidate: Equatable, Sendable {
+  public let summary: ProductResourceSummary
+  let fieldReports: [VendorCharonStartFieldReport]
+  let snapshotComplete: Bool
+  let firstMissingField: VendorCharonStartField?
+  let firstMissingPath: String?
+
+  init(
+    summary: ProductResourceSummary,
+    validation: VendorCharonStartValidation
   ) {
-    self.name = name
-    self.availableSnapshotFields = availableSnapshotFields
+    self.summary = summary
+    fieldReports = validation.fieldReports
+    snapshotComplete = validation.complete
+    firstMissingField = validation.firstMissingField
+    firstMissingPath = validation.firstMissingPath
   }
 }
 
 public struct VendorSnapshotFieldReport: Encodable, Equatable, Sendable {
-  public let field: VendorSnapshotField
-  public let required: Bool
-  public let availability: SnapshotFieldAvailability
-  public let source: SnapshotFieldSource
+  public let field: VendorCharonStartField
+  public let requirement: VendorCharonStartFieldRequirement
+  public let availability: VendorCharonStartFieldAvailability
+  public let sources: [VendorCharonStartMaterialSource]
+  public let firstIssuePath: String?
 }
 
 public struct ProductSnapshotDryRunReport: Encodable, Equatable, Sendable {
-  public let schemaVersion = 1
+  public let schemaVersion = 3
   public let productState: ProductState
   public let profileSource: ProductProfileSource
   public let resourceSource: ProductResourceSource
-  public let selectedResource: String?
+  public let selectedResource: ProductResourceSummary?
   public let fields: [VendorSnapshotFieldReport]
   public let snapshotComplete: Bool
-  public let firstMissingField: VendorSnapshotField?
+  public let firstMissingField: VendorCharonStartField?
   public let blocker: ProductBlocker?
   public let snapshotSerialized = false
   public let containsSecrets = false

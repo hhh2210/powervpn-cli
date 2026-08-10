@@ -25,16 +25,28 @@ On this Mac they currently establish:
 - the sealed installed portal profile is available;
 - a bounded direct-XPC probe is safe to perform, but these observation commands
   do not launch the helper and therefore report `directXPCStatus=not_probed`;
-- no production resource catalog is exposed yet;
-- a complete `start_connection` snapshot cannot be constructed; its first
-  missing required value is `common.sessionid`.
+- the default observation path has no authenticated resource lease, so it
+  exposes no production resource catalog and its first missing required value
+  remains `common.sessionid`;
+- the Portal target now has a generation-bound, memory-only authenticated lease
+  with a scoped resource-tree borrow, and Core has a nested typed charon
+  `start_connection` contract instead of a forgeable field-name set;
+- Product retains only the exact `NC_RESOURCE/name` catalog label and pairs it
+  with a snapshot-stable opaque handle; helper/session/PSK values stay borrowed
+  and every Core value must share one non-serializable resource lineage;
+- an offline synthetic authenticated dry-run maps `common.sessionid` only from
+  `NC_RESOURCE.TUNNEL.IKE.CLIENT.id` in that same resource. It never uses the
+  Portal cookie and then stops truthfully at `common.gateway`.
 
-The four commands contact no server, send no XPC, serialize no complete helper
-snapshot, and contain no credential, cookie, PSK, route value, or session value.
-The current product state is therefore **blocked at M1**, not a usable VPN yet.
-The next product slice is an in-memory authenticated portal/resource snapshot
-or a reviewed `vendor_once` onboarding source that can lawfully supply the
-missing helper material.
+The four commands contact no server, read no TTY credential, send no XPC,
+serialize no complete helper snapshot, and contain no credential, cookie, PSK,
+route value, or session value. The current product state is therefore **blocked
+at M1**, not a usable VPN yet, and the Goal remains **ACTIVE**.
+The existing resource-tree seam does not yet prove the raw sources for gateway,
+major version or DNS-derived material, and no complete helper snapshot exists.
+The next product slice is to map the remaining fields from one lawful resource
+generation without combining sibling resources; `vendor_once` remains the
+declared fallback if the owned Portal response cannot supply them.
 
 ## Development
 
