@@ -164,6 +164,7 @@ package struct NetworkCleanupResult: Encodable, Equatable, Sendable {
       && utunRestored && persistentRoutesRestored
       && selectedRouteResidueCount == 0 && surgeStateRestored
       && vendorProcessesRestored && helperGenerationRestored
+      && structuralRouteTablesEqual
   }
 }
 

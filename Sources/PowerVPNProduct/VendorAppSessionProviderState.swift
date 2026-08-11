@@ -2,17 +2,24 @@ import Foundation
 import PowerVPNCore
 
 final class VendorAppSessionProviderState: @unchecked Sendable {
+  struct AcquisitionClaim: Sendable {
+    let material: VendorAppSessionSnapshotMaterial
+    let commitStartAuthorization: @Sendable () throws -> Void
+  }
+
   private let lock = NSLock()
   private let cursor: VendorAppOnboardingCursor?
   private let sourceIsCurrent: @Sendable (VendorAppSessionSnapshotMaterial) -> Bool
   private let handoffProofIsCurrent:
     @Sendable (VendorAppOnboardingCursor, VendorAppSessionSnapshotMaterial) -> Bool
+  private let consumeCursor: @Sendable (VendorAppOnboardingCursor) throws -> Void
   private var material: VendorAppSessionSnapshotMaterial?
   private var acquisitionIssued = false
 
   init() {
     sourceIsCurrent = { $0.sourceIsCurrent }
     handoffProofIsCurrent = Self.installedHandoffProofIsCurrent
+    consumeCursor = { try $0.consumeDefault() }
     let loaded: (VendorAppOnboardingCursor, VendorAppSessionSnapshotMaterial)?
     do {
       let cursor = try VendorAppOnboardingCursor.loadDefault()
@@ -44,12 +51,16 @@ final class VendorAppSessionProviderState: @unchecked Sendable {
     handoffProofIsCurrent:
       @escaping @Sendable (
         VendorAppOnboardingCursor, VendorAppSessionSnapshotMaterial
-      ) -> Bool = { _, _ in true }
+      ) -> Bool = { _, _ in true },
+    consumeCursor: @escaping @Sendable (VendorAppOnboardingCursor) throws -> Void = {
+      try $0.consumeDefault()
+    }
   ) {
     self.cursor = cursor
     self.material = material
     self.sourceIsCurrent = sourceIsCurrent
     self.handoffProofIsCurrent = handoffProofIsCurrent
+    self.consumeCursor = consumeCursor
   }
 
   var isAvailable: Bool {
@@ -65,7 +76,7 @@ final class VendorAppSessionProviderState: @unchecked Sendable {
     }
   }
 
-  func claimForAcquisition() -> VendorAppSessionSnapshotMaterial? {
+  func claimForAcquisition() -> AcquisitionClaim? {
     let claim: (VendorAppOnboardingCursor, VendorAppSessionSnapshotMaterial)? = lock.withLock {
       guard let cursor, let material = currentMaterialLocked() else { return nil }
       acquisitionIssued = true
@@ -77,13 +88,17 @@ final class VendorAppSessionProviderState: @unchecked Sendable {
       material.erase()
       return nil
     }
-    do {
-      try cursor.consumeDefault()
-      return material
-    } catch {
-      material.erase()
-      return nil
-    }
+    let handoffProofIsCurrent = handoffProofIsCurrent
+    let consumeCursor = consumeCursor
+    return AcquisitionClaim(
+      material: material,
+      commitStartAuthorization: {
+        guard material.sourceIsCurrent, handoffProofIsCurrent(cursor, material) else {
+          throw VendorAppSessionSnapshotError.stale
+        }
+        try consumeCursor(cursor)
+      }
+    )
   }
 
   private func currentMaterialLocked() -> VendorAppSessionSnapshotMaterial? {

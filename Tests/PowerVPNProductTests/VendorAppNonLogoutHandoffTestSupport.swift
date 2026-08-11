@@ -120,17 +120,22 @@ final class HandoffTrace: @unchecked Sendable {
   func count(_ value: String) -> Int { lock.withLock { values.count { $0 == value } } }
 }
 
-final class HandoffAdvancingClock: @unchecked Sendable {
+final class HandoffScriptedClock: @unchecked Sendable {
   private let lock = NSLock()
-  private let step: UInt64
-  private var value: UInt64 = 0
+  private var values: [UInt64]
+  private var last: UInt64
 
-  init(step: UInt64) { self.step = step }
+  init(_ values: [UInt64]) {
+    precondition(!values.isEmpty)
+    self.values = values
+    last = values.last!
+  }
 
   func now() -> UInt64 {
     lock.withLock {
-      value += step
-      return value
+      guard !values.isEmpty else { return last }
+      last = values.removeFirst()
+      return last
     }
   }
 }
@@ -142,6 +147,7 @@ func handoffDependencies(
   trace: HandoffTrace,
   launcher: (any VendorAppHandoffLaunching)? = nil,
   clearResult: Bool = true,
+  prefixObservation: @escaping @Sendable () throws -> Bool = { true },
   materialFactory: @escaping @Sendable () throws -> VendorAppSessionSnapshotMaterial = {
     try vendorAppMaterial(
       sourceSeal: handoffSourceSeal(),
@@ -160,6 +166,10 @@ func handoffDependencies(
     clearCursor: { _ in
       trace.record("clear")
       return clearResult
+    },
+    observeBoundedPrefix: { _ in
+      trace.record("observe")
+      return try prefixObservation()
     },
     loadMaterial: { _ in
       trace.record("load")

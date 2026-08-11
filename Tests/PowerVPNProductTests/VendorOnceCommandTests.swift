@@ -24,7 +24,7 @@ import Testing
       signalMonitorFactory: { VendorOnceNoopSignalMonitor() },
       handoff: { secondApproval in
         trace.record("coordinator")
-        let outcome = secondApproval()
+        let outcome = await secondApproval()
         trace.record("second:\(outcome.rawValue)")
         return syntheticHandoffReport(.ready, secondApproval: outcome)
       }
@@ -101,7 +101,7 @@ import Testing
         signalMonitorFactory: { VendorOnceNoopSignalMonitor() },
         handoff: { secondApproval in
           trace.record("coordinator")
-          let approval = secondApproval()
+          let approval = await secondApproval()
           return syntheticHandoffReport(
             approval == .denied ? .approvalDenied : .approvalUnavailable,
             secondApproval: approval

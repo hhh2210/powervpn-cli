@@ -9,6 +9,7 @@ struct VendorAppNonLogoutHandoffDependencies: Sendable {
   let captureCursor: @Sendable () throws -> VendorAppOnboardingCursor
   let persistCursor: @Sendable (VendorAppOnboardingCursor) throws -> Void
   let clearCursor: @Sendable (VendorAppOnboardingCursor) -> Bool
+  let observeBoundedPrefix: @Sendable (VendorAppOnboardingCursor) throws -> Bool
   let loadMaterial: @Sendable (VendorAppOnboardingCursor) throws -> VendorAppSessionSnapshotMaterial
   let publishProof:
     @Sendable (
@@ -32,6 +33,9 @@ extension VendorAppNonLogoutHandoffDependencies {
       } catch {
         return false
       }
+    },
+    observeBoundedPrefix: { cursor in
+      try VendorAppSessionSnapshotSource(cursor: cursor).validateBoundedPrefix()
     },
     loadMaterial: { cursor in
       try VendorAppSessionSnapshotSource(cursor: cursor).load().makeMaterial()
@@ -107,17 +111,21 @@ func finishAfterTermination(
       forceTerminationAccepted: true,
       exactReceiverTerminated: true,
       sourceSnapshotComplete: true,
+      sourceObservation: .ready,
       officialAppStillRunning: false,
       cleanup: observedCleanup
     )
   }
-  guard
-    let material = await waitForFinalMaterial(
-      dependencies: dependencies,
-      deadline: deadline,
-      cursor: cursor
-    )
-  else {
+  let finalMaterial = await waitForFinalMaterial(
+    dependencies: dependencies,
+    deadline: deadline,
+    cursor: cursor
+  )
+  let material: VendorAppSessionSnapshotMaterial
+  switch finalMaterial {
+  case .ready(let readyMaterial):
+    material = readyMaterial
+  case .rejected(let sourceObservation):
     let cleared = dependencies.clearCursor(cursor)
     return report(
       .sourceNotReady,
@@ -127,6 +135,7 @@ func finishAfterTermination(
       secondApproval: approval,
       forceTerminationAccepted: true,
       exactReceiverTerminated: true,
+      sourceObservation: sourceObservation,
       officialAppStillRunning: false,
       cleanup: cleanup
     )
@@ -147,6 +156,7 @@ func finishAfterTermination(
       secondApproval: approval,
       forceTerminationAccepted: true,
       exactReceiverTerminated: true,
+      sourceObservation: .missingSourceSeal,
       officialAppStillRunning: false,
       cleanup: cleanup
     )
@@ -168,6 +178,7 @@ func finishAfterTermination(
       forceTerminationAccepted: true,
       exactReceiverTerminated: true,
       sourceSnapshotComplete: true,
+      sourceObservation: .ready,
       proofPersisted: true,
       officialAppStillRunning: false,
       cleanup: cleanup
@@ -183,97 +194,9 @@ func finishAfterTermination(
       forceTerminationAccepted: true,
       exactReceiverTerminated: true,
       sourceSnapshotComplete: true,
+      sourceObservation: .ready,
       officialAppStillRunning: false,
       cleanup: cleanup
     )
   }
-}
-
-private func waitForRestoredCleanup(
-  dependencies: VendorAppNonLogoutHandoffDependencies,
-  deadline: UInt64,
-  window: NetworkCleanupCaptureWindow,
-  before: NetworkCleanupSnapshot,
-  generation: VendorHelperGenerationSnapshot
-) async -> VendorAppNonLogoutHandoffCleanupProof? {
-  var lastObservation: VendorAppNonLogoutHandoffCleanupProof?
-  while let timeout = remainingMilliseconds(
-    dependencies: dependencies,
-    deadline: deadline,
-    cap: 12_000
-  ) {
-    let after = await dependencies.networkObserver.capture(
-      window: window,
-      selectedRoutes: nil,
-      timeoutMilliseconds: timeout
-    )
-    let cleanup = VendorAppNonLogoutHandoffCleanupAssessment.assess(
-      before: before,
-      after: after,
-      finalGeneration: generation
-    )
-    lastObservation = cleanup
-    if cleanup.allDimensionsRestored { return cleanup }
-    guard
-      remainingMilliseconds(
-        dependencies: dependencies,
-        deadline: deadline,
-        cap: 200
-      ) != nil
-    else { return lastObservation }
-    try? await Task.sleep(for: .milliseconds(200))
-  }
-  return lastObservation
-}
-
-private func waitForFinalMaterial(
-  dependencies: VendorAppNonLogoutHandoffDependencies,
-  deadline: UInt64,
-  cursor: VendorAppOnboardingCursor
-) async -> VendorAppSessionSnapshotMaterial? {
-  while remainingMilliseconds(
-    dependencies: dependencies,
-    deadline: deadline,
-    cap: 200
-  ) != nil {
-    if let material = try? dependencies.loadMaterial(cursor) {
-      if material.validation.complete, material.sourceIsCurrent, material.sourceSeal != nil {
-        return material
-      }
-      material.erase()
-    }
-    try? await Task.sleep(for: .milliseconds(200))
-  }
-  return nil
-}
-
-private func remainingMilliseconds(
-  dependencies: VendorAppNonLogoutHandoffDependencies,
-  deadline: UInt64,
-  cap: Int
-) -> Int? {
-  let current = dependencies.monotonicNowNanoseconds()
-  guard current < deadline, cap > 0 else { return nil }
-  let remaining = (deadline - current) / 1_000_000
-  guard remaining > 0 else { return nil }
-  return min(cap, Int(remaining))
-}
-
-private func postForceFailure(
-  _ outcome: VendorAppNonLogoutHandoffOutcome,
-  cleared: Bool,
-  application: any VendorAppHandoffApplication,
-  approval: VendorAppNonLogoutHandoffApproval
-) -> VendorAppNonLogoutHandoffReport {
-  report(
-    outcome,
-    baselineStable: true,
-    cursorPersisted: !cleared,
-    officialAppLaunched: true,
-    secondApproval: approval,
-    forceTerminationAccepted: true,
-    exactReceiverTerminated: application.isTerminated,
-    sourceSnapshotComplete: true,
-    officialAppStillRunning: !application.isTerminated
-  )
 }

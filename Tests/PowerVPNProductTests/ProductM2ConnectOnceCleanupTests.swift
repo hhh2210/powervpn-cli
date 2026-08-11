@@ -111,6 +111,36 @@ import Testing
     #expect(report.finalState == .failed)
   }
 
+  @Test func structuralRouteDifferenceCannotBeReportedAsVerifiedCleanup() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+    let evidence = ProductM2CleanupEvidence(
+      defaultRouteRestored: true,
+      dnsRestored: true,
+      interfacesRestored: true,
+      utunRestored: true,
+      surgeStateRestored: true,
+      helperGenerationRestored: true,
+      structuralRouteTablesEqual: false
+    )
+    let dependencies = productM2TestDependencies(
+      snapshot: fixture.snapshot,
+      trace: trace,
+      cleanup: evidence
+    )
+
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: dependencies
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(!report.cleanupEvidence.structuralRouteTablesEqual)
+    #expect(!report.cleanupVerified)
+    #expect(report.outcome == .cleanupUnproven)
+  }
+
   @Test func unsentLeaseStopWithExactRunningUsesOneEmergencyStop() async throws {
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
     defer { fixture.erase() }

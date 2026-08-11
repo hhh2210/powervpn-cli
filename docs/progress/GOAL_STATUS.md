@@ -1449,3 +1449,60 @@ one explicitly approved `vendor-once handoff`, followed by `resources`,
 There will be no retry or second login. Success still requires connected status,
 selected-route evidence, fresh SSH proof, stop and complete cleanup; otherwise
 the result remains the exact value-free blocker from that one experiment.
+
+## 2026-08-11 — First non-logout handoff stopped before force
+
+Live result: both fresh TTY approvals were accepted. The coordinator proved a
+stable cold A/B baseline, captured the pre-login cursor and normally launched
+the exact installed PowerVPN App. The user completed the official login and
+confirmed `login21` connected in the App window. The handoff then returned
+`source_not_ready` before the irreversible operation:
+`forceTerminationAccepted=false`, `exactReceiverTerminated=false`,
+`proofPersisted=false`, `sourceSnapshotComplete=false` and
+`officialAppStillRunning=true`. No `forceTerminate`, M2 start, status wait, SSH,
+stop or retry occurred.
+
+Value-free diagnosis: the cursor generation contained exactly one fresh fixed
+`get_version` request and one fresh `start_connection`; no `stop_connection` or
+logout marker followed it, and the appended bytes remained below the 64 KiB
+cap. The root-owned log nevertheless continued growing after the second
+approval. Schema 1 collapsed the exact internal rejection to
+`source_not_ready`, so the strongest supported classification is a pre-force
+source-stability failure while the vendor helper was still writing, not a
+missing resource field or over-cap append.
+
+Failure cleanup: because force was never accepted, the program intentionally
+left the official App under user control and cleared the unproven cursor. The
+user then performed normal Cmd-Q. Passive post-state showed the App stopped,
+charon exact inactive at runs 10, no vendor process, no DNS recovery file and
+no cursor. The passive bounded preflight was safe. Normal quit may contact the
+vendor logout endpoint, so this generation is intentionally unusable and no
+M2 attempt followed.
+
+Offline correction: handoff report schema 2 adds a closed, value-free
+`sourceObservation` (`changed_during_read`, `append_too_large`, malformed,
+incomplete, stale logout and related categories). The pre-force gate now polls
+the same cursor-bound source for at most five monotonic seconds. Each sample is
+a bounded-prefix observation: it accepts only same-inode, security-preserving,
+monotonic growth within the cursor's 64 KiB window, and rejects rotation,
+shrink, unsafe metadata, an over-cap append, malformed input or a captured
+logout. This prefix API returns only completeness, so its observational seal
+cannot reach proof/provider. The separate post-force load still requires an
+exact current seal before proof publication. Cancellation is rechecked
+immediately before force and there is still no login or force retry. Post-force
+cleanup retains its separate 60-second absolute deadline. The second TTY gate
+now uses nonblocking 50 ms cancellation polling with a ten-minute human-input
+window. One-shot proof consumption has moved from acquisition to the validated
+start-submission boundary, so a wrong resource name, wrong target, stale source,
+deadline or pre-start cancellation does not consume it. M2 cleanup now also
+requires structural route-table equality. Synthetic tests cover
+append-during-read metadata, rotation/shrink/security rejection, final sealed
+polling, TTY cancellation, deferred proof consumption and expiration with the
+last source category preserved. Full `swift test`, arm64 product build, strict
+Swift formatting, diff validation and secret scan passed. No second live
+handoff is authorized by this result.
+
+Current status: **M1 PASS, M2 NOT PASS, Goal ACTIVE**. The next live action, if
+separately approved, is one fresh handoff using schema 2. Only `outcome=ready`
+and `sourceObservation=ready` may proceed to resources, dry-run and the sole
+bounded M2 transaction.

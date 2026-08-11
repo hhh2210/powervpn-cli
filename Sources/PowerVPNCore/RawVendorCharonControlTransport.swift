@@ -64,22 +64,58 @@ package struct RawVendorCharonControlTransport: Sendable {
     timeoutMilliseconds: Int = Self.defaultTimeoutMilliseconds,
     peerGenerationValidator: @escaping @Sendable () async -> Bool
   ) -> VendorCharonPendingStart {
-    guard Self.validTimeoutMilliseconds.contains(timeoutMilliseconds) else {
-      return VendorCharonPendingStart(immediate: immediateStartResult(.invalidTimeout))
-    }
-    guard !Task.isCancelled else {
-      return VendorCharonPendingStart(immediate: immediateStartResult(.cancelled))
-    }
+    if let rejection = startPreflightRejection(timeoutMilliseconds) { return rejection }
+    return try! submitStart(
+      snapshot: snapshot,
+      timeoutMilliseconds: timeoutMilliseconds,
+      peerGenerationValidator: peerGenerationValidator,
+      commitStartAuthorization: {}
+    )
+  }
 
+  package func beginStart(
+    snapshot: VendorCharonStartSnapshot,
+    timeoutMilliseconds: Int = Self.defaultTimeoutMilliseconds,
+    peerGenerationValidator: @escaping @Sendable () async -> Bool,
+    commitStartAuthorization: @Sendable () throws -> Void
+  ) throws -> VendorCharonPendingStart {
+    if let rejection = startPreflightRejection(timeoutMilliseconds) { return rejection }
+    return try submitStart(
+      snapshot: snapshot,
+      timeoutMilliseconds: timeoutMilliseconds,
+      peerGenerationValidator: peerGenerationValidator,
+      commitStartAuthorization: commitStartAuthorization
+    )
+  }
+
+  private func submitStart(
+    snapshot: VendorCharonStartSnapshot,
+    timeoutMilliseconds: Int,
+    peerGenerationValidator: @escaping @Sendable () async -> Bool,
+    commitStartAuthorization: @Sendable () throws -> Void
+  ) throws -> VendorCharonPendingStart {
     let state = VendorCharonControlState(
       snapshot: snapshot,
       driverFactory: driverFactory
     )
-    state.beginStartSynchronously(
+    try state.beginStartSynchronously(
       timeoutMilliseconds: timeoutMilliseconds,
-      peerGenerationValidator: peerGenerationValidator
+      peerGenerationValidator: peerGenerationValidator,
+      commitStartAuthorization: commitStartAuthorization
     )
     return VendorCharonPendingStart(state: state)
+  }
+
+  private func startPreflightRejection(
+    _ timeoutMilliseconds: Int
+  ) -> VendorCharonPendingStart? {
+    if !Self.validTimeoutMilliseconds.contains(timeoutMilliseconds) {
+      return VendorCharonPendingStart(immediate: immediateStartResult(.invalidTimeout))
+    }
+    if Task.isCancelled {
+      return VendorCharonPendingStart(immediate: immediateStartResult(.cancelled))
+    }
+    return nil
   }
 
   package func start(

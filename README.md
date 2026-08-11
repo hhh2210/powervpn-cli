@@ -146,9 +146,26 @@ One allowlisted `invalid HASH_V1` marker was observed after the M2 start. A
 subsequent fixed `get_version` request succeeded, so the failure was not generic
 XPC reachability and the complete dry-run excluded a missing snapshot field.
 The exact old-path blocker is now known: normal Cmd-Q initiated Portal logout
-before M2 reused the snapshot. The non-logout handoff is implemented and
-offline-verified but has not yet received approval for its one live experiment.
-The product is therefore still not a usable VPN and the Goal remains **ACTIVE**.
+before M2 reused the snapshot. The first approved non-logout handoff then
+stopped safely before termination with `source_not_ready`: both TTY approvals
+were accepted and the official app was running, but no `forceTerminate`, proof
+publication or M2 start occurred. Value-free observation showed one fresh
+`get_version` plus one fresh `start_connection`, no stop/logout record and an
+append below the source cap, while the root-owned log was still changing.
+
+Report schema 2 now preserves the final closed source-observation category. Its
+five-second pre-force gate validates a cursor-bounded prefix: same-inode,
+security-preserving monotonic appends may continue during the read, but
+rotation, shrink, an append beyond 64 KiB, malformed records and any captured
+logout fail closed. The prefix observation exposes no proof-capable seal. Only
+the separate post-force load requires an exact current source seal and may back
+the one-shot proof/provider. After the failed experiment the user normally quit
+the untouched official app; the app/helper returned cold, the cursor was absent
+and no M2 retry ran. This correction is offline-verified but not yet
+live-verified. The second handoff approval is now cancellable and bounded, the
+proof is consumed only immediately before a validated start submission, and a
+structural route-table mismatch can no longer pass cleanup verification. The
+product is therefore still not a usable VPN and the Goal remains **ACTIVE**.
 
 ## Development
 

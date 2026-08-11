@@ -22,7 +22,7 @@ struct VendorOnceCommandResult: Equatable, Sendable {
 
 typealias VendorOnceHandoffOperation =
   @Sendable (
-    @escaping @Sendable () -> VendorAppNonLogoutHandoffApproval
+    @escaping @Sendable () async -> VendorAppNonLogoutHandoffApproval
   ) async -> VendorAppNonLogoutHandoffReport
 
 func runVendorOnceCommand(
@@ -69,7 +69,7 @@ func runVendorOnceCommand(
           return .unavailable
         }
         return productApproval(
-          approval.requestVendorHandoffTermination(code: secondCode)
+          await approval.requestVendorHandoffTermination(code: secondCode)
         )
       })
   }

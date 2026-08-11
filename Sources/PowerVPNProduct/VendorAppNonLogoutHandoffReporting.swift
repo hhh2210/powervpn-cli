@@ -7,6 +7,7 @@ func report(
   forceTerminationAccepted: Bool = false,
   exactReceiverTerminated: Bool = false,
   sourceSnapshotComplete: Bool = false,
+  sourceObservation: VendorAppNonLogoutHandoffSourceObservation = .notObserved,
   proofPersisted: Bool = false,
   officialAppStillRunning: Bool = false,
   cleanup: VendorAppNonLogoutHandoffCleanupProof? = nil
@@ -20,6 +21,7 @@ func report(
     forceTerminationAccepted: forceTerminationAccepted,
     exactReceiverTerminated: exactReceiverTerminated,
     sourceSnapshotComplete: sourceSnapshotComplete,
+    sourceObservation: sourceObservation,
     proofPersisted: proofPersisted,
     officialAppStillRunning: officialAppStillRunning,
     cleanup: cleanup

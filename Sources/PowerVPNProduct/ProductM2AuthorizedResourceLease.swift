@@ -74,9 +74,8 @@ package actor ProductM2AuthorizedResourceLease {
   package typealias EraseOwnedMaterial = @Sendable () -> Bool
   package typealias Close =
     @Sendable (ProductM2StageDeadline) async -> ProductM2AuthorizationCloseReceipt
-
+  package typealias CommitStartAuthorization = @Sendable () throws -> Void
   private enum State { case open, closing, closed }
-
   package nonisolated let source: ProductM2AuthorizationSource
   private var state = State.open
   private var readCatalog: Catalog?
@@ -89,26 +88,26 @@ package actor ProductM2AuthorizedResourceLease {
   private var withStartSnapshot: ProductM2PreparedAuthorizedResource.WithStartSnapshot?
   private var selectedRoutes: VendorCharonSelectedRouteMatcher?
   private var requiredTargetIPv4: UInt32?
+  private var commitStartAuthorization: CommitStartAuthorization?
   private var startIssued = false
-
   package init(
     source: ProductM2AuthorizationSource,
     catalog: @escaping Catalog,
     prepare: @escaping Prepare,
     eraseOwnedMaterial: @escaping EraseOwnedMaterial,
-    close: @escaping Close
+    close: @escaping Close,
+    commitStartAuthorization: @escaping CommitStartAuthorization = {}
   ) {
     self.source = source
     readCatalog = catalog
     self.prepare = prepare
     self.eraseOwnedMaterial = eraseOwnedMaterial
     self.close = close
+    self.commitStartAuthorization = commitStartAuthorization
   }
-
   deinit {
     _ = eraseOwnedMaterial?()
   }
-
   package func catalog() throws -> [ProductResourceCandidate] {
     guard state == .open else {
       throw ProductM2AuthorizedResourceSelectionError.leaseClosed
@@ -125,7 +124,6 @@ package actor ProductM2AuthorizedResourceLease {
     cachedCatalog = catalog
     return catalog
   }
-
   package func selectUnique(
     displayName: String,
     requiredTargetIPv4: UInt32
@@ -179,7 +177,7 @@ package actor ProductM2AuthorizedResourceLease {
       throw ProductM2AuthorizedResourceSelectionError.invalidSelection
     }
     guard !startIssued, let withStartSnapshot, let selectedRoutes,
-      let requiredTargetIPv4
+      let requiredTargetIPv4, let commitStartAuthorization
     else {
       throw ProductM2AuthorizedResourceSelectionError.startAlreadyIssued
     }
@@ -187,6 +185,7 @@ package actor ProductM2AuthorizedResourceLease {
     self.withStartSnapshot = nil
     self.selectedRoutes = nil
     self.requiredTargetIPv4 = nil
+    self.commitStartAuthorization = nil
     var pending: ProductM2PendingStart?
     var invocationCount = 0
     do {
@@ -206,10 +205,11 @@ package actor ProductM2AuthorizedResourceLease {
         else {
           throw ProductM2AuthorizedResourceSelectionError.workAborted
         }
-        pending = control.beginStart(
+        pending = try control.beginStart(
           snapshot: snapshot,
           timeoutMilliseconds: timeoutMilliseconds,
-          peerGenerationValidator: peerGenerationValidator
+          peerGenerationValidator: peerGenerationValidator,
+          commitStartAuthorization: commitStartAuthorization
         )
       }
     } catch let error as ProductM2AuthorizedResourceSelectionError {
@@ -239,6 +239,7 @@ package actor ProductM2AuthorizedResourceLease {
     withStartSnapshot = nil
     selectedRoutes = nil
     requiredTargetIPv4 = nil
+    commitStartAuthorization = nil
 
     let erase = eraseOwnedMaterial
     eraseOwnedMaterial = nil

@@ -14,7 +14,7 @@ package struct VendorAppNonLogoutHandoffCoordinator: Sendable {
   }
 
   package func run(
-    secondApproval: @escaping @Sendable () -> VendorAppNonLogoutHandoffApproval
+    secondApproval: @escaping @Sendable () async -> VendorAppNonLogoutHandoffApproval
   ) async -> VendorAppNonLogoutHandoffReport {
     let window = NetworkCleanupCaptureWindow()
     let first = await dependencies.networkObserver.capture(
@@ -57,7 +57,18 @@ package struct VendorAppNonLogoutHandoffCoordinator: Sendable {
       application = launched
     }
 
-    let approval = secondApproval()
+    let approval = await secondApproval()
+    guard !Task.isCancelled else {
+      let cleared = dependencies.clearCursor(cursor)
+      return report(
+        .cancelled,
+        baselineStable: true,
+        cursorPersisted: !cleared,
+        officialAppLaunched: true,
+        secondApproval: approval,
+        officialAppStillRunning: !application.isTerminated
+      )
+    }
     guard approval == .accepted else {
       let cleared = dependencies.clearCursor(cursor)
       return report(
@@ -81,7 +92,21 @@ package struct VendorAppNonLogoutHandoffCoordinator: Sendable {
       )
     }
 
-    guard validateFreshSnapshot(cursor) else {
+    let sourceObservation = await waitForFreshSnapshot(cursor)
+    guard !Task.isCancelled else {
+      let cleared = dependencies.clearCursor(cursor)
+      return report(
+        .cancelled,
+        baselineStable: true,
+        cursorPersisted: !cleared,
+        officialAppLaunched: true,
+        secondApproval: approval,
+        sourceSnapshotComplete: sourceObservation == .ready,
+        sourceObservation: sourceObservation,
+        officialAppStillRunning: !application.isTerminated
+      )
+    }
+    guard sourceObservation == .ready else {
       let cleared = dependencies.clearCursor(cursor)
       return report(
         .sourceNotReady,
@@ -89,6 +114,7 @@ package struct VendorAppNonLogoutHandoffCoordinator: Sendable {
         cursorPersisted: !cleared,
         officialAppLaunched: true,
         secondApproval: approval,
+        sourceObservation: sourceObservation,
         officialAppStillRunning: !application.isTerminated
       )
     }
@@ -101,6 +127,7 @@ package struct VendorAppNonLogoutHandoffCoordinator: Sendable {
         officialAppLaunched: true,
         secondApproval: approval,
         sourceSnapshotComplete: true,
+        sourceObservation: .ready,
         officialAppStillRunning: !application.isTerminated
       )
     }
@@ -113,6 +140,7 @@ package struct VendorAppNonLogoutHandoffCoordinator: Sendable {
         officialAppLaunched: true,
         secondApproval: approval,
         sourceSnapshotComplete: true,
+        sourceObservation: .ready,
         officialAppStillRunning: !application.isTerminated
       )
     }
@@ -129,14 +157,32 @@ package struct VendorAppNonLogoutHandoffCoordinator: Sendable {
     }.value
   }
 
-  private func validateFreshSnapshot(_ cursor: VendorAppOnboardingCursor) -> Bool {
-    do {
-      let material = try dependencies.loadMaterial(cursor)
-      defer { material.erase() }
-      return material.validation.complete && material.sourceIsCurrent
-    } catch {
-      return false
+  private func waitForFreshSnapshot(
+    _ cursor: VendorAppOnboardingCursor
+  ) async -> VendorAppNonLogoutHandoffSourceObservation {
+    let started = dependencies.monotonicNowNanoseconds()
+    let duration: UInt64 = 5_000_000_000
+    guard started <= UInt64.max - duration else { return .sourceUnavailable }
+    let deadline = started + duration
+    var lastObservation = VendorAppNonLogoutHandoffSourceObservation.sourceUnavailable
+
+    while !Task.isCancelled, dependencies.monotonicNowNanoseconds() < deadline {
+      do {
+        let complete = try dependencies.observeBoundedPrefix(cursor)
+        if !complete {
+          lastObservation = .snapshotIncomplete
+        } else {
+          return .ready
+        }
+      } catch let error as VendorAppSessionSnapshotError {
+        lastObservation = VendorAppNonLogoutHandoffSourceObservation(error)
+      } catch {
+        lastObservation = .sourceUnavailable
+      }
+      guard !Task.isCancelled else { break }
+      try? await Task.sleep(for: .milliseconds(200))
     }
+    return lastObservation
   }
 
   private func cancelled(

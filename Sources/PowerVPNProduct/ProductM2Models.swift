@@ -196,6 +196,7 @@ public struct ProductM2CleanupEvidence: Encodable, Equatable, Sendable {
       && utunRestored && persistentRoutesRestored
       && selectedRouteResidueCount == 0 && surgeStateRestored
       && vendorProcessesRestored && helperGenerationRestored
+      && structuralRouteTablesEqual
   }
 
   package static let unavailable = Self(

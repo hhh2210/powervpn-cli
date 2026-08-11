@@ -25,12 +25,12 @@ package struct VendorAppSessionProvider: ProductM2AuthorizedResourceProviding {
         guard budget.work.hasRemaining else {
           return Self.rejected(.timedOut)
         }
-        guard let material = self.state.claimForAcquisition() else {
+        guard let claim = self.state.claimForAcquisition() else {
           return Self.rejected(.providerUnavailable)
         }
         return .acquired(
           source: .vendorOnce,
-          lease: Self.lease(material),
+          lease: Self.lease(claim),
           serverContactRequested: false
         )
       },
@@ -43,9 +43,10 @@ package struct VendorAppSessionProvider: ProductM2AuthorizedResourceProviding {
   }
 
   private static func lease(
-    _ material: VendorAppSessionSnapshotMaterial
+    _ claim: VendorAppSessionProviderState.AcquisitionClaim
   ) -> ProductM2AuthorizedResourceLease {
-    ProductM2AuthorizedResourceLease(
+    let material = claim.material
+    return ProductM2AuthorizedResourceLease(
       source: .vendorOnce,
       catalog: {
         [ProductResourceCandidate(summary: material.summary, validation: material.validation)]
@@ -90,7 +91,8 @@ package struct VendorAppSessionProvider: ProductM2AuthorizedResourceProviding {
           sourceCloseRequested: false,
           serverContactRequested: false
         )
-      }
+      },
+      commitStartAuthorization: claim.commitStartAuthorization
     )
   }
 

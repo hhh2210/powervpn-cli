@@ -1,6 +1,10 @@
 import Dispatch
 import Foundation
 
+private struct VendorCharonStartAuthorizationCommitFailure: Error {
+  let underlying: any Error
+}
+
 final class VendorCharonControlState: @unchecked Sendable {
   enum Phase { case idle, starting, provisional, active, stopping, closed }
 
@@ -64,12 +68,14 @@ final class VendorCharonControlState: @unchecked Sendable {
 
   func beginStartSynchronously(
     timeoutMilliseconds: Int,
-    peerGenerationValidator: @escaping @Sendable () async -> Bool
-  ) {
-    queue.sync {
-      beginStart(
+    peerGenerationValidator: @escaping @Sendable () async -> Bool,
+    commitStartAuthorization: @Sendable () throws -> Void
+  ) throws {
+    try queue.sync {
+      try beginStart(
         timeoutMilliseconds: timeoutMilliseconds,
-        peerGenerationValidator: peerGenerationValidator
+        peerGenerationValidator: peerGenerationValidator,
+        commitStartAuthorization: commitStartAuthorization
       )
     }
   }
@@ -129,8 +135,9 @@ final class VendorCharonControlState: @unchecked Sendable {
 
   private func beginStart(
     timeoutMilliseconds: Int,
-    peerGenerationValidator: @escaping @Sendable () async -> Bool
-  ) {
+    peerGenerationValidator: @escaping @Sendable () async -> Bool,
+    commitStartAuthorization: @Sendable () throws -> Void
+  ) throws {
     guard phase == .idle, let snapshot else {
       finishStart(.leaseClosed)
       return
@@ -140,6 +147,11 @@ final class VendorCharonControlState: @unchecked Sendable {
     defer { self.snapshot = nil }
     do {
       try snapshot.withEncodedStartMessage { request in
+        do {
+          try commitStartAuthorization()
+        } catch {
+          throw VendorCharonStartAuthorizationCommitFailure(underlying: error)
+        }
         let driver = driverFactory(queue) { [weak self] event in
           guard let self else { return }
           self.queue.async { self.handle(event) }
@@ -152,6 +164,10 @@ final class VendorCharonControlState: @unchecked Sendable {
         }
         handleSubmission(submission, operation: .startConnection)
       }
+    } catch let failure as VendorCharonStartAuthorizationCommitFailure {
+      currentValidator = nil
+      phase = .closed
+      throw failure.underlying
     } catch let error as VendorCharonStartEncodingError {
       finishStart(.snapshotEncodingFailed, encodingError: error)
     } catch {

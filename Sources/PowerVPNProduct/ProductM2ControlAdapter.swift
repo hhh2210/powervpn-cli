@@ -103,8 +103,9 @@ package struct ProductM2ControlAdapter: Sendable {
     @Sendable (
       VendorCharonStartSnapshot,
       Int,
-      @escaping @Sendable () async -> Bool
-    ) -> ProductM2PendingStart
+      @escaping @Sendable () async -> Bool,
+      @escaping @Sendable () throws -> Void
+    ) throws -> ProductM2PendingStart
   private let emergencyOperation:
     @Sendable (
       Int,
@@ -113,11 +114,12 @@ package struct ProductM2ControlAdapter: Sendable {
     ) async -> ProductM2ControlReceipt
 
   package init(transport: RawVendorCharonControlTransport) {
-    beginOperation = { snapshot, timeoutMilliseconds, validator in
-      let pending = transport.beginStart(
+    beginOperation = { snapshot, timeoutMilliseconds, validator, commit in
+      let pending = try transport.beginStart(
         snapshot: snapshot,
         timeoutMilliseconds: timeoutMilliseconds,
-        peerGenerationValidator: validator
+        peerGenerationValidator: validator,
+        commitStartAuthorization: commit
       )
       return ProductM2PendingStart {
         let result = await pending.result()
@@ -182,16 +184,25 @@ package struct ProductM2ControlAdapter: Sendable {
         @escaping @Sendable () async -> Bool
       ) async -> ProductM2ControlReceipt
   ) {
-    beginOperation = beginStart
+    beginOperation = { snapshot, timeoutMilliseconds, validator, commit in
+      try commit()
+      return beginStart(snapshot, timeoutMilliseconds, validator)
+    }
     emergencyOperation = emergencyStop
   }
 
   package func beginStart(
     snapshot: VendorCharonStartSnapshot,
     timeoutMilliseconds: Int,
-    peerGenerationValidator: @escaping @Sendable () async -> Bool
-  ) -> ProductM2PendingStart {
-    beginOperation(snapshot, timeoutMilliseconds, peerGenerationValidator)
+    peerGenerationValidator: @escaping @Sendable () async -> Bool,
+    commitStartAuthorization: @escaping @Sendable () throws -> Void
+  ) throws -> ProductM2PendingStart {
+    try beginOperation(
+      snapshot,
+      timeoutMilliseconds,
+      peerGenerationValidator,
+      commitStartAuthorization
+    )
   }
 
   package func emergencyStop(

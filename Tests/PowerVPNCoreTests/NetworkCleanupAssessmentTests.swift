@@ -52,6 +52,19 @@ import Testing
     #expect(restored.allDimensionsRestored)
   }
 
+  @Test func structuralRouteDifferenceCannotPassCleanup() {
+    let before = snapshot(helperRuns: 10, structuralV4: fingerprint("1"))
+    let after = snapshot(helperRuns: 11, structuralV4: fingerprint("2"))
+    let result = NetworkCleanupAssessment.assess(
+      before: before,
+      after: after,
+      startRequestSent: true
+    )
+
+    #expect(!result.structuralRouteTablesEqual)
+    #expect(!result.allDimensionsRestored)
+  }
+
   @Test func vendorProcessResidueCannotPassCleanup() {
     let before = snapshot(helperRuns: 10)
     let residueToken = Data([4])

@@ -27,13 +27,17 @@ import Testing
     #expect(result.forceTerminationAccepted)
     #expect(result.exactReceiverTerminated)
     #expect(result.proofPersisted)
+    #expect(result.sourceObservation == .ready)
     #expect(!result.officialAppStillRunning)
     #expect(application.forceCount == 1)
-    #expect(trace.count("load") == 2)
+    #expect(trace.count("observe") == 1)
+    #expect(trace.count("load") == 1)
     #expect(trace.count("publish") == 1)
     #expect(trace.count("clear") == 0)
 
     let encoded = String(decoding: try JSONEncoder().encode(result), as: UTF8.self)
+    #expect(encoded.contains("\"schemaVersion\":2"))
+    #expect(encoded.contains("\"sourceObservation\":\"ready\""))
     for forbidden in ["synthetic-psk", "synthetic-session", "gateway", "inode"] {
       #expect(!encoded.contains(forbidden))
     }
@@ -79,9 +83,11 @@ import Testing
 
     #expect(result.outcome == .terminationRejected)
     #expect(result.sourceSnapshotComplete)
+    #expect(result.sourceObservation == .ready)
     #expect(result.officialAppStillRunning)
     #expect(application.forceCount == 1)
-    #expect(trace.count("load") == 1)
+    #expect(trace.count("observe") == 1)
+    #expect(trace.count("load") == 0)
     #expect(trace.count("publish") == 0)
     #expect(trace.count("clear") == 1)
   }
@@ -91,7 +97,9 @@ import Testing
     let application = HandoffApplication()
     let before = handoffNetworkSnapshot(10)
     let unavailable = NetworkCleanupSnapshot.unavailable(.commandFailed)
-    let clock = HandoffAdvancingClock(step: 20_000_000_000)
+    let clock = HandoffScriptedClock([
+      0, 0, 0, 0, 40_000_000_000, 60_000_000_000,
+    ])
     let coordinator = VendorAppNonLogoutHandoffCoordinator(
       dependencies: try handoffDependencies(
         application: application,
@@ -107,6 +115,7 @@ import Testing
     #expect(result.outcome == .cleanupUnproven)
     #expect(result.forceTerminationAccepted)
     #expect(result.exactReceiverTerminated)
+    #expect(result.sourceObservation == .ready)
     #expect(result.cleanup?.allDimensionsRestored == false)
     #expect(trace.count("publish") == 0)
     #expect(trace.count("clear") == 1)
@@ -122,12 +131,9 @@ import Testing
         snapshots: [before, before],
         finalGeneration: nil,
         trace: trace,
-        materialFactory: {
+        prefixObservation: {
           withUnsafeCurrentTask { $0?.cancel() }
-          return try vendorAppMaterial(
-            sourceSeal: handoffSourceSeal(),
-            sourceCurrent: { true }
-          )
+          return true
         }
       )
     )
@@ -185,36 +191,6 @@ import Testing
     #expect(result.outcome == .ready)
     #expect(result.cleanup?.allDimensionsRestored == true)
     #expect(application.forceCount == 1)
-    #expect(trace.count("publish") == 1)
-  }
-
-  @Test func boundedSourcePollAcceptsLaterStableRecord() async throws {
-    let trace = HandoffTrace()
-    let application = HandoffApplication()
-    let before = handoffNetworkSnapshot(10)
-    let after = handoffNetworkSnapshot(12)
-    let coordinator = VendorAppNonLogoutHandoffCoordinator(
-      dependencies: try handoffDependencies(
-        application: application,
-        snapshots: [before, before, after],
-        finalGeneration: handoffInactiveGeneration(12),
-        trace: trace,
-        materialFactory: {
-          if trace.count("load") == 2 {
-            throw VendorAppSessionSnapshotError.unavailable
-          }
-          return try vendorAppMaterial(
-            sourceSeal: handoffSourceSeal(),
-            sourceCurrent: { true }
-          )
-        }
-      )
-    )
-
-    let result = await coordinator.run(secondApproval: { .accepted })
-
-    #expect(result.outcome == .ready)
-    #expect(trace.count("load") == 3)
     #expect(trace.count("publish") == 1)
   }
 
