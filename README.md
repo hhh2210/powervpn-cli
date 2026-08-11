@@ -23,19 +23,30 @@ One separate explicit command performs the bounded local helper probe:
 powervpn helper status --probe --json
 ```
 
+One narrow onboarding command records a value-free boundary immediately before
+the official app is used:
+
+```sh
+powervpn vendor-once begin --json
+```
+
 On this Mac they currently establish:
 
 - PowerVPN 3.2.1 build 24572 is installed as x86_64;
-- the root-owned x86_64 charon helper is installed, launchd-observed, inactive,
-  and at generation run 20;
+- the root-owned x86_64 charon helper is installed, launchd-observed and
+  inactive at the latest value-free post-run observation;
 - the sealed installed portal profile is available;
 - the four passive commands do not launch the helper and therefore report
   `directXPCStatus=not_probed`. One explicit arm64 product probe issued only the
-  fixed `get_version` request, returned `current_reachable`, and observed the
-  helper inactive again at run 20;
-- the default observation path has no authenticated resource lease, so it
-  exposes no production resource catalog and its first missing required value
-  remains `common.sessionid`;
+  fixed `get_version` request and returned `current_reachable`. A second fixed
+  reachability request after the first real M2 attempt also succeeded;
+- `onboardingMode=vendor_once` now uses a pre-GUI cursor and only the official
+  app's subsequent normal-login generation. The official app auto-started its
+  resources; normal Cmd-Q then closed the GUI/helper path without an explicit
+  Portal logout;
+- the passive resource catalog exposed exactly one selectable resource,
+  `login21`. `snapshot --dry-run` constructed its complete snapshot in memory,
+  reported no missing field and serialized none of the snapshot material;
 - the Portal target now has a generation-bound, memory-only authenticated lease
   with a scoped resource-tree borrow, and Core has a nested typed charon
   `start_connection` contract instead of a forgeable field-name set;
@@ -103,39 +114,31 @@ the same-session provisional stop authority, and preserves late receipts while
 refusing to call them verified. A deadline report maps to exit `124`, while
 unproven cleanup retains the higher-priority exit `74`.
 
-The installed app currently supplies no legitimate `vendor_once` provider.
-Its signed bundle `resource.xml` contains static resource-shaped template data,
-but it is build-time material rather than a current-user authenticated
-generation and is therefore never consumed. Official authorized resources are
-held only in the GUI process after login and are cleared on logout; preferences
-and the credential-history database are not resource providers. Once a
-legitimate `vendor_once`
-authorized-resource provider exists, one approved transaction will own scoped
-snapshot construction, `start_connection`, a bounded same-session connected
-status wait, and an active network snapshot whose effective route for the
-locked SSH target uniquely resolves to a selected-resource binding introduced
-in this transaction. Only then may it run a fresh strict SSH proof. The same
-transaction retains the session through stop (or authenticated emergency
-cleanup), authorization close and value-free network restoration evidence. At
-the stop submission boundary it atomically rechecks that the latest vendor
-status is still connected. It has no retry and does not implement cross-process
-`connect`/`disconnect` state.
+The development `vendor_once` adapter is deliberately narrow. It does not
+reimplement Portal login or copy the vendor's TLS behavior. `vendor-once begin`
+persists only the pre-GUI source cursor; after normal official-app login and
+Cmd-Q, Product accepts only the new complete generation after that cursor,
+filters it to exactly one `login21` candidate, owns the material only in memory
+and consumes the cursor when the mutating acquisition is claimed. The signed
+bundle template, preferences and credential-history database remain rejected
+as authorization sources.
 
-All M2 verification so far is offline and synthetic. The real binary was run
-for one bounded helper `get_version` probe, `help`, strict rejection of a `--yes` bypass, the historical
-no-controlling-TTY gate (`exit 77`, `runtimeInvoked=false`), and the current
-default-provider gate (`exit 69`, `outcome=provider_unavailable`,
-`runtimeInvoked=false`). No Portal request, `start_connection`, SSH connection
-or network mutation ran. The product is therefore not yet a usable VPN and the
-Goal remains **ACTIVE**. The first blocker is the missing authorized-resource
-provider. The staged supervisor budget is now implemented and synthetically
-verified; its 120-second guarantee requires every future production provider
-to satisfy the bounded/cancellable contract. The product intentionally does
-not use a hard process kill that could abandon cleanup, and cannot guarantee a
-report after `SIGKILL`, an uninterruptible kernel wait, or a dependency that
-violates that contract. Fresh explicit approval will be required only after a
-lawful provider exists and immediately before the first bounded M2 live
-transaction.
+The first real M2 transaction has now run, but it did **not** connect. It
+submitted exactly one `start_connection`; that request timed out before any
+connected status, active-path proof or fresh SSH proof. Cleanup then submitted
+exactly one same-session provisional `stop_connection`, verified every cleanup
+dimension and finished in `disconnected` with zero retry. The one-shot cursor
+was consumed. A gatewayless point-to-point default-route shape encountered in
+this path is now canonicalized without weakening the required destination,
+interface or flags checks.
+
+One allowlisted `invalid HASH_V1` marker was observed after the M2 start. A
+subsequent fixed `get_version` request succeeded, so the current blocker is not
+generic XPC reachability and the complete dry-run excludes a missing snapshot
+field. The exact live blocker is the vendor start/session-reuse boundary after
+normal official-app Cmd-Q. The marker narrows that boundary but is not claimed
+as a fully isolated cryptographic root cause. The product is therefore still
+not a usable VPN and the Goal remains **ACTIVE**.
 
 ## Development
 

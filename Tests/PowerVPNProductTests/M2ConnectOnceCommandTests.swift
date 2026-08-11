@@ -160,10 +160,11 @@ import Testing
     }
   }
 
-  @Test func defaultUnavailableProviderStopsBeforeApprovalSignalAndRuntime() async throws {
+  @Test func unavailableProviderStopsBeforeApprovalSignalAndRuntime() async throws {
     let trace = M2CommandTrace()
     let result = try await runM2ConnectOnceCommand(
       validArguments,
+      authorizationAvailabilityFailure: { .providerUnavailable },
       generateApprovalCode: {
         trace.record("code")
         return "A1B2C3D4"

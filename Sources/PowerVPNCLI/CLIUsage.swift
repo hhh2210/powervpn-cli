@@ -20,6 +20,8 @@ func printCLIUsage() {
       xpc get-version [--timeout-ms N]
                              Read the installed charon helper version over exact XPC
       login                  Run the sealed username/password portal transaction
+      vendor-once begin --json
+                             Capture a value-free pre-onboarding source boundary
       doctor --json          Show product readiness and the first blocker
       helper status [--probe] --json
                              Show passive helper state; --probe performs one bounded get_version

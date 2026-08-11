@@ -17,6 +17,9 @@ struct PowerVPNCommand {
     } catch let error as ProductCommandError {
       FileHandle.standardError.write(Data("error: \(error)\n".utf8))
       Foundation.exit(64)
+    } catch let error as VendorOnceCommandError {
+      FileHandle.standardError.write(Data("error: \(error)\n".utf8))
+      Foundation.exit(64)
     } catch {
       FileHandle.standardError.write(Data("error: \(error)\n".utf8))
       Foundation.exit(1)
@@ -54,8 +57,23 @@ struct PowerVPNCommand {
       if result.exitCode != 0 {
         Foundation.exit(result.exitCode)
       }
+    case "vendor-once":
+      let result = try runVendorOnceCommand(arguments)
+      print(result.standardOutput)
+      if result.exitCode != 0 {
+        Foundation.exit(result.exitCode)
+      }
     case "m2":
-      let result = try await runM2ConnectOnceCommand(arguments)
+      let runtime = ProductM2CurrentMachineRuntime()
+      let result = try await runM2ConnectOnceCommand(
+        arguments,
+        authorizationAvailabilityFailure: {
+          runtime.authorizationAvailabilityFailure
+        },
+        runtime: { request, budget in
+          await runtime.run(request, budget: budget)
+        }
+      )
       print(result.standardOutput)
       if result.exitCode != 0 {
         Foundation.exit(result.exitCode)

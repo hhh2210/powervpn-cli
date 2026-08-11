@@ -38,11 +38,12 @@ enum NetworkCleanupText {
 }
 
 enum NetworkDefaultRouteCanonicalizer {
-  private static let required = ["destination", "gateway", "interface", "flags"]
+  private static let required = ["destination", "interface", "flags"]
+  private static let optional = ["mask", "gateway"]
 
   static func canonicalize(_ data: Data) throws -> NetworkCleanupFingerprint {
     var values: [String: String] = [:]
-    let accepted = Set(required + ["mask"])
+    let accepted = Set(required + optional)
     for rawLine in try NetworkCleanupText.lines(data) {
       let line = rawLine.trimmingCharacters(in: .whitespaces)
       guard !line.isEmpty, let colon = line.firstIndex(of: ":") else { continue }
@@ -57,13 +58,24 @@ enum NetworkDefaultRouteCanonicalizer {
     guard required.allSatisfy({ values[$0] != nil }) else {
       throw NetworkCleanupCanonicalizationError.invalidShape
     }
-    let records = (required + ["mask"]).compactMap { key in
+    if values["gateway"] == nil {
+      guard let interface = values["interface"], isExactUtunInterface(interface) else {
+        throw NetworkCleanupCanonicalizationError.invalidShape
+      }
+    }
+    let records = (required + optional).compactMap { key in
       values[key].map { "\(key)=\($0)" }
     }
     return .observed(
       count: 1,
       sha256: NetworkCleanupDigest.sha256(domain: "default-route", records: records)
     )
+  }
+
+  private static func isExactUtunInterface(_ value: String) -> Bool {
+    guard value.hasPrefix("utun") else { return false }
+    let suffix = value.dropFirst(4).utf8
+    return !suffix.isEmpty && suffix.allSatisfy { (0x30...0x39).contains($0) }
   }
 }
 

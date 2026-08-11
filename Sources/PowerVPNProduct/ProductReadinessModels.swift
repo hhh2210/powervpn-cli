@@ -19,6 +19,7 @@ public enum DirectXPCStatus: String, Codable, Equatable, Sendable {
 
 public enum ProductProfileSource: String, Codable, Equatable, Sendable {
   case sealedInstalledConfiguration = "sealed_installed_configuration"
+  case vendorAppSession = "vendor_app_session"
   case unavailable
 }
 

@@ -1351,3 +1351,49 @@ separately reviewed native onboarding path, implement it behind the existing
 source-neutral provider contract, and repeat all offline gates. Only then may a
 fresh approval name one exact resource and SSH target for the first bounded M2
 transaction.
+
+## 2026-08-11 — First vendor-once M2 live attempt: clean start/session failure
+
+M1 result: the narrow official-app onboarding path is now real. Before opening
+the GUI, `powervpn vendor-once begin --json` recorded a value-free cursor for
+the installed source. The official app then performed one normal login and its
+normal automatic resource start; normal Cmd-Q closed the GUI/helper path. The
+adapter accepted only the complete generation after that cursor and projected
+exactly one selectable resource, `login21`, with
+`onboardingMode=vendor_once`. `resources --json` returned that one resource and
+`snapshot --dry-run --json` returned a complete in-memory snapshot with no
+missing field, `containsSecrets=false` and `snapshotSerialized=false`.
+
+First live M2 result: one TTY-approved `login21`/`thu21` transaction submitted
+exactly one `start_connection`. The start timed out, so no connected status,
+active-network proof or fresh SSH proof was attempted or claimed. The retained
+same-session cleanup capability then submitted exactly one provisional
+`stop_connection`. The command performed no retry, consumed the one-shot
+onboarding cursor and finished truthfully in `disconnected`, not connected.
+
+Cleanup result: **PASS**. Cleanup verification was complete across default
+route, DNS, interface inventory, utun inventory, persistent routes, zero
+selected-route residue, Surge state, vendor processes and helper generation.
+No credential, cookie, PSK, route value, complete dictionary or raw log line was
+written into the report or this document.
+
+Live diagnosis: one allowlisted `invalid HASH_V1` marker occurred after the M2
+start. Its raw line and values are intentionally not retained here. A subsequent
+fixed `get_version` reachability request succeeded. Therefore the blocker is
+not generic helper/XPC reachability; the complete dry-run also rules out a
+missing required snapshot field. The exact current blocker is the vendor
+start/session-reuse boundary after normal official-app Cmd-Q. The marker is
+corroborating timing evidence, not a claim that its cryptographic cause is fully
+isolated.
+
+Production correction found on this path: the default-route canonicalizer now
+accepts the valid gatewayless point-to-point shape while continuing to require
+destination, interface and flags. This prevents a utun-style default route from
+being mislabeled as an unavailable cleanup observation; it does not relax any
+resource, session or helper-start gate.
+
+Product status: **M1 PASS, M2 NOT PASS, Goal ACTIVE**. The authorization source
+and complete `login21` snapshot now exist, and failure cleanup is proven on the
+real machine. A usable connection is still absent because the vendor helper did
+not accept/reach connected state with the just-onboarded material after GUI
+exit. No automatic relogin or second connection attempt was made.

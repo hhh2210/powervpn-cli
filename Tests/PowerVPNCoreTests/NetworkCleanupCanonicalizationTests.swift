@@ -35,10 +35,23 @@ import Testing
     }
   }
 
-  @Test func defaultRouteRejectsMissingAndRawNUL() {
+  @Test func defaultRouteAcceptsGatewaylessUtunButRejectsOtherIncompleteShapes() throws {
+    let pointToPoint = try NetworkDefaultRouteCanonicalizer.canonicalize(
+      Data("destination: default\nmask: default\ninterface: utun8\nflags: <UP>\n".utf8)
+    )
+    #expect(pointToPoint.isObserved)
+    for interface in ["en0", "utun", "utunfoo", "utun١"] {
+      #expect(throws: NetworkCleanupCanonicalizationError.invalidShape) {
+        try NetworkDefaultRouteCanonicalizer.canonicalize(
+          Data(
+            "destination: default\nmask: default\ninterface: \(interface)\nflags: <UP>\n".utf8
+          )
+        )
+      }
+    }
     #expect(throws: NetworkCleanupCanonicalizationError.invalidShape) {
       try NetworkDefaultRouteCanonicalizer.canonicalize(
-        Data("destination: default\ninterface: en0\nflags: <UP>\n".utf8)
+        Data("destination: default\nflags: <UP>\n".utf8)
       )
     }
     #expect(throws: NetworkCleanupCanonicalizationError.invalidUTF8) {

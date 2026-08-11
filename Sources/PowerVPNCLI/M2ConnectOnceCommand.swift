@@ -22,9 +22,7 @@ typealias M2ConnectOnceRuntimeOperation =
 
 func runM2ConnectOnceCommand(
   _ arguments: [String],
-  authorizationAvailabilityFailure: @escaping @Sendable () -> ProductM2AuthorizationFailure? = {
-    ProductM2CurrentMachineRuntime().authorizationAvailabilityFailure
-  },
+  authorizationAvailabilityFailure: @escaping @Sendable () -> ProductM2AuthorizationFailure?,
   generateApprovalCode: @escaping @Sendable () throws -> String = M2TTYApproval.secureCode,
   approval: M2TTYApproval = M2TTYApproval(),
   signalMonitorFactory: CLISignalMonitorFactory = { DarwinCLISignalMonitor() },
@@ -39,9 +37,7 @@ func runM2ConnectOnceCommand(
     else { return }
     try? await Task.sleep(for: .milliseconds(milliseconds))
   },
-  runtime: @escaping M2ConnectOnceRuntimeOperation = { request, budget in
-    await ProductM2CurrentMachineRuntime().run(request, budget: budget)
-  }
+  runtime: @escaping M2ConnectOnceRuntimeOperation
 ) async throws -> M2ConnectOnceCommandResult {
   let request = try parseM2ConnectOnceArguments(arguments)
   if let failure = authorizationAvailabilityFailure() {
