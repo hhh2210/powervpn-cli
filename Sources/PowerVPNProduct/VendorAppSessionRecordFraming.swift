@@ -4,9 +4,6 @@ struct VendorAppSessionLocatedRecord {
 }
 
 enum VendorAppSessionRecordFraming {
-  private static let producer = Array("com.leadsec.charon-xpc[".utf8)
-  private static let marker = Array("] charon xpc handle request:".utf8)
-  private static let markerText = Array("charon xpc handle request:".utf8)
   private static let maximumRecordBytes = 16_384
 
   private enum RPC {
@@ -15,6 +12,9 @@ enum VendorAppSessionRecordFraming {
     case updown
     case stop
     case logout
+    case missing
+    case nonScalar
+    case unknown
   }
 
   static func singleStartRecord(
@@ -22,135 +22,142 @@ enum VendorAppSessionRecordFraming {
   ) throws -> VendorAppSessionLocatedRecord {
     var lineStart = 0
     var start: VendorAppSessionLocatedRecord?
+    var firstProducerIdentity: Range<Int>?
     var requestCount = 0
+    var startCount = 0
+    var hasAmbiguousProducerSet = false
+    var sawMissingRPC = false
+    var sawNonScalarRPC = false
+    var sawUnknownRPC = false
+
     while lineStart < bytes.count {
-      if let dictionaryStart = try dictionaryStart(at: lineStart, in: bytes) {
-        requestCount += 1
-        let suffix = UnsafeRawBufferPointer(rebasing: bytes[dictionaryStart..<bytes.count])
-        var parser = VendorAppSessionLogParser(bytes: suffix)
-        let parsed: (VendorAppSessionLogNode, Int)
-        do {
-          parsed = try parser.parsePrefix()
-        } catch {
+      guard let lineEnd = newline(in: bytes, from: lineStart) else {
+        throw VendorAppSessionSnapshotError.incomplete
+      }
+      switch markerCount(in: bytes, range: lineStart..<lineEnd) {
+      case .zero:
+        lineStart = lineEnd + 1
+        continue
+      case .many:
+        throw VendorAppSessionSnapshotError.recordRejected(.markerMultiplicity)
+      case .one:
+        break
+      }
+      guard let header = try recordHeader(at: lineStart, in: bytes) else {
+        throw VendorAppSessionSnapshotError.recordRejected(.markerUnbalanced)
+      }
+
+      requestCount += 1
+      if let firstProducerIdentity {
+        if !sameProducerIdentity(bytes, firstProducerIdentity, header.producerIdentityRange) {
+          hasAmbiguousProducerSet = true
+        }
+      } else {
+        firstProducerIdentity = header.producerIdentityRange
+      }
+
+      let dictionaryStart = header.dictionaryStart
+      let suffix = UnsafeRawBufferPointer(rebasing: bytes[dictionaryStart..<bytes.count])
+      var parser = VendorAppSessionLogParser(bytes: suffix)
+      let parsed: (VendorAppSessionLogNode, Int)
+      do {
+        parsed = try parser.parsePrefix()
+      } catch let error as VendorAppSessionLogParserError {
+        guard parser.consumedByteCount < maximumRecordBytes else {
+          throw VendorAppSessionSnapshotError.recordRejected(.windowLimitReached)
+        }
+        switch error {
+        case .incomplete:
           throw VendorAppSessionSnapshotError.incomplete
+        case .invalidEncoding:
+          throw VendorAppSessionSnapshotError.recordRejected(.invalidEncoding)
+        case .syntax:
+          throw VendorAppSessionSnapshotError.recordRejected(.dictionarySyntax)
         }
-        guard (1...maximumRecordBytes).contains(parsed.1) else {
-          throw VendorAppSessionSnapshotError.malformed
-        }
-        let end = dictionaryStart + parsed.1
-        guard end + 1 < bytes.count, bytes[end] == 0x20, bytes[end + 1] == 0x0A else {
-          throw VendorAppSessionSnapshotError.incomplete
-        }
-        switch try rpc(of: parsed.0, bytes: suffix) {
-        case .start:
-          guard start == nil else { throw VendorAppSessionSnapshotError.malformed }
+      }
+      guard parsed.1 > 0 else {
+        throw VendorAppSessionSnapshotError.recordRejected(.dictionaryRootShape)
+      }
+      guard parsed.1 <= maximumRecordBytes else {
+        throw VendorAppSessionSnapshotError.recordRejected(.windowLimitReached)
+      }
+      let end = dictionaryStart + parsed.1
+      guard end < bytes.count else {
+        throw VendorAppSessionSnapshotError.incomplete
+      }
+      guard bytes[end] == 0x20 else {
+        throw VendorAppSessionSnapshotError.recordRejected(.markerUnbalanced)
+      }
+      guard end + 1 < bytes.count else {
+        throw VendorAppSessionSnapshotError.incomplete
+      }
+      guard bytes[end + 1] == 0x0A else {
+        throw VendorAppSessionSnapshotError.recordRejected(.markerUnbalanced)
+      }
+
+      switch try rpc(of: parsed.0, bytes: suffix) {
+      case .start:
+        startCount += 1
+        if start == nil {
           start = VendorAppSessionLocatedRecord(
             root: parsed.0,
             dictionaryRange: dictionaryStart..<end
           )
-        case .getVersion, .updown, .stop:
-          break
-        case .logout:
-          throw VendorAppSessionSnapshotError.stale
         }
-        lineStart = end + 2
-      } else {
-        guard let lineEnd = newline(in: bytes, from: lineStart) else {
-          throw VendorAppSessionSnapshotError.incomplete
-        }
-        if contains(markerText, in: bytes, range: lineStart..<lineEnd) {
-          throw VendorAppSessionSnapshotError.malformed
-        }
-        lineStart = lineEnd + 1
+      case .getVersion, .updown, .stop:
+        break
+      case .logout:
+        throw VendorAppSessionSnapshotError.stale
+      case .missing:
+        sawMissingRPC = true
+      case .nonScalar:
+        sawNonScalarRPC = true
+      case .unknown:
+        sawUnknownRPC = true
       }
+      lineStart = end + 2
     }
-    guard requestCount > 0, let start else {
-      throw VendorAppSessionSnapshotError.resourceUnavailable
-    }
-    return start
-  }
 
-  private static func dictionaryStart(
-    at lineStart: Int,
-    in bytes: UnsafeRawBufferPointer
-  ) throws -> Int? {
-    guard validTimestamp(at: lineStart, in: bytes),
-      matches(producer, at: lineStart + 24, in: bytes)
-    else { return nil }
-    var index = lineStart + 24 + producer.count
-    guard consumeCanonicalDecimal(in: bytes, index: &index, maximumDigits: 10),
-      index < bytes.count, bytes[index] == 0x3A
-    else { return nil }
-    index += 1
-    guard consumeCanonicalDecimal(in: bytes, index: &index, maximumDigits: 20),
-      matches(marker, at: index, in: bytes)
-    else { return nil }
-    index += marker.count
-    guard index + 1 < bytes.count, bytes[index] == 0x7B, bytes[index + 1] == 0x0A else {
-      throw VendorAppSessionSnapshotError.incomplete
+    if hasAmbiguousProducerSet {
+      throw VendorAppSessionSnapshotError.recordRejected(.ambiguousRecordSet)
     }
-    return index
-  }
-
-  private static func validTimestamp(
-    at start: Int,
-    in bytes: UnsafeRawBufferPointer
-  ) -> Bool {
-    guard start >= 0, start + 24 <= bytes.count, bytes[start + 23] == 0x20 else {
-      return false
+    if startCount > 1 {
+      throw VendorAppSessionSnapshotError.recordRejected(.duplicateStartRecord)
     }
-    let punctuation: [Int: UInt8] = [
-      4: 0x2D, 7: 0x2D, 10: 0x20, 13: 0x3A, 16: 0x3A, 19: 0x2E,
-    ]
-    for offset in 0..<23 {
-      if let expected = punctuation[offset] {
-        guard bytes[start + offset] == expected else { return false }
-      } else if !(0x30...0x39).contains(bytes[start + offset]) {
-        return false
-      }
+    if sawMissingRPC {
+      throw VendorAppSessionSnapshotError.recordRejected(.rpcMissing)
     }
-    guard let year = decimal(bytes, start, 4),
-      let month = decimal(bytes, start + 5, 2),
-      let day = decimal(bytes, start + 8, 2),
-      let hour = decimal(bytes, start + 11, 2),
-      let minute = decimal(bytes, start + 14, 2),
-      let second = decimal(bytes, start + 17, 2)
-    else { return false }
-    return (1...12).contains(month) && (1...days(in: month, year: year)).contains(day)
-      && (0...23).contains(hour) && (0...59).contains(minute)
-      && (0...60).contains(second)
-  }
-
-  private static func consumeCanonicalDecimal(
-    in bytes: UnsafeRawBufferPointer,
-    index: inout Int,
-    maximumDigits: Int
-  ) -> Bool {
-    let start = index
-    while index < bytes.count, (0x30...0x39).contains(bytes[index]),
-      index - start < maximumDigits
-    {
-      index += 1
+    if sawNonScalarRPC {
+      throw VendorAppSessionSnapshotError.recordRejected(.rpcNonScalar)
     }
-    let count = index - start
-    return count > 0 && (count == 1 || bytes[start] != 0x30)
+    if sawUnknownRPC {
+      throw VendorAppSessionSnapshotError.recordRejected(.rpcUnknown)
+    }
+    if let start { return start }
+    guard requestCount > 0 else {
+      throw VendorAppSessionSnapshotError.recordRejected(.markerMissing)
+    }
+    throw VendorAppSessionSnapshotError.recordRejected(.noStartRecord)
   }
 
   private static func rpc(
     of root: VendorAppSessionLogNode,
     bytes: UnsafeRawBufferPointer
   ) throws -> RPC {
-    guard let dictionary = root.dictionary,
-      let range = dictionary["rpc"]?.scalarRange,
+    guard let dictionary = root.dictionary else {
+      throw VendorAppSessionSnapshotError.recordRejected(.dictionaryRootShape)
+    }
+    guard let node = dictionary["rpc"] else { return .missing }
+    guard let range = node.scalarRange,
       range.lowerBound >= 0,
       range.upperBound <= bytes.count
-    else { throw VendorAppSessionSnapshotError.malformed }
+    else { return .nonScalar }
     if equal(bytes, range, "start_connection") { return .start }
     if equal(bytes, range, "get_version") { return .getVersion }
     if equal(bytes, range, "updown_nc") { return .updown }
     if equal(bytes, range, "stop_connection") { return .stop }
     if equal(bytes, range, "logout") { return .logout }
-    throw VendorAppSessionSnapshotError.malformed
+    return .unknown
   }
 
   private static func equal(
@@ -164,57 +171,4 @@ enum VendorAppSessionRecordFraming {
     }
   }
 
-  private static func matches(
-    _ expected: [UInt8],
-    at start: Int,
-    in bytes: UnsafeRawBufferPointer
-  ) -> Bool {
-    guard start >= 0, start + expected.count <= bytes.count else { return false }
-    return expected.indices.allSatisfy { bytes[start + $0] == expected[$0] }
-  }
-
-  private static func contains(
-    _ expected: [UInt8],
-    in bytes: UnsafeRawBufferPointer,
-    range: Range<Int>
-  ) -> Bool {
-    guard !expected.isEmpty, range.count >= expected.count else { return false }
-    for index in range.lowerBound...(range.upperBound - expected.count) {
-      if matches(expected, at: index, in: bytes) { return true }
-    }
-    return false
-  }
-
-  private static func newline(
-    in bytes: UnsafeRawBufferPointer,
-    from start: Int
-  ) -> Int? {
-    guard start >= 0, start < bytes.count else { return nil }
-    return (start..<bytes.count).first { bytes[$0] == 0x0A }
-  }
-
-  private static func days(in month: Int, year: Int) -> Int {
-    switch month {
-    case 2:
-      let leap =
-        year.isMultiple(of: 400)
-        || (year.isMultiple(of: 4) && !year.isMultiple(of: 100))
-      return leap ? 29 : 28
-    case 4, 6, 9, 11: return 30
-    default: return 31
-    }
-  }
-
-  private static func decimal(
-    _ bytes: UnsafeRawBufferPointer,
-    _ start: Int,
-    _ count: Int
-  ) -> Int? {
-    var value = 0
-    for index in start..<(start + count) {
-      guard (0x30...0x39).contains(bytes[index]) else { return nil }
-      value = value * 10 + Int(bytes[index] - 0x30)
-    }
-    return value
-  }
 }

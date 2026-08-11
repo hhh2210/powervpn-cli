@@ -1,13 +1,33 @@
 import Darwin
 import Foundation
 
+enum VendorAppSessionRecordRejectReason: Equatable, Sendable {
+  case invalidEncoding
+  case markerMissing
+  case markerUnbalanced
+  case markerMultiplicity
+  case rpcMissing
+  case rpcNonScalar
+  case rpcUnknown
+  case noStartRecord
+  case duplicateStartRecord
+  case ambiguousRecordSet
+  case dictionarySyntax
+  case dictionaryRootShape
+  case windowLimitReached
+}
+
 enum VendorAppSessionSnapshotError: Error, Equatable, Sendable {
   case unavailable
   case unsafeSource
   case changedDuringRead
+  case noAppendObserved
   case appendTooLarge
   case stale
   case malformed
+  case recordRejected(VendorAppSessionRecordRejectReason)
+  case requiredFieldMissing(VendorAppSessionRequiredField)
+  case requiredFieldWrongType(VendorAppSessionRequiredField)
   case resourceUnavailable
   case incomplete
 }
@@ -90,12 +110,14 @@ struct VendorAppSessionSnapshotSource: Sendable {
       UInt32(metadata.st_uid) == cursor.ownerUID,
       UInt32(metadata.st_mode) == cursor.mode,
       metadata.st_size >= 0,
-      UInt64(metadata.st_size) > cursor.size,
+      UInt64(metadata.st_size) >= cursor.size,
       !Self.earlier(metadata.st_mtimespec, than: cursor.modificationTime.timespecValue),
       !Self.earlier(metadata.st_ctimespec, than: cursor.changeTime.timespecValue)
     else { throw VendorAppSessionSnapshotError.unsafeSource }
+    guard UInt64(metadata.st_size) > cursor.size else {
+      throw VendorAppSessionSnapshotError.noAppendObserved
+    }
     let delta = UInt64(metadata.st_size) - cursor.size
-    guard delta > 0 else { throw VendorAppSessionSnapshotError.unavailable }
     guard delta <= UInt64(Self.maximumAppendBytes) else {
       throw VendorAppSessionSnapshotError.appendTooLarge
     }
@@ -207,10 +229,13 @@ struct VendorAppSessionSnapshotSource: Sendable {
       UInt32(metadata.st_uid) == cursor.ownerUID,
       UInt32(metadata.st_mode) == cursor.mode,
       metadata.st_size >= 0,
-      UInt64(metadata.st_size) > cursor.size,
+      UInt64(metadata.st_size) >= cursor.size,
       !earlier(metadata.st_mtimespec, than: cursor.modificationTime.timespecValue),
       !earlier(metadata.st_ctimespec, than: cursor.changeTime.timespecValue)
     else { throw VendorAppSessionSnapshotError.unsafeSource }
+    guard UInt64(metadata.st_size) > cursor.size else {
+      throw VendorAppSessionSnapshotError.noAppendObserved
+    }
     let delta = UInt64(metadata.st_size) - cursor.size
     guard delta <= UInt64(maximumAppendBytes) else {
       throw VendorAppSessionSnapshotError.appendTooLarge

@@ -40,6 +40,31 @@ import Testing
     }
   }
 
+  @Test func noAppendIsDistinctAndNeverMasksUnsafeMetadata() throws {
+    let cursor = try sourceCursor()
+    let unchanged = sourceMetadata(size: 1_024, timestamp: 101)
+    let writable = sourceMetadata(
+      size: 1_024,
+      timestamp: 101,
+      mode: S_IFREG | S_IRUSR | S_IWUSR | S_IWGRP
+    )
+
+    #expect(throws: VendorAppSessionSnapshotError.noAppendObserved) {
+      try VendorAppSessionSnapshotSource.validateBoundedPrefixMetadata(
+        cursor: cursor,
+        prefix: unchanged,
+        postRead: []
+      )
+    }
+    #expect(throws: VendorAppSessionSnapshotError.unsafeSource) {
+      try VendorAppSessionSnapshotSource.validateBoundedPrefixMetadata(
+        cursor: cursor,
+        prefix: writable,
+        postRead: []
+      )
+    }
+  }
+
   @Test func boundedPrefixRejectsAppendBeyondMaximumWindow() throws {
     let cursor = try sourceCursor()
     let prefix = sourceMetadata(size: 2_048, timestamp: 101)
@@ -69,7 +94,7 @@ import Testing
     #expect(throws: VendorAppSessionSnapshotError.stale) {
       _ = try vendorAppLocatedRecord(start + logout)
     }
-    #expect(throws: VendorAppSessionSnapshotError.malformed) {
+    #expect(throws: VendorAppSessionSnapshotError.recordRejected(.rpcUnknown)) {
       _ = try vendorAppLocatedRecord(start + malformed)
     }
   }

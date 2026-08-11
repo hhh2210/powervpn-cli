@@ -99,4 +99,118 @@ import Testing
       }
     }
   }
+
+  @Test func requiredFieldDomainIsClosedAndDeterministic() {
+    let fields = VendorAppSessionRequiredField.allCases
+    #expect(fields.count == 44)
+    #expect(Set(fields.map(\.rawValue)).count == fields.count)
+
+    let missingTwo = vendorAppReplacingFirst("    authport = 0;\n", with: "")
+      .replacingOccurrences(of: "    dns = \"10.0.0.1\";\n", with: "")
+    #expect(
+      throws: VendorAppSessionSnapshotError.requiredFieldMissing(.commonAuthport)
+    ) {
+      _ = try vendorAppMaterial(missingTwo)
+    }
+
+    let wrongRouteType = vendorAppReplacingFirst(
+      "net = \"11.11.30.52\";",
+      with: "net = injected-value-token;"
+    )
+    #expect(
+      throws: VendorAppSessionSnapshotError.requiredFieldWrongType(.routeNetwork)
+    ) {
+      _ = try vendorAppMaterial(wrongRouteType)
+    }
+  }
+
+  @Test func requiredValueShapeFailuresRetainTheirFixedFields() throws {
+    for root in [
+      vendorAppReplacingLogin21Status(with: "status = +1;"),
+      vendorAppReplacingLogin21Status(with: "status = 2147483648;"),
+    ] {
+      #expect(
+        throws: VendorAppSessionSnapshotError.requiredFieldWrongType(.tunnelStatus)
+      ) {
+        _ = try vendorAppMaterial(root)
+      }
+    }
+
+    let emptyGateway = vendorAppReplacingFirst(
+      "gateway = \"166.111.143.19\";",
+      with: "gateway = \"\";"
+    )
+    #expect(
+      throws: VendorAppSessionSnapshotError.requiredFieldWrongType(.commonGateway)
+    ) {
+      _ = try vendorAppMaterial(emptyGateway)
+    }
+
+    let bytes = Array(vendorAppSyntheticRoot.utf8)
+    try bytes.withUnsafeBytes { raw in
+      var parser = VendorAppSessionLogParser(bytes: raw)
+      let node = try parser.parseComplete()
+      var root = try #require(node.dictionary)
+      var common = try #require(root["common"]?.dictionary)
+      common["gateway"] = .scalar(
+        VendorAppSessionLogScalar(
+          range: bytes.count..<(bytes.count + 1),
+          style: .quoted
+        )
+      )
+      root["common"] = .dictionary(common)
+
+      #expect(
+        throws: VendorAppSessionSnapshotError.requiredFieldWrongType(.commonGateway)
+      ) {
+        try VendorAppSessionSnapshotSchema.validate(root: root, bytes: raw)
+      }
+    }
+  }
+
+  @Test func valuesExtrasAndMaterialRootStayNonValueBearingStructuralFailures() {
+    let extra = vendorAppReplacingFirst(
+      "    authport = 0;\n",
+      with: "    authport = 0;\n    injected-field = injected-value;\n"
+    )
+    let invalidValue = vendorAppReplacingFirst(
+      "type = rpc;",
+      with: "type = injected-literal;"
+    )
+    for root in [extra, invalidValue, "(not-a-root-dictionary)"] {
+      #expect(throws: VendorAppSessionSnapshotError.malformed) {
+        _ = try vendorAppMaterial(root)
+      }
+      let diagnosis = VendorAppNonLogoutHandoffSourceDiagnosis(.malformed)
+      #expect(diagnosis.observation == .dictionaryRootShape)
+      #expect(diagnosis.requiredField == nil)
+    }
+  }
+
+  @Test func wrongContainerTypeNamesOnlyItsFixedField() throws {
+    let bytes = Array(vendorAppSyntheticRoot.utf8)
+    try bytes.withUnsafeBytes { raw in
+      var parser = VendorAppSessionLogParser(bytes: raw)
+      let node = try parser.parseComplete()
+      var root = try #require(node.dictionary)
+      root["common"] = .array([])
+
+      #expect(
+        throws: VendorAppSessionSnapshotError.requiredFieldWrongType(.rootCommon)
+      ) {
+        try VendorAppSessionSnapshotSchema.validate(root: root, bytes: raw)
+      }
+    }
+  }
+  @Test func nonUniqueTunnelTopologyIsAmbiguousWithoutNamesEscaping() {
+    let duplicate = vendorAppSyntheticRoot.replacingOccurrences(
+      of: "tunnel-name = login52;",
+      with: "tunnel-name = login21;"
+    )
+    #expect(
+      throws: VendorAppSessionSnapshotError.recordRejected(.ambiguousRecordSet)
+    ) {
+      _ = try vendorAppMaterial(duplicate)
+    }
+  }
 }

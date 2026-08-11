@@ -163,8 +163,24 @@ struct M2TTYApproval: Sendable {
   ) -> M2TTYLineRead {
     let descriptor = open("/dev/tty", O_RDWR | O_CLOEXEC | O_NOCTTY | O_NONBLOCK)
     guard descriptor >= 0 else { return .unavailable }
+    return cancellableTerminalExchange(
+      prompt,
+      timeoutMilliseconds: timeoutMilliseconds,
+      ownedDescriptor: descriptor
+    )
+  }
+
+  static func cancellableTerminalExchange(
+    _ prompt: String,
+    timeoutMilliseconds: UInt64,
+    ownedDescriptor descriptor: Int32
+  ) -> M2TTYLineRead {
     defer { close(descriptor) }
     guard isatty(descriptor) == 1 else { return .unavailable }
+    let flags = fcntl(descriptor, F_GETFL)
+    guard flags >= 0, fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) == 0 else {
+      return .unavailable
+    }
 
     let now = DispatchTime.now().uptimeNanoseconds
     let duration = timeoutMilliseconds.multipliedReportingOverflow(by: 1_000_000)
@@ -179,20 +195,9 @@ struct M2TTYApproval: Sendable {
     var response = [UInt8]()
     response.reserveCapacity(8)
     while response.count <= 8 {
-      guard !Task.isCancelled,
-        let wait = boundedPollMilliseconds(deadline: deadline)
-      else { return .unavailable }
-      var pollDescriptor = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
-      let status = Darwin.poll(&pollDescriptor, 1, wait)
-      if status == 0 { continue }
-      if status < 0 {
-        if errno == EINTR { continue }
+      guard !Task.isCancelled, DispatchTime.now().uptimeNanoseconds < deadline else {
         return .unavailable
       }
-      if pollDescriptor.revents & Int16(POLLERR | POLLHUP | POLLNVAL) != 0 {
-        return .unavailable
-      }
-      guard pollDescriptor.revents & Int16(POLLIN) != 0 else { continue }
       var byte: UInt8 = 0
       let count = read(descriptor, &byte, 1)
       if count == 1 {
@@ -200,7 +205,11 @@ struct M2TTYApproval: Sendable {
         response.append(byte)
       } else if count == 0 {
         return .unavailable
-      } else if errno != EINTR, errno != EAGAIN, errno != EWOULDBLOCK {
+      } else if errno == EINTR {
+        continue
+      } else if errno == EAGAIN || errno == EWOULDBLOCK {
+        guard waitForTerminalRetry(deadline: deadline) else { return .unavailable }
+      } else {
         return .unavailable
       }
     }
@@ -216,25 +225,16 @@ struct M2TTYApproval: Sendable {
       guard let base = buffer.baseAddress else { return true }
       var written = 0
       while written < buffer.count {
-        guard !Task.isCancelled,
-          let wait = boundedPollMilliseconds(deadline: deadline)
-        else { return false }
-        var pollDescriptor = pollfd(fd: descriptor, events: Int16(POLLOUT), revents: 0)
-        let status = Darwin.poll(&pollDescriptor, 1, wait)
-        if status == 0 { continue }
-        if status < 0 {
-          if errno == EINTR { continue }
+        guard !Task.isCancelled, DispatchTime.now().uptimeNanoseconds < deadline else {
           return false
         }
-        if pollDescriptor.revents & Int16(POLLERR | POLLHUP | POLLNVAL) != 0 {
-          return false
-        }
-        guard pollDescriptor.revents & Int16(POLLOUT) != 0 else { continue }
         let count = write(descriptor, base.advanced(by: written), buffer.count - written)
         if count > 0 {
           written += count
-        } else if count < 0, errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK {
+        } else if count < 0, errno == EINTR {
           continue
+        } else if count < 0, errno == EAGAIN || errno == EWOULDBLOCK {
+          guard waitForTerminalRetry(deadline: deadline) else { return false }
         } else {
           return false
         }
@@ -243,12 +243,23 @@ struct M2TTYApproval: Sendable {
     }
   }
 
-  private static func boundedPollMilliseconds(deadline: UInt64) -> Int32? {
+  private static func waitForTerminalRetry(deadline: UInt64) -> Bool {
+    guard !Task.isCancelled else { return false }
     let now = DispatchTime.now().uptimeNanoseconds
-    guard now < deadline else { return nil }
+    guard now < deadline else { return false }
     let remaining = deadline - now
-    let milliseconds = remaining / 1_000_000 + (remaining % 1_000_000 == 0 ? 0 : 1)
-    return Int32(min(UInt64(cancellationPollMilliseconds), milliseconds))
+    let interval = min(remaining, UInt64(cancellationPollMilliseconds) * 1_000_000)
+    var request = timespec(
+      tv_sec: Int(interval / 1_000_000_000),
+      tv_nsec: Int(interval % 1_000_000_000)
+    )
+    while true {
+      var remainder = timespec()
+      if nanosleep(&request, &remainder) == 0 { break }
+      guard errno == EINTR, !Task.isCancelled else { return false }
+      request = remainder
+    }
+    return !Task.isCancelled
   }
 
   private static func writeAll(_ data: Data, to descriptor: Int32) -> Bool {

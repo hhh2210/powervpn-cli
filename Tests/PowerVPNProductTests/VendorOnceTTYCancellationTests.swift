@@ -89,6 +89,38 @@ import Testing
     )
     #expect(observation.invocationCount == 0)
   }
+  @Test func cancellableExchangeAcceptsLineOnRealPseudoTerminal() async throws {
+    var master: Int32 = -1
+    var slave: Int32 = -1
+    try #require(openpty(&master, &slave, nil, nil, nil) == 0)
+    let masterDescriptor = master
+    let slaveDescriptor = slave
+    defer { close(masterDescriptor) }
+
+    let responder = Task.detached {
+      var output = [UInt8](repeating: 0, count: 128)
+      let outputCount = Darwin.read(masterDescriptor, &output, output.count)
+      guard outputCount > 0 else { return ("", -1) }
+      let prompt = String(decoding: output.prefix(outputCount), as: UTF8.self)
+      let response = Data("A1B2C3D4\n".utf8)
+      let written = response.withUnsafeBytes { buffer in
+        Darwin.write(masterDescriptor, buffer.baseAddress, buffer.count)
+      }
+      return (prompt, written)
+    }
+    let exchange = Task.detached {
+      M2TTYApproval.cancellableTerminalExchange(
+        "approval: ",
+        timeoutMilliseconds: 1_000,
+        ownedDescriptor: slaveDescriptor
+      )
+    }
+
+    let (prompt, written) = await responder.value
+    #expect(prompt.contains("approval: "))
+    #expect(written == 9)
+    #expect(await exchange.value == .line("A1B2C3D4"))
+  }
 }
 
 private final class VendorOnceSyntheticBlockingRead: @unchecked Sendable {

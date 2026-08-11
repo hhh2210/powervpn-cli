@@ -28,30 +28,113 @@ package enum VendorAppNonLogoutHandoffSourceObservation:
   case sourceUnavailable = "source_unavailable"
   case unsafeSource = "unsafe_source"
   case changedDuringRead = "changed_during_read"
-  case appendTooLarge = "append_too_large"
-  case staleLogout = "stale_logout"
-  case malformedRecord = "malformed_record"
+  case noAppendObserved = "no_append_observed"
+  case windowLimitReached = "window_limit_reached"
+  case recordTruncated = "record_truncated"
+  case invalidEncoding = "invalid_encoding"
+  case markerMissing = "marker_missing"
+  case markerUnbalanced = "marker_unbalanced"
+  case markerMultiplicity = "marker_multiplicity"
+  case rpcMissing = "rpc_missing"
+  case rpcNonScalar = "rpc_non_scalar"
+  case rpcUnknown = "rpc_unknown"
+  case noStartRecord = "no_start_record"
+  case duplicateStartRecord = "duplicate_start_record"
+  case logoutObserved = "logout_observed"
+  case ambiguousRecordSet = "ambiguous_record_set"
+  case dictionarySyntax = "dictionary_syntax"
+  case dictionaryRootShape = "dictionary_root_shape"
+  case requiredFieldMissing = "required_field_missing"
+  case requiredFieldWrongType = "required_field_wrong_type"
   case resourceUnavailable = "resource_unavailable"
-  case incompleteRecord = "incomplete_record"
   case snapshotIncomplete = "snapshot_incomplete"
   case missingSourceSeal = "missing_source_seal"
+}
+
+package struct VendorAppNonLogoutHandoffSourceDiagnosis: Equatable, Sendable {
+  package let observation: VendorAppNonLogoutHandoffSourceObservation
+  package let requiredField: VendorAppSessionRequiredField?
+
+  package init(
+    _ observation: VendorAppNonLogoutHandoffSourceObservation,
+    requiredField: VendorAppSessionRequiredField? = nil
+  ) {
+    self.observation = observation
+    self.requiredField = requiredField
+  }
 
   init(_ error: VendorAppSessionSnapshotError) {
     switch error {
-    case .unavailable: self = .sourceUnavailable
-    case .unsafeSource: self = .unsafeSource
-    case .changedDuringRead: self = .changedDuringRead
-    case .appendTooLarge: self = .appendTooLarge
-    case .stale: self = .staleLogout
-    case .malformed: self = .malformedRecord
-    case .resourceUnavailable: self = .resourceUnavailable
-    case .incomplete: self = .incompleteRecord
+    case .unavailable:
+      self.init(VendorAppNonLogoutHandoffSourceObservation.sourceUnavailable)
+    case .unsafeSource:
+      self.init(VendorAppNonLogoutHandoffSourceObservation.unsafeSource)
+    case .changedDuringRead:
+      self.init(VendorAppNonLogoutHandoffSourceObservation.changedDuringRead)
+    case .noAppendObserved:
+      self.init(VendorAppNonLogoutHandoffSourceObservation.noAppendObserved)
+    case .appendTooLarge:
+      self.init(VendorAppNonLogoutHandoffSourceObservation.windowLimitReached)
+    case .stale:
+      self.init(VendorAppNonLogoutHandoffSourceObservation.logoutObserved)
+    case .malformed:
+      self.init(VendorAppNonLogoutHandoffSourceObservation.dictionaryRootShape)
+    case .recordRejected(let reason):
+      switch reason {
+      case .invalidEncoding:
+        self.init(VendorAppNonLogoutHandoffSourceObservation.invalidEncoding)
+      case .markerMissing:
+        self.init(VendorAppNonLogoutHandoffSourceObservation.markerMissing)
+      case .markerUnbalanced:
+        self.init(VendorAppNonLogoutHandoffSourceObservation.markerUnbalanced)
+      case .markerMultiplicity:
+        self.init(VendorAppNonLogoutHandoffSourceObservation.markerMultiplicity)
+      case .rpcMissing:
+        self.init(VendorAppNonLogoutHandoffSourceObservation.rpcMissing)
+      case .rpcNonScalar:
+        self.init(VendorAppNonLogoutHandoffSourceObservation.rpcNonScalar)
+      case .rpcUnknown:
+        self.init(VendorAppNonLogoutHandoffSourceObservation.rpcUnknown)
+      case .noStartRecord:
+        self.init(VendorAppNonLogoutHandoffSourceObservation.noStartRecord)
+      case .duplicateStartRecord:
+        self.init(VendorAppNonLogoutHandoffSourceObservation.duplicateStartRecord)
+      case .ambiguousRecordSet:
+        self.init(VendorAppNonLogoutHandoffSourceObservation.ambiguousRecordSet)
+      case .dictionarySyntax:
+        self.init(VendorAppNonLogoutHandoffSourceObservation.dictionarySyntax)
+      case .dictionaryRootShape:
+        self.init(VendorAppNonLogoutHandoffSourceObservation.dictionaryRootShape)
+      case .windowLimitReached:
+        self.init(VendorAppNonLogoutHandoffSourceObservation.windowLimitReached)
+      }
+    case .requiredFieldMissing(let field):
+      self.init(
+        VendorAppNonLogoutHandoffSourceObservation.requiredFieldMissing,
+        requiredField: field
+      )
+    case .requiredFieldWrongType(let field):
+      self.init(
+        VendorAppNonLogoutHandoffSourceObservation.requiredFieldWrongType,
+        requiredField: field
+      )
+    case .resourceUnavailable:
+      self.init(VendorAppNonLogoutHandoffSourceObservation.resourceUnavailable)
+    case .incomplete:
+      self.init(VendorAppNonLogoutHandoffSourceObservation.recordTruncated)
     }
   }
+
+  static let notObserved = Self(.notObserved)
+  static let ready = Self(.ready)
+  static let sourceUnavailable = Self(.sourceUnavailable)
+  static let changedDuringRead = Self(.changedDuringRead)
+  static let snapshotIncomplete = Self(.snapshotIncomplete)
+  static let missingSourceSeal = Self(.missingSourceSeal)
 }
 
 package struct VendorAppNonLogoutHandoffReport: Encodable, Sendable {
-  package static let schemaVersion = 2
+  package static let schemaVersion = 4
 
   package let schemaVersion = Self.schemaVersion
   package let outcome: VendorAppNonLogoutHandoffOutcome
@@ -66,6 +149,7 @@ package struct VendorAppNonLogoutHandoffReport: Encodable, Sendable {
   package let exactReceiverTerminated: Bool
   package let sourceSnapshotComplete: Bool
   package let sourceObservation: VendorAppNonLogoutHandoffSourceObservation
+  package let sourceRequiredField: VendorAppSessionRequiredField?
   package let proofPersisted: Bool
   package let officialAppStillRunning: Bool
   package let cleanup: VendorAppNonLogoutHandoffCleanupProof?
@@ -82,7 +166,7 @@ package struct VendorAppNonLogoutHandoffReport: Encodable, Sendable {
     forceTerminationAccepted: Bool,
     exactReceiverTerminated: Bool,
     sourceSnapshotComplete: Bool,
-    sourceObservation: VendorAppNonLogoutHandoffSourceObservation = .notObserved,
+    sourceDiagnosis: VendorAppNonLogoutHandoffSourceDiagnosis = .notObserved,
     proofPersisted: Bool,
     officialAppStillRunning: Bool,
     cleanup: VendorAppNonLogoutHandoffCleanupProof?
@@ -95,7 +179,8 @@ package struct VendorAppNonLogoutHandoffReport: Encodable, Sendable {
     self.forceTerminationAccepted = forceTerminationAccepted
     self.exactReceiverTerminated = exactReceiverTerminated
     self.sourceSnapshotComplete = sourceSnapshotComplete
-    self.sourceObservation = sourceObservation
+    sourceObservation = sourceDiagnosis.observation
+    sourceRequiredField = sourceDiagnosis.requiredField
     self.proofPersisted = proofPersisted
     self.officialAppStillRunning = officialAppStillRunning
     self.cleanup = cleanup

@@ -40,7 +40,7 @@ func waitForRestoredCleanup(
 
 enum VendorAppFinalMaterialPollResult {
   case ready(VendorAppSessionSnapshotMaterial)
-  case rejected(VendorAppNonLogoutHandoffSourceObservation)
+  case rejected(VendorAppNonLogoutHandoffSourceDiagnosis)
 }
 
 func waitForFinalMaterial(
@@ -48,7 +48,7 @@ func waitForFinalMaterial(
   deadline: UInt64,
   cursor: VendorAppOnboardingCursor
 ) async -> VendorAppFinalMaterialPollResult {
-  var lastObservation = VendorAppNonLogoutHandoffSourceObservation.sourceUnavailable
+  var lastDiagnosis = VendorAppNonLogoutHandoffSourceDiagnosis.sourceUnavailable
   while remainingMilliseconds(
     dependencies: dependencies,
     deadline: deadline,
@@ -57,25 +57,25 @@ func waitForFinalMaterial(
     do {
       let material = try dependencies.loadMaterial(cursor)
       if !material.validation.complete {
-        lastObservation = .snapshotIncomplete
+        lastDiagnosis = .snapshotIncomplete
         material.erase()
       } else if !material.sourceIsCurrent {
-        lastObservation = .changedDuringRead
+        lastDiagnosis = .changedDuringRead
         material.erase()
       } else if material.sourceSeal == nil {
-        lastObservation = .missingSourceSeal
+        lastDiagnosis = .missingSourceSeal
         material.erase()
       } else {
         return .ready(material)
       }
     } catch let error as VendorAppSessionSnapshotError {
-      lastObservation = VendorAppNonLogoutHandoffSourceObservation(error)
+      lastDiagnosis = VendorAppNonLogoutHandoffSourceDiagnosis(error)
     } catch {
-      lastObservation = .sourceUnavailable
+      lastDiagnosis = .sourceUnavailable
     }
     try? await Task.sleep(for: .milliseconds(200))
   }
-  return .rejected(lastObservation)
+  return .rejected(lastDiagnosis)
 }
 
 func remainingMilliseconds(
@@ -105,7 +105,7 @@ func postForceFailure(
     forceTerminationAccepted: true,
     exactReceiverTerminated: application.isTerminated,
     sourceSnapshotComplete: true,
-    sourceObservation: .ready,
+    sourceDiagnosis: .ready,
     officialAppStillRunning: !application.isTerminated
   )
 }

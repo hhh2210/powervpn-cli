@@ -16,6 +16,12 @@ struct VendorAppSessionLogScalar {
   let style: Style
 }
 
+enum VendorAppSessionLogParserError: Error {
+  case incomplete
+  case invalidEncoding
+  case syntax
+}
+
 struct VendorAppSessionLogParser {
   private let bytes: UnsafeRawBufferPointer
   private var index = 0
@@ -29,34 +35,53 @@ struct VendorAppSessionLogParser {
     self.bytes = bytes
   }
 
+  var consumedByteCount: Int {
+    index
+  }
+
   mutating func parsePrefix() throws -> (VendorAppSessionLogNode, Int) {
     let node = try parseValue(depth: 0)
     return (node, index)
   }
 
   mutating func parseComplete() throws -> VendorAppSessionLogNode {
-    let node = try parseValue(depth: 0)
-    skipWhitespace()
-    guard index == bytes.count else { throw VendorAppSessionSnapshotError.malformed }
-    return node
+    do {
+      let node = try parseValue(depth: 0)
+      skipWhitespace()
+      guard index == bytes.count else {
+        throw VendorAppSessionLogParserError.syntax
+      }
+      return node
+    } catch is VendorAppSessionLogParserError {
+      throw VendorAppSessionSnapshotError.malformed
+    }
   }
 
   private mutating func parseValue(depth: Int) throws -> VendorAppSessionLogNode {
-    guard depth <= maximumDepth else { throw VendorAppSessionSnapshotError.malformed }
+    guard depth <= maximumDepth else {
+      throw VendorAppSessionLogParserError.syntax
+    }
     nodeCount += 1
     guard nodeCount <= maximumNodeCount else {
-      throw VendorAppSessionSnapshotError.malformed
+      throw VendorAppSessionLogParserError.syntax
     }
     skipWhitespace()
-    guard let byte = current else { throw VendorAppSessionSnapshotError.malformed }
+    guard let byte = current else {
+      throw VendorAppSessionLogParserError.incomplete
+    }
     switch byte {
     case 0x7B:
-      guard depth < maximumDepth else { throw VendorAppSessionSnapshotError.malformed }
+      guard depth < maximumDepth else {
+        throw VendorAppSessionLogParserError.syntax
+      }
       return try parseDictionary(depth: depth + 1)
     case 0x28:
-      guard depth < maximumDepth else { throw VendorAppSessionSnapshotError.malformed }
+      guard depth < maximumDepth else {
+        throw VendorAppSessionLogParserError.syntax
+      }
       return try parseArray(depth: depth + 1)
-    default: return try .scalar(parseScalar())
+    default:
+      return try .scalar(parseScalar())
     }
   }
 
@@ -67,11 +92,13 @@ struct VendorAppSessionLogParser {
       skipWhitespace()
       if consume(0x7D) { return .dictionary(dictionary) }
       guard dictionary.count < maximumCollectionCount else {
-        throw VendorAppSessionSnapshotError.malformed
+        throw VendorAppSessionLogParserError.syntax
       }
       let keyRange = try parseScalar()
       let key = try keyString(keyRange)
-      guard dictionary[key] == nil else { throw VendorAppSessionSnapshotError.malformed }
+      guard dictionary[key] == nil else {
+        throw VendorAppSessionLogParserError.syntax
+      }
       skipWhitespace()
       try expect(0x3D)
       let value = try parseValue(depth: depth)
@@ -88,59 +115,72 @@ struct VendorAppSessionLogParser {
       skipWhitespace()
       if consume(0x29) { return .array(values) }
       guard values.count < maximumCollectionCount else {
-        throw VendorAppSessionSnapshotError.malformed
+        throw VendorAppSessionLogParserError.syntax
       }
       values.append(try parseValue(depth: depth))
       skipWhitespace()
       if consume(0x2C) {
         skipWhitespace()
-        guard current != 0x29 else { throw VendorAppSessionSnapshotError.malformed }
+        guard current != 0x29 else {
+          throw VendorAppSessionLogParserError.syntax
+        }
         continue
       }
-      guard current == 0x29 else { throw VendorAppSessionSnapshotError.malformed }
+      try expect(0x29)
+      return .array(values)
     }
   }
 
   private mutating func parseScalar() throws -> VendorAppSessionLogScalar {
     skipWhitespace()
-    guard let first = current else { throw VendorAppSessionSnapshotError.malformed }
+    guard let first = current else {
+      throw VendorAppSessionLogParserError.incomplete
+    }
     if first == 0x22 {
       index += 1
       let start = index
       while let byte = current, byte != 0x22 {
-        guard byte != 0x5C, byte >= 0x20, byte <= 0x7E,
-          index - start < maximumScalarBytes
-        else {
-          throw VendorAppSessionSnapshotError.malformed
+        guard isCanonicalSourceByte(byte) else {
+          throw VendorAppSessionLogParserError.invalidEncoding
+        }
+        guard byte != 0x5C, byte >= 0x20, index - start < maximumScalarBytes else {
+          throw VendorAppSessionLogParserError.syntax
         }
         index += 1
       }
-      guard current == 0x22 else { throw VendorAppSessionSnapshotError.malformed }
+      guard current == 0x22 else {
+        throw VendorAppSessionLogParserError.incomplete
+      }
       let range = start..<index
       index += 1
       return VendorAppSessionLogScalar(range: range, style: .quoted)
     }
     let start = index
     if first == 0x2F, let next = byte(at: index + 1), next == 0x2F || next == 0x2A {
-      throw VendorAppSessionSnapshotError.malformed
+      throw VendorAppSessionLogParserError.syntax
     }
     while let byte = current,
       !isWhitespace(byte),
       ![0x3B, 0x2C, 0x29, 0x7D, 0x3D, 0x7B, 0x28].contains(byte)
     {
-      guard byte >= 0x21, byte <= 0x7E, byte != 0x22, byte != 0x5C,
+      guard isCanonicalSourceByte(byte) else {
+        throw VendorAppSessionLogParserError.invalidEncoding
+      }
+      guard byte >= 0x21, byte != 0x22, byte != 0x5C,
         index - start < maximumScalarBytes
       else {
-        throw VendorAppSessionSnapshotError.malformed
+        throw VendorAppSessionLogParserError.syntax
       }
       if byte == 0x2F, let next = self.byte(at: index + 1),
         next == 0x2F || next == 0x2A
       {
-        throw VendorAppSessionSnapshotError.malformed
+        throw VendorAppSessionLogParserError.syntax
       }
       index += 1
     }
-    guard index > start else { throw VendorAppSessionSnapshotError.malformed }
+    guard index > start else {
+      throw VendorAppSessionLogParserError.syntax
+    }
     return VendorAppSessionLogScalar(range: start..<index, style: .bare)
   }
 
@@ -152,6 +192,10 @@ struct VendorAppSessionLogParser {
     byte == 0x20 || byte == 0x09 || byte == 0x0A || byte == 0x0D
   }
 
+  private func isCanonicalSourceByte(_ byte: UInt8) -> Bool {
+    isWhitespace(byte) || (0x20...0x7E).contains(byte)
+  }
+
   private var current: UInt8? {
     byte(at: index)
   }
@@ -161,7 +205,12 @@ struct VendorAppSessionLogParser {
   }
 
   private mutating func expect(_ byte: UInt8) throws {
-    guard consume(byte) else { throw VendorAppSessionSnapshotError.malformed }
+    guard current != nil else {
+      throw VendorAppSessionLogParserError.incomplete
+    }
+    guard consume(byte) else {
+      throw VendorAppSessionLogParserError.syntax
+    }
   }
 
   private mutating func consume(_ byte: UInt8) -> Bool {
@@ -180,7 +229,9 @@ struct VendorAppSessionLogParser {
           || (0x61...0x7A).contains(byte)
           || byte == 0x2D || byte == 0x5F
       })
-    else { throw VendorAppSessionSnapshotError.malformed }
+    else {
+      throw VendorAppSessionLogParserError.syntax
+    }
     return String(decoding: bytes[range], as: UTF8.self)
   }
 }

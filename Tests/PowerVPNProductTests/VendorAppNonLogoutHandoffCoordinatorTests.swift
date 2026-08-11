@@ -36,9 +36,17 @@ import Testing
     #expect(trace.count("clear") == 0)
 
     let encoded = String(decoding: try JSONEncoder().encode(result), as: UTF8.self)
-    #expect(encoded.contains("\"schemaVersion\":2"))
+    #expect(encoded.contains("\"schemaVersion\":4"))
     #expect(encoded.contains("\"sourceObservation\":\"ready\""))
-    for forbidden in ["synthetic-psk", "synthetic-session", "gateway", "inode"] {
+    for forbidden in [
+      "synthetic-psk", "synthetic-session", "gateway", "inode",
+      "no_append_observed", "window_limit_reached", "record_truncated",
+      "invalid_encoding", "marker_missing", "marker_unbalanced", "marker_multiplicity",
+      "rpc_missing", "rpc_non_scalar", "rpc_unknown", "no_start_record",
+      "duplicate_start_record", "logout_observed", "ambiguous_record_set",
+      "dictionary_syntax", "dictionary_root_shape", "required_field_missing",
+      "required_field_wrong_type", "sourceRequiredField",
+    ] {
       #expect(!encoded.contains(forbidden))
     }
   }

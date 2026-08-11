@@ -111,7 +111,7 @@ func finishAfterTermination(
       forceTerminationAccepted: true,
       exactReceiverTerminated: true,
       sourceSnapshotComplete: true,
-      sourceObservation: .ready,
+      sourceDiagnosis: .ready,
       officialAppStillRunning: false,
       cleanup: observedCleanup
     )
@@ -125,7 +125,7 @@ func finishAfterTermination(
   switch finalMaterial {
   case .ready(let readyMaterial):
     material = readyMaterial
-  case .rejected(let sourceObservation):
+  case .rejected(let sourceDiagnosis):
     let cleared = dependencies.clearCursor(cursor)
     return report(
       .sourceNotReady,
@@ -135,7 +135,7 @@ func finishAfterTermination(
       secondApproval: approval,
       forceTerminationAccepted: true,
       exactReceiverTerminated: true,
-      sourceObservation: sourceObservation,
+      sourceDiagnosis: sourceDiagnosis,
       officialAppStillRunning: false,
       cleanup: cleanup
     )
@@ -156,7 +156,7 @@ func finishAfterTermination(
       secondApproval: approval,
       forceTerminationAccepted: true,
       exactReceiverTerminated: true,
-      sourceObservation: .missingSourceSeal,
+      sourceDiagnosis: .missingSourceSeal,
       officialAppStillRunning: false,
       cleanup: cleanup
     )
@@ -178,7 +178,7 @@ func finishAfterTermination(
       forceTerminationAccepted: true,
       exactReceiverTerminated: true,
       sourceSnapshotComplete: true,
-      sourceObservation: .ready,
+      sourceDiagnosis: .ready,
       proofPersisted: true,
       officialAppStillRunning: false,
       cleanup: cleanup
@@ -194,7 +194,7 @@ func finishAfterTermination(
       forceTerminationAccepted: true,
       exactReceiverTerminated: true,
       sourceSnapshotComplete: true,
-      sourceObservation: .ready,
+      sourceDiagnosis: .ready,
       officialAppStillRunning: false,
       cleanup: cleanup
     )

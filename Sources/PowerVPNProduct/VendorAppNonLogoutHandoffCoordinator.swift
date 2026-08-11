@@ -92,7 +92,7 @@ package struct VendorAppNonLogoutHandoffCoordinator: Sendable {
       )
     }
 
-    let sourceObservation = await waitForFreshSnapshot(cursor)
+    let sourceDiagnosis = await waitForFreshSnapshot(cursor)
     guard !Task.isCancelled else {
       let cleared = dependencies.clearCursor(cursor)
       return report(
@@ -101,12 +101,12 @@ package struct VendorAppNonLogoutHandoffCoordinator: Sendable {
         cursorPersisted: !cleared,
         officialAppLaunched: true,
         secondApproval: approval,
-        sourceSnapshotComplete: sourceObservation == .ready,
-        sourceObservation: sourceObservation,
+        sourceSnapshotComplete: sourceDiagnosis.observation == .ready,
+        sourceDiagnosis: sourceDiagnosis,
         officialAppStillRunning: !application.isTerminated
       )
     }
-    guard sourceObservation == .ready else {
+    guard sourceDiagnosis.observation == .ready else {
       let cleared = dependencies.clearCursor(cursor)
       return report(
         .sourceNotReady,
@@ -114,7 +114,7 @@ package struct VendorAppNonLogoutHandoffCoordinator: Sendable {
         cursorPersisted: !cleared,
         officialAppLaunched: true,
         secondApproval: approval,
-        sourceObservation: sourceObservation,
+        sourceDiagnosis: sourceDiagnosis,
         officialAppStillRunning: !application.isTerminated
       )
     }
@@ -127,7 +127,7 @@ package struct VendorAppNonLogoutHandoffCoordinator: Sendable {
         officialAppLaunched: true,
         secondApproval: approval,
         sourceSnapshotComplete: true,
-        sourceObservation: .ready,
+        sourceDiagnosis: .ready,
         officialAppStillRunning: !application.isTerminated
       )
     }
@@ -140,7 +140,7 @@ package struct VendorAppNonLogoutHandoffCoordinator: Sendable {
         officialAppLaunched: true,
         secondApproval: approval,
         sourceSnapshotComplete: true,
-        sourceObservation: .ready,
+        sourceDiagnosis: .ready,
         officialAppStillRunning: !application.isTerminated
       )
     }
@@ -159,30 +159,30 @@ package struct VendorAppNonLogoutHandoffCoordinator: Sendable {
 
   private func waitForFreshSnapshot(
     _ cursor: VendorAppOnboardingCursor
-  ) async -> VendorAppNonLogoutHandoffSourceObservation {
+  ) async -> VendorAppNonLogoutHandoffSourceDiagnosis {
     let started = dependencies.monotonicNowNanoseconds()
     let duration: UInt64 = 5_000_000_000
     guard started <= UInt64.max - duration else { return .sourceUnavailable }
     let deadline = started + duration
-    var lastObservation = VendorAppNonLogoutHandoffSourceObservation.sourceUnavailable
+    var lastDiagnosis = VendorAppNonLogoutHandoffSourceDiagnosis.sourceUnavailable
 
     while !Task.isCancelled, dependencies.monotonicNowNanoseconds() < deadline {
       do {
         let complete = try dependencies.observeBoundedPrefix(cursor)
         if !complete {
-          lastObservation = .snapshotIncomplete
+          lastDiagnosis = .snapshotIncomplete
         } else {
           return .ready
         }
       } catch let error as VendorAppSessionSnapshotError {
-        lastObservation = VendorAppNonLogoutHandoffSourceObservation(error)
+        lastDiagnosis = VendorAppNonLogoutHandoffSourceDiagnosis(error)
       } catch {
-        lastObservation = .sourceUnavailable
+        lastDiagnosis = .sourceUnavailable
       }
       guard !Task.isCancelled else { break }
       try? await Task.sleep(for: .milliseconds(200))
     }
-    return lastObservation
+    return lastDiagnosis
   }
 
   private func cancelled(

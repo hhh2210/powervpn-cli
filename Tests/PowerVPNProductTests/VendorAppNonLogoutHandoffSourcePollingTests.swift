@@ -90,4 +90,30 @@ import Testing
     #expect(application.forceCount == 0)
     #expect(trace.count("clear") == 1)
   }
+
+  @Test func fixedRequiredFieldFailureReachesProductReport() async throws {
+    let trace = HandoffTrace()
+    let application = HandoffApplication()
+    let before = handoffNetworkSnapshot(10)
+    let clock = HandoffScriptedClock([0, 0, 5_000_000_000])
+    let coordinator = VendorAppNonLogoutHandoffCoordinator(
+      dependencies: try handoffDependencies(
+        application: application,
+        snapshots: [before, before],
+        finalGeneration: nil,
+        trace: trace,
+        prefixObservation: {
+          throw VendorAppSessionSnapshotError.requiredFieldMissing(.commonGateway)
+        },
+        monotonicNowNanoseconds: clock.now
+      )
+    )
+
+    let result = await coordinator.run(secondApproval: { .accepted })
+
+    #expect(result.outcome == .sourceNotReady)
+    #expect(result.sourceObservation == .requiredFieldMissing)
+    #expect(result.sourceRequiredField == .commonGateway)
+    #expect(application.forceCount == 0)
+  }
 }
