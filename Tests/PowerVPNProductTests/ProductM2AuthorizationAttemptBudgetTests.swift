@@ -30,7 +30,7 @@ import Testing
   @Test func resultIsOneShotAndCompletionClearsTheCancelAction() async {
     let observation = ProductM2AuthorizationAttemptObservation()
     let attempt = ProductM2AuthorizationAttempt(
-      source: .vendorOnce,
+      source: .nativePortal,
       operation: {
         observation.recordResult()
         return rejectedAuthorization(.providerUnavailable)
@@ -171,7 +171,7 @@ private func rejectedAuthorization(
   _ failure: ProductM2AuthorizationFailure
 ) -> ProductM2AuthorizedResourceAcquisition {
   .rejected(
-    source: .vendorOnce,
+    source: .nativePortal,
     failure: failure,
     cleanup: ProductM2AuthorizationCloseReceipt(
       outcome: .notRequired,

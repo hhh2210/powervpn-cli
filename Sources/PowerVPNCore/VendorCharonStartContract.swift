@@ -75,7 +75,6 @@ public enum VendorCharonStartMaterialSource: String, CaseIterable, Codable, Send
   case authenticatedPortalResource = "authenticated_portal_resource"
   case authenticatedPortalOrigin = "authenticated_portal_origin"
   case authenticatedPortalMetadata = "authenticated_portal_metadata"
-  case installedVendorOnboarding = "installed_vendor_onboarding"
 }
 
 public enum VendorCharonStartContract {

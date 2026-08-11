@@ -1,7 +1,6 @@
 import Foundation
 
 public enum ProductM2AuthorizationSource: String, Encodable, Equatable, Sendable {
-  case vendorOnce = "vendor_once"
   case nativePortal = "native_portal"
 }
 
@@ -81,10 +80,10 @@ package struct ProductM2AuthorizationAttempt: Sendable {
   }
 }
 
-package struct ProductM2UnavailableVendorOnceProvider:
+package struct ProductM2UnavailableNativePortalProvider:
   ProductM2AuthorizedResourceProviding
 {
-  package let source = ProductM2AuthorizationSource.vendorOnce
+  package let source = ProductM2AuthorizationSource.nativePortal
   package let availabilityFailure: ProductM2AuthorizationFailure? = .providerUnavailable
 
   package init() {}
@@ -93,10 +92,10 @@ package struct ProductM2UnavailableVendorOnceProvider:
     budget: ProductM2AuthorizationBudget
   ) -> ProductM2AuthorizationAttempt {
     ProductM2AuthorizationAttempt(
-      source: .vendorOnce,
+      source: .nativePortal,
       operation: {
         .rejected(
-          source: .vendorOnce,
+          source: .nativePortal,
           failure: budget.work.hasRemaining ? .providerUnavailable : .timedOut,
           cleanup: ProductM2AuthorizationCloseReceipt(
             outcome: .notRequired,

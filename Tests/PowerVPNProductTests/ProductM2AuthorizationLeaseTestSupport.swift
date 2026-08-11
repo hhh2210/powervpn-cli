@@ -10,7 +10,7 @@ func testAuthorizationLease(
   eraseSucceeds: Bool = true
 ) -> ProductM2AuthorizedResourceLease {
   ProductM2AuthorizedResourceLease(
-    source: .vendorOnce,
+    source: .nativePortal,
     catalog: {
       state.recordCatalog()
       return try ProductM2PortalAdapter.catalog(snapshot: snapshot)

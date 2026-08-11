@@ -44,7 +44,7 @@ import Testing
     let snapshot = fixture.snapshot
     let trace = ProductM2TestTrace()
     let lease = ProductM2AuthorizedResourceLease(
-      source: .vendorOnce,
+      source: .nativePortal,
       catalog: { try ProductM2PortalAdapter.catalog(snapshot: snapshot) },
       prepare: { handle, target in
         try wrappedPreparedResource(

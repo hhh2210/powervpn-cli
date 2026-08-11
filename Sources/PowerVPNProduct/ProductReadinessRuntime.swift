@@ -58,15 +58,9 @@ public struct InstalledProductReadinessObserver: ProductReadinessObserving {
     let generation = LaunchdVendorHelperGenerationObserver().observe()
     let preflightSafe = InstalledVendorXPCPreflightChecker()
       .check(generation: generation).safeToProbe
-    let vendorSessionCandidate = VendorAppSessionProvider().readinessCandidate()
-    let profileSource: ProductProfileSource
-    if vendorSessionCandidate != nil {
-      profileSource = .vendorAppSession
-    } else {
-      profileSource =
-        (try? InstalledConfigDiscovery.discoverCurrentMachine()) == nil
-        ? .unavailable : .sealedInstalledConfiguration
-    }
+    let profileSource: ProductProfileSource =
+      (try? InstalledConfigDiscovery.discoverCurrentMachine()) == nil
+      ? .unavailable : .sealedInstalledConfiguration
     return ProductReadinessObservation(
       installedVersion: installation.appVersion,
       installedBuild: installation.appBuild,
@@ -77,8 +71,8 @@ public struct InstalledProductReadinessObserver: ProductReadinessObserving {
       directXPCStatus: .notProbed,
       directXPCPreflightSafe: preflightSafe,
       profileSource: profileSource,
-      resourceSource: vendorSessionCandidate == nil ? .unavailable : .installedVendorOnboarding,
-      resourceCandidates: vendorSessionCandidate.map { [$0] } ?? []
+      resourceSource: .unavailable,
+      resourceCandidates: []
     )
   }
 
@@ -247,7 +241,7 @@ public struct ProductReadinessRuntime: Sendable {
 extension ProductResourceSource {
   fileprivate var isAuthorized: Bool {
     switch self {
-    case .authenticatedPortalSnapshot, .installedVendorOnboarding: true
+    case .authenticatedPortalSnapshot: true
     case .unavailable: false
     }
   }

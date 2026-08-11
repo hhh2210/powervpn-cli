@@ -47,7 +47,7 @@ import Testing
     #expect(coordinatorTrace.count("emergency_stop") == 0)
   }
 
-  @Test func defaultVendorOnceProviderFailsBeforeNetworkPortalOrControl() async {
+  @Test func defaultNativePortalProviderFailsBeforeNetworkPortalOrControl() async {
     let trace = CurrentMachineRuntimeTrace()
     let coordinatorTrace = ProductM2TestTrace()
     let runtime = ProductM2CurrentMachineRuntime(
@@ -77,7 +77,7 @@ import Testing
     #expect(report.schemaVersion == 7)
     #expect(report.outcome == .authorizationAcquisitionRejected)
     #expect(report.firstBadEvent == .authorizationAcquisitionRejected)
-    #expect(report.authorizationSource == .vendorOnce)
+    #expect(report.authorizationSource == .nativePortal)
     #expect(report.authorizationAcquisition == .rejected)
     #expect(report.authorizationFailure == .providerUnavailable)
     #expect(report.authorizationOwnedMaterialErased)

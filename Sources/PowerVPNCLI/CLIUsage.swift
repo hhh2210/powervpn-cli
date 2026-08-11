@@ -20,14 +20,12 @@ func printCLIUsage() {
       xpc get-version [--timeout-ms N]
                              Read the installed charon helper version over exact XPC
       login                  Run the sealed username/password portal transaction
-      vendor-once handoff --json
-                             Run the two-approval official-App non-logout handoff
       doctor --json          Show product readiness and the first blocker
       helper status [--probe] --json
                              Show passive helper state; --probe performs one bounded get_version
       resources --json       List selectable authorized resources, if available
       snapshot --dry-run --json
-                             Check vendor snapshot completeness without serializing it
+                             Check authorized snapshot completeness without serializing it
       m2 connect-once --resource-display-name <exact> --ssh-target <thu21|thu52> --json
                              Run one approved M2 connect/prove/cleanup transaction
 

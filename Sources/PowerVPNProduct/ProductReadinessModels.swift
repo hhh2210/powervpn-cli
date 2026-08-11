@@ -8,7 +8,7 @@ public enum ProductState: String, Codable, Equatable, Sendable {
 }
 
 public enum ProductOnboardingMode: String, Codable, Equatable, Sendable {
-  case vendorOnce = "vendor_once"
+  case nativePortal = "native_portal"
 }
 
 public enum DirectXPCStatus: String, Codable, Equatable, Sendable {
@@ -19,13 +19,11 @@ public enum DirectXPCStatus: String, Codable, Equatable, Sendable {
 
 public enum ProductProfileSource: String, Codable, Equatable, Sendable {
   case sealedInstalledConfiguration = "sealed_installed_configuration"
-  case vendorAppSession = "vendor_app_session"
   case unavailable
 }
 
 public enum ProductResourceSource: String, Codable, Equatable, Sendable {
   case authenticatedPortalSnapshot = "authenticated_portal_snapshot"
-  case installedVendorOnboarding = "installed_vendor_onboarding"
   case unavailable
 }
 
@@ -64,7 +62,7 @@ public struct ProductHelperGeneration: Encodable, Equatable, Sendable {
 public struct ProductDoctorReport: Encodable, Equatable, Sendable {
   public let schemaVersion = 2
   public let productState: ProductState
-  public let onboardingMode = ProductOnboardingMode.vendorOnce
+  public let onboardingMode = ProductOnboardingMode.nativePortal
   public let installedVersion: String?
   public let installedBuild: String?
   public let installedArchitectures: [String]
@@ -98,7 +96,7 @@ public struct ProductHelperStatusReport: Encodable, Equatable, Sendable {
 public struct ProductResourcesReport: Encodable, Equatable, Sendable {
   public let schemaVersion = 3
   public let productState: ProductState
-  public let onboardingMode = ProductOnboardingMode.vendorOnce
+  public let onboardingMode = ProductOnboardingMode.nativePortal
   public let profileSource: ProductProfileSource
   public let resourceSource: ProductResourceSource
   public let selectableResourceCount: Int

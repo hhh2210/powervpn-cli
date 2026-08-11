@@ -39,7 +39,7 @@ import Testing
     let snapshot = fixture.snapshot
     let state = AuthorizationLeaseTestState()
     let lease = ProductM2AuthorizedResourceLease(
-      source: .vendorOnce,
+      source: .nativePortal,
       catalog: {
         state.recordCatalog()
         return try ProductM2PortalAdapter.catalog(snapshot: snapshot)

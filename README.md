@@ -23,64 +23,15 @@ One separate explicit command performs the bounded local helper probe:
 powervpn helper status --probe --json
 ```
 
-One narrow, two-approval onboarding supervisor owns the complete official-app
-handoff window:
+On this Mac the helper remains observable, while the latest smoke reports the
+sealed installed profile and authorized resource as unavailable. Readiness
+reports `onboardingMode=native_portal`, `resourceSource=unavailable`, an empty
+resource catalog and `authorized_resource_provider_unavailable`. The readiness
+path may inspect only the sealed installed profile; it does not read session
+material from the vendor helper log.
 
-```sh
-powervpn vendor-once handoff --json
-```
-
-On this Mac they currently establish:
-
-- PowerVPN 3.2.1 build 24572 is installed as x86_64;
-- the root-owned x86_64 charon helper is installed, launchd-observed and
-  inactive at the latest value-free post-run observation;
-- the sealed installed portal profile is available;
-- the four passive commands do not launch the helper and therefore report
-  `directXPCStatus=not_probed`. One explicit arm64 product probe issued only the
-  fixed `get_version` request and returned `current_reachable`. A second fixed
-  reachability request after the first real M2 attempt also succeeded;
-- `onboardingMode=vendor_once` uses a pre-GUI cursor and only the official
-  app's subsequent normal-login generation. Static inspection after the first
-  experiment proved that normal Cmd-Q also initiates the vendor Portal logout,
-  so legacy `vendor-once begin` cursors are now rejected;
-- the passive resource catalog exposed exactly one selectable resource,
-  `login21`. `snapshot --dry-run` constructed its complete snapshot in memory,
-  reported no missing field and serialized none of the snapshot material;
-- the Portal target now has a generation-bound, memory-only authenticated lease
-  with a scoped resource-tree borrow, and Core has a nested typed charon
-  `start_connection` contract instead of a forgeable field-name set;
-- Product accepts statically proven XMLReader helper leaves only as element
-  attributes. Each resource display name is the first `TUNNEL@tunnel-name`,
-  while `VERSION@major` is generation-bound Portal metadata;
-- the same-resource SP2 mapper now covers session ID (only `CLIENT@id`, never
-  the Portal cookie), VIP, IKE port/version, IKE/ESP proposals, PSK/lifetimes,
-  tunnel direct/default fields, map ID, negotiate mode, direct IPv4/CIDR routes
-  and the exact empty-route shape. Ascending IPv4 ranges become a minimal CIDR
-  cover; malformed or reversed ranges fail closed, with reversed-range rejection
-  an intentional safety divergence from the vendor loop;
-- sealed gateway provenance is now closed from the selected `VSGAddressModel`
-  row through `VSGService.vpnAddress`, numeric-IPv4 `getaddrinfo` identity and
-  the builder's `common.gateway`. Hostnames, IPv6 and any different literal
-  still fail closed;
-- Product's `withValidatedStartSnapshot` keeps gateway, resource leaves and the
-  Core snapshot inside one borrow. A complete synthetic snapshot encodes inside
-  that callback, while an escaped snapshot can no longer borrow its material;
-- Core also has a bounded begin/pending control primitive. A start transport
-  acknowledgement retains the same connection for lease-bound stop, but an
-  exact empty acknowledgement proves transport only and
-  `helperSuccessEstablished` remains false. If a submitted start instead ends
-  in cancellation, timeout or generation mismatch, Core now transfers an
-  opaque cleanup-only capability over that same non-reconnecting XPC session.
-  Product attempts its fixed `stop_connection` exactly once before considering
-  authenticated emergency cleanup; report schema 7 distinguishes this as
-  `same_session_provisional_stop` rather than claiming an active lease.
-
-The four passive M1 commands contact no server, read no TTY credential and send
-no XPC. The explicit helper probe also contacts no server and cannot encode
-`start_connection`; it performs one bounded local XPC `get_version`
-transaction. The bounded M2 transaction is exposed behind one strict,
-single-process command:
+The bounded M2 transaction remains exposed behind one strict, single-process
+command:
 
 ```sh
 powervpn m2 connect-once \
@@ -89,83 +40,31 @@ powervpn m2 connect-once \
   --json
 ```
 
-The default runtime currently stops with
-`authorized_resource_provider_unavailable` before generating an approval code,
-opening `/dev/tty`, installing signal handlers or running any observer. It does
-not silently fall back to the native username/password Portal lane whose last
-authorized result was `tls_rejected`. M2 authorization is now source-neutral:
-one actor-owned authorization generation provides a value-free validated
-catalog, one exact resource selection, one target-bound selected-route matcher
-and one start capability. Core lineage binds the matcher to the snapshot that
-is reborrowed for start; a submitted start remains an irreversible receipt even
-if a source wrapper subsequently invokes its callback again or throws. Close
-revokes the capability and erases app-owned material before its first await.
-The native Portal path exists only as an explicitly injected adapter.
+The current-machine runtime uses an inert native-Portal-unavailable provider.
+It stops locally with `authorizationSource=native_portal` and
+`provider_unavailable` before generating an approval code, opening `/dev/tty`,
+installing signal handlers, capturing network state, contacting a server or
+issuing helper/XPC control. There is no alternate authorization source or
+fallback. The existing native Portal adapter is available only through explicit
+dependency injection while its TLS trust decision remains unresolved.
 
-M2 now derives every stage from one monotonic budget created only after the
-TTY approval succeeds. New helper mutation is cut off at 65 seconds; control
-cleanup, authorization close, after-state verification and the final report
-have absolute cutoffs at 73, 94, 118 and 120 seconds. Each Core observation
-shrinks its command timeout from the same remaining stage budget. Cancellation
-before authorization result cannot start the provider, and the final
-`start_connection` gate is checked again inside the scoped snapshot borrow at
-the irreversible submission point. Cleanup is cancellation-shielded, retains
-the same-session provisional stop authority, and preserves late receipts while
-refusing to call them verified. A deadline report maps to exit `124`, while
-unproven cleanup retains the higher-priority exit `74`.
+The standalone `powervpn login` command remains a sealed Portal diagnostic. It
+does not supply resources to readiness or M2, and the product does not weaken
+Portal peer or hostname verification.
 
-The development `vendor_once` adapter is deliberately narrow. It does not
-reimplement Portal login or copy the vendor's TLS behavior. The foreground
-`vendor-once handoff` supervisor requires one TTY approval before it constructs
-the Product coordinator or launches the official app, and a second fresh code
-after the user confirms `login21` is connected in the official app window. It
-holds the exact `NSRunningApplication` receiver returned by that launch and,
-only after the second approval, invokes that receiver's `forceTerminate()`;
-there is no PID lookup, Cmd-Q, normal terminate, AppleScript or fallback.
+M2 authorization remains source-checked and generation-owned: one authorization
+lease provides a value-free validated catalog, one exact selection, one
+target-bound route matcher and one start capability. Close revokes the
+capability and erases owned material before its first suspension. The monotonic
+120-second M2 budget, same-session cleanup capability, helper-generation gates
+and value-free report contracts remain intact.
 
-This current-machine development path is pinned to macOS build `26A5406e` and
-PowerVPN 3.2.1 build 24572. It publishes the one-shot cursor proof only after
-the exact receiver has terminated, all vendor processes and helpers are absent,
-the pre-login route/DNS/interface/utun/Surge state is restored, and the final
-source generation remains complete and stable. Cleanup and final source checks
-poll within one 60-second absolute post-termination deadline. The proof filters
-the vendor record to exactly one `login21` candidate, retains its material only
-in erasable memory, and is consumed when M2 claims it. The signed bundle
-template, preferences and credential-history database remain rejected sources.
+`/var/log/vsgvpn.log` remains relevant only to vendor-helper diagnostics and
+startup rotation safety. Its contents are never an authorization input.
 
-The first real M2 transaction has now run, but it did **not** connect. It
-submitted exactly one `start_connection`; that request timed out before any
-connected status, active-path proof or fresh SSH proof. Cleanup then submitted
-exactly one same-session provisional `stop_connection`, verified every cleanup
-dimension and finished in `disconnected` with zero retry. The one-shot cursor
-was consumed. A gatewayless point-to-point default-route shape encountered in
-this path is now canonicalized without weakening the required destination,
-interface or flags checks.
-
-One allowlisted `invalid HASH_V1` marker was observed after the M2 start. A
-subsequent fixed `get_version` request succeeded, so the failure was not generic
-XPC reachability and the complete dry-run excluded a missing snapshot field.
-The exact old-path blocker is now known: normal Cmd-Q initiated Portal logout
-before M2 reused the snapshot. The first approved non-logout handoff then
-stopped safely before termination with `source_not_ready`: both TTY approvals
-were accepted and the official app was running, but no `forceTerminate`, proof
-publication or M2 start occurred. Value-free observation showed one fresh
-`get_version` plus one fresh `start_connection`, no stop/logout record and an
-append below the source cap, while the root-owned log was still changing.
-
-Report schema 2 now preserves the final closed source-observation category. Its
-five-second pre-force gate validates a cursor-bounded prefix: same-inode,
-security-preserving monotonic appends may continue during the read, but
-rotation, shrink, an append beyond 64 KiB, malformed records and any captured
-logout fail closed. The prefix observation exposes no proof-capable seal. Only
-the separate post-force load requires an exact current source seal and may back
-the one-shot proof/provider. After the failed experiment the user normally quit
-the untouched official app; the app/helper returned cold, the cursor was absent
-and no M2 retry ran. This correction is offline-verified but not yet
-live-verified. The second handoff approval is now cancellable and bounded, the
-proof is consumed only immediately before a validated start submission, and a
-structural route-table mismatch can no longer pass cleanup verification. The
-product is therefore still not a usable VPN and the Goal remains **ACTIVE**.
+The product is therefore still not a usable VPN. Native Portal authorization
+must be implemented under an explicit trust policy before M2 can acquire a
+resource, and the Goal remains **ACTIVE**.
 
 ## Development
 

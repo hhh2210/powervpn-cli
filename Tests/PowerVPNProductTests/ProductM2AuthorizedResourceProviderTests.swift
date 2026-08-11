@@ -111,13 +111,13 @@ import Testing
     }
   }
 
-  @Test func unavailableVendorProviderIsLocalAndExplicit() async {
-    let provider = ProductM2UnavailableVendorOnceProvider()
-    #expect(provider.source == .vendorOnce)
+  @Test func unavailableNativePortalProviderIsLocalAndExplicit() async {
+    let provider = ProductM2UnavailableNativePortalProvider()
+    #expect(provider.source == .nativePortal)
     #expect(provider.availabilityFailure == .providerUnavailable)
     switch await provider.beginAcquire(budget: m2TestBudget().authorization).result() {
     case .rejected(let source, let failure, let cleanup):
-      #expect(source == .vendorOnce)
+      #expect(source == .nativePortal)
       #expect(failure == .providerUnavailable)
       #expect(!cleanup.serverContactRequested)
       #expect(cleanup.ownedMaterialErased)
@@ -138,11 +138,11 @@ import Testing
       },
       baselineStable: { _, _ in true },
       assessActiveConnection: { _, _ in .unavailable },
-      authorizationSource: .vendorOnce,
+      authorizationSource: .nativePortal,
       beginAuthorization: { _ in
         m2AuthorizationAttempt(
           .rejected(
-            source: .vendorOnce,
+            source: .nativePortal,
             failure: .internalFailure,
             cleanup: ProductM2AuthorizationCloseReceipt(
               outcome: .notRequired,
@@ -230,7 +230,7 @@ private func m2AuthorizationAttempt(
   _ result: ProductM2AuthorizedResourceAcquisition
 ) -> ProductM2AuthorizationAttempt {
   ProductM2AuthorizationAttempt(
-    source: .vendorOnce,
+    source: .nativePortal,
     operation: { result },
     cancel: {}
   )

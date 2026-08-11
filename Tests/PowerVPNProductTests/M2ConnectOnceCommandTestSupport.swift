@@ -101,7 +101,7 @@ func report(
   ProductM2ConnectReport(
     outcome: outcome, finalState: finalState, lastGoodState: .ready,
     firstBadEvent: nil, resourceDisplayName: resource, sshTarget: .thu21,
-    authorizationSource: mutated ? .nativePortal : .vendorOnce,
+    authorizationSource: mutated ? .nativePortal : .nativePortal,
     authorizationAcquisition: mutated ? .acquired : .notRequested,
     authorizationFailure: nil,
     startOutcome: mutated ? .transportAcknowledged : .notAttempted,

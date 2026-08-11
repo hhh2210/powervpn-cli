@@ -58,19 +58,21 @@ MVP PASS requires all of the following:
 The MVP may still require the official PowerVPN installation, Rosetta and
 vendor helpers.
 
-### One-time onboarding allowance
+### Authorization source boundary
 
-For the fastest Rescue MVP, one-time authentication through the official
-client is allowed during development if, and only if:
+An authorized resource may come only from an authenticated Portal response
+produced by this client's own code. Process memory, logs, helper output, cached
+official-client sessions and replayable installed artifacts are not
+authorization sources.
 
-- the official GUI is not required during ordinary connect/disconnect use;
-- no credential or replayable secret is scraped from process memory or logs;
-- the native client consumes only a legally available installed profile,
-  helper state, or an authenticated response produced by its own code;
-- this limitation is shown truthfully as `onboardingMode=vendor_once`.
+Until native username/password Portal authorization has an approved TLS trust
+policy and is explicitly wired into Product, the current-machine provider must
+remain a local `native_portal/provider_unavailable` gate. It must not read TTY
+credentials, contact the Portal, launch the official app, inspect session logs,
+or mutate the helper.
 
-The final product target remains native username/password login, but onboarding
-must not block proving the helper-control vertical slice.
+The sealed installed profile may support passive readiness, but it cannot make
+a resource catalog available by itself.
 
 ## 3. What is frozen
 

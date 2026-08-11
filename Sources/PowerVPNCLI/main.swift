@@ -17,9 +17,6 @@ struct PowerVPNCommand {
     } catch let error as ProductCommandError {
       FileHandle.standardError.write(Data("error: \(error)\n".utf8))
       Foundation.exit(64)
-    } catch let error as VendorOnceCommandError {
-      FileHandle.standardError.write(Data("error: \(error)\n".utf8))
-      Foundation.exit(64)
     } catch {
       FileHandle.standardError.write(Data("error: \(error)\n".utf8))
       Foundation.exit(1)
@@ -53,12 +50,6 @@ struct PowerVPNCommand {
       try await runVendorXPCCommand(arguments, json: json)
     case "login":
       let result = try await runPortalLoginCommand(arguments)
-      print(result.standardOutput)
-      if result.exitCode != 0 {
-        Foundation.exit(result.exitCode)
-      }
-    case "vendor-once":
-      let result = try await runVendorOnceCommand(arguments)
       print(result.standardOutput)
       if result.exitCode != 0 {
         Foundation.exit(result.exitCode)

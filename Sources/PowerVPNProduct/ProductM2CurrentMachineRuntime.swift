@@ -1,8 +1,7 @@
 import PowerVPNCore
 
-/// Explicit composition root for the current-machine M2 path. Construction may
-/// read and seal one local vendor-onboarding record; only `run` may mutate the
-/// helper, run SSH, or contact a remote service.
+/// Explicit composition root for the current-machine M2 path. Construction is
+/// inert; only `run` may mutate the helper, run SSH, or contact a remote service.
 package struct ProductM2CurrentMachineRuntime: Sendable {
   private let coordinator: ProductM2ConnectOnceCoordinator
   package let authorizationAvailabilityFailure: ProductM2AuthorizationFailure?
@@ -24,7 +23,7 @@ package struct ProductM2CurrentMachineRuntime: Sendable {
     preflightChecker: any BoundedVendorXPCPreflightChecking,
     networkObserver: any NetworkCleanupObserving,
     authorizationProvider: any ProductM2AuthorizedResourceProviding =
-      VendorAppSessionProvider(),
+      ProductM2UnavailableNativePortalProvider(),
     control: ProductM2ControlAdapter,
     freshSSHProver: ProductM2FreshSSHProver
   ) {

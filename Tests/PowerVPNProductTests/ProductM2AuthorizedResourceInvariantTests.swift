@@ -5,50 +5,13 @@ import Testing
 @testable import PowerVPNProduct
 
 @Suite struct ProductM2AuthorizedResourceInvariantTests {
-  @Test func providerAcquisitionAndLeaseSourcesMustAllAgree() async throws {
-    let cases:
-      [(
-        dependency: ProductM2AuthorizationSource,
-        acquisition: ProductM2AuthorizationSource,
-        lease: ProductM2AuthorizationSource
-      )] = [
-        (.vendorOnce, .nativePortal, .nativePortal),
-        (.vendorOnce, .vendorOnce, .nativePortal),
-      ]
-
-    for sources in cases {
-      let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
-      let trace = ProductM2TestTrace()
-      let report = await ProductM2ConnectOnceCoordinator(
-        dependencies: productM2TestDependencies(
-          snapshot: fixture.snapshot,
-          trace: trace,
-          dependencyAuthorizationSource: sources.dependency,
-          acquisitionAuthorizationSource: sources.acquisition,
-          leaseAuthorizationSource: sources.lease
-        )
-      ).run(
-        ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
-      )
-
-      #expect(report.outcome == .authorizationAcquisitionRejected)
-      #expect(report.authorizationFailure == .sourceMismatch)
-      #expect(report.authorizationClose == .accepted)
-      #expect(report.authorizationOwnedMaterialErased)
-      #expect(report.cleanupVerified)
-      #expect(trace.count("begin_start") == 0)
-      #expect(trace.count("logout") == 1)
-      #expect(fixture.snapshot.isErased)
-      fixture.erase()
-    }
-  }
 
   @Test func preparedSummaryMustMatchTheCatalogCandidate() async throws {
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
     defer { fixture.erase() }
     let snapshot = fixture.snapshot
     let lease = ProductM2AuthorizedResourceLease(
-      source: .vendorOnce,
+      source: .nativePortal,
       catalog: { try ProductM2PortalAdapter.catalog(snapshot: snapshot) },
       prepare: { handle, target in
         let prepared = try ProductM2PortalAdapter.prepare(
@@ -103,7 +66,7 @@ import Testing
     )
     let trace = ProductM2TestTrace()
     let lease = ProductM2AuthorizedResourceLease(
-      source: .vendorOnce,
+      source: .nativePortal,
       catalog: { [candidate, candidate] },
       prepare: { _, _ in
         trace.record("prepare")
@@ -138,7 +101,7 @@ import Testing
     let requestedTarget = ProductM2SSHTarget.thu21.requiredTargetIPv4
     let otherTarget = ProductM2SSHTarget.thu52.requiredTargetIPv4
     let lease = ProductM2AuthorizedResourceLease(
-      source: .vendorOnce,
+      source: .nativePortal,
       catalog: { try ProductM2PortalAdapter.catalog(snapshot: snapshot) },
       prepare: { handle, target in
         let prepared = try ProductM2PortalAdapter.prepare(
@@ -188,7 +151,7 @@ import Testing
     let trace = ProductM2TestTrace()
     let target = ProductM2SSHTarget.thu21.requiredTargetIPv4
     let lease = ProductM2AuthorizedResourceLease(
-      source: .vendorOnce,
+      source: .nativePortal,
       catalog: { catalog },
       prepare: { handle, requestedTarget in
         let resourceA = try ProductM2PortalAdapter.prepare(

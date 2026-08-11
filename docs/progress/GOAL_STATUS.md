@@ -1506,3 +1506,12 @@ Current status: **M1 PASS, M2 NOT PASS, Goal ACTIVE**. The next live action, if
 separately approved, is one fresh handoff using schema 2. Only `outcome=ready`
 and `sourceObservation=ready` may proceed to resources, dry-run and the sole
 bounded M2 transaction.
+
+## 2026-08-11 — Vendor-log authorization path retired
+
+The official-app/log handoff is permanently superseded and removed from the
+active product surface. Earlier entries remain historical evidence only and do
+not authorize another handoff or retry. The current-machine default is now an
+inert `native_portal/provider_unavailable` gate; readiness may inspect only the
+sealed installed profile and publishes no resource until native Portal trust
+and authorization are explicitly implemented.
