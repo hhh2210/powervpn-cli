@@ -1,6 +1,7 @@
 import Darwin
+import Foundation
 
-struct VendorAppSessionSourceSeal: Sendable {
+package struct VendorAppSessionSourceSeal: Codable, Equatable, Sendable {
   let device: UInt64
   let inode: UInt64
   let size: Int64
@@ -11,7 +12,7 @@ struct VendorAppSessionSourceSeal: Sendable {
   let changeSeconds: Int64
   let changeNanoseconds: Int
 
-  init(_ metadata: stat) {
+  package init(_ metadata: stat) {
     device = UInt64(metadata.st_dev)
     inode = UInt64(metadata.st_ino)
     size = Int64(metadata.st_size)
@@ -23,7 +24,40 @@ struct VendorAppSessionSourceSeal: Sendable {
     changeNanoseconds = metadata.st_ctimespec.tv_nsec
   }
 
-  func isCurrent(path: String = VendorAppOnboardingCursor.installedSourcePath) -> Bool {
+  package init(
+    device: UInt64,
+    inode: UInt64,
+    size: Int64,
+    ownerUID: UInt32,
+    mode: UInt32,
+    modificationSeconds: Int64,
+    modificationNanoseconds: Int,
+    changeSeconds: Int64,
+    changeNanoseconds: Int
+  ) {
+    self.device = device
+    self.inode = inode
+    self.size = size
+    self.ownerUID = ownerUID
+    self.mode = mode
+    self.modificationSeconds = modificationSeconds
+    self.modificationNanoseconds = modificationNanoseconds
+    self.changeSeconds = changeSeconds
+    self.changeNanoseconds = changeNanoseconds
+  }
+
+  package var isStructurallyValid: Bool {
+    mode_t(mode) & S_IFMT == S_IFREG
+      && ownerUID == 0
+      && mode_t(mode) & (S_IWGRP | S_IWOTH) == 0
+      && size >= 0
+      && (0..<1_000_000_000).contains(modificationNanoseconds)
+      && (0..<1_000_000_000).contains(changeNanoseconds)
+  }
+
+  package func isCurrent(
+    path: String = VendorAppOnboardingCursor.installedSourcePath
+  ) -> Bool {
     let descriptor = path.withCString { open($0, O_RDONLY | O_CLOEXEC | O_NOFOLLOW) }
     guard descriptor >= 0 else { return false }
     defer { close(descriptor) }

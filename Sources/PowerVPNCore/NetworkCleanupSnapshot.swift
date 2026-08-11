@@ -37,7 +37,7 @@ package struct NetworkCleanupFingerprint: Equatable, Sendable {
 package struct NetworkCleanupInterfaceSnapshot: Equatable, Sendable {
   package let inventory: NetworkCleanupFingerprint
   package let utunCount: Int
-  let utunTokens: Set<Data>
+  package let utunTokens: Set<Data>
 
   package static func unavailable(_ state: NetworkCleanupObservationState) -> Self {
     Self(inventory: .unavailable(state), utunCount: 0, utunTokens: [])

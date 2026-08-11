@@ -58,7 +58,7 @@ struct PowerVPNCommand {
         Foundation.exit(result.exitCode)
       }
     case "vendor-once":
-      let result = try runVendorOnceCommand(arguments)
+      let result = try await runVendorOnceCommand(arguments)
       print(result.standardOutput)
       if result.exitCode != 0 {
         Foundation.exit(result.exitCode)

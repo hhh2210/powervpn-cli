@@ -81,14 +81,23 @@ func vendorAppParseComplete(_ text: String) throws -> VendorAppSessionLogNode {
   }
 }
 
-func vendorAppMaterial(_ rootText: String = vendorAppSyntheticRoot) throws
+func vendorAppMaterial(
+  _ rootText: String = vendorAppSyntheticRoot,
+  sourceSeal: VendorAppSessionSourceSeal? = nil,
+  sourceCurrent: (@Sendable () -> Bool)? = nil
+) throws
   -> VendorAppSessionSnapshotMaterial
 {
   let bytes = Array(rootText.utf8)
   return try bytes.withUnsafeBytes { raw in
     var parser = VendorAppSessionLogParser(bytes: raw)
     let root = try parser.parseComplete()
-    return try VendorAppSessionSnapshotMaterial(root: root, bytes: raw)
+    return try VendorAppSessionSnapshotMaterial(
+      root: root,
+      bytes: raw,
+      sourceSeal: sourceSeal,
+      sourceCurrent: sourceCurrent
+    )
   }
 }
 

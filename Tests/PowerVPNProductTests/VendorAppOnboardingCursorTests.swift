@@ -111,6 +111,45 @@ import Testing
     #expect(FileManager.default.fileExists(atPath: paths.lock))
   }
 
+  @Test func proofPublicationCompareAndSwapsOnlyTheExactArmedCursor() throws {
+    let paths = try temporaryPaths()
+    defer { try? FileManager.default.removeItem(atPath: paths.directory) }
+    let armed = try syntheticCursor(inode: 81)
+    try armed.persist(at: paths.cursor)
+
+    let proven = try armed.publishHandoffProof(
+      try syntheticProof(for: armed),
+      at: paths.cursor
+    )
+    #expect(proven.handoffProof != nil)
+    #expect(try VendorAppOnboardingCursor.load(at: paths.cursor) == proven)
+
+    #expect(throws: VendorAppOnboardingCursorError.self) {
+      _ = try armed.publishHandoffProof(
+        try syntheticProof(for: armed),
+        at: paths.cursor
+      )
+    }
+    #expect(try VendorAppOnboardingCursor.load(at: paths.cursor) == proven)
+  }
+
+  @Test func proofPublicationRejectsAReplacedCursorWithoutRemovingIt() throws {
+    let paths = try temporaryPaths()
+    defer { try? FileManager.default.removeItem(atPath: paths.directory) }
+    let armed = try syntheticCursor(inode: 91)
+    let replacement = try syntheticCursor(inode: 92)
+    try armed.persist(at: paths.cursor)
+    try replacement.persist(at: paths.cursor)
+
+    #expect(throws: VendorAppOnboardingCursorError.self) {
+      _ = try armed.publishHandoffProof(
+        try syntheticProof(for: armed),
+        at: paths.cursor
+      )
+    }
+    #expect(try VendorAppOnboardingCursor.load(at: paths.cursor) == replacement)
+  }
+
   private func temporaryPaths() throws -> (directory: String, cursor: String, lock: String) {
     let directory = FileManager.default.temporaryDirectory
       .appendingPathComponent("powervpn-cursor-\(UUID().uuidString)", isDirectory: true)
@@ -142,6 +181,41 @@ import Testing
       modificationTime: timestamp,
       changeTime: timestamp,
       capturedAt: timestamp
+    )
+  }
+
+  private func syntheticProof(
+    for cursor: VendorAppOnboardingCursor
+  ) throws -> VendorAppNonLogoutHandoffProof {
+    VendorAppNonLogoutHandoffProof(
+      cleanup: VendorAppNonLogoutHandoffCleanupProof(
+        complete: true,
+        defaultRouteRestored: true,
+        dnsRestored: true,
+        interfacesRestored: true,
+        utunRestored: true,
+        persistentRoutesRestored: true,
+        surgeStateRestored: true,
+        vendorProcessesAbsent: true,
+        helperInactive: true,
+        structuralRouteTablesEqual: true
+      ),
+      finalSourceSeal: VendorAppSessionSourceSeal(
+        device: cursor.device,
+        inode: cursor.inode,
+        size: Int64(cursor.size + 512),
+        ownerUID: cursor.ownerUID,
+        mode: cursor.mode,
+        modificationSeconds: cursor.modificationTime.seconds + 1,
+        modificationNanoseconds: 0,
+        changeSeconds: cursor.changeTime.seconds + 1,
+        changeNanoseconds: 0
+      ),
+      finalHelperRuns: 21,
+      createdAt: try VendorAppCursorTimestamp(
+        seconds: cursor.capturedAt.seconds + 1,
+        nanoseconds: 0
+      )
     )
   }
 

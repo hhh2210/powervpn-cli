@@ -1,50 +1,43 @@
 import Darwin
+import Foundation
 import Testing
 
 @testable import PowerVPNProduct
 
-@Suite struct VendorAppSessionProviderStateTests {
-  @Test func availabilityAndReadinessRejectAndEraseStaleMaterial() throws {
-    let availabilityMaterial = try vendorAppMaterial()
-    let availabilityState = VendorAppSessionProviderState(
-      cursor: try syntheticCursor(inode: 61),
-      material: availabilityMaterial,
-      sourceIsCurrent: { _ in false }
-    )
-    #expect(!availabilityState.isAvailable)
-    #expect(availabilityMaterial.isErased)
+@Suite struct VendorAppNonLogoutHandoffProofTests {
+  @Test func completeProofIsValueFreeAndBoundToOneCursorGeneration() throws {
+    let cursor = try syntheticCursor(inode: 101)
+    let proof = try syntheticProof(for: cursor)
+    #expect(proof.isStructurallyValid)
+    #expect(proof.isBound(to: cursor))
+    #expect(!proof.isBound(to: try syntheticCursor(inode: 102)))
 
-    let readinessMaterial = try vendorAppMaterial()
-    let readinessState = VendorAppSessionProviderState(
-      cursor: try syntheticCursor(inode: 62),
-      material: readinessMaterial,
-      sourceIsCurrent: { _ in false }
-    )
-    #expect(readinessState.readinessCandidate() == nil)
-    #expect(readinessMaterial.isErased)
+    let encoded = try JSONEncoder().encode(proof)
+    let text = String(decoding: encoded, as: UTF8.self)
+    for forbidden in ["synthetic-session", "synthetic-psk", "login21", "gateway"] {
+      #expect(!text.contains(forbidden))
+    }
   }
 
-  @Test func availabilityRequiresHandoffProofAtBothReadinessChecks() throws {
-    let legacyMaterial = try vendorAppMaterial()
-    let legacy = VendorAppSessionProviderState(
-      cursor: try syntheticCursor(inode: 71),
-      material: legacyMaterial,
-      handoffProofIsCurrent: { cursor, _ in cursor.handoffProof != nil }
+  @Test func incompleteCleanupCannotBecomeACursorProof() throws {
+    let cursor = try syntheticCursor(inode: 111)
+    let complete = try syntheticProof(for: cursor)
+    var object = try #require(
+      JSONSerialization.jsonObject(with: JSONEncoder().encode(complete))
+        as? [String: Any]
     )
-    #expect(!legacy.isAvailable)
-    #expect(legacyMaterial.isErased)
+    var cleanup = try #require(object["cleanup"] as? [String: Any])
+    cleanup["dnsRestored"] = false
+    object["cleanup"] = cleanup
+    let tampered = try JSONDecoder().decode(
+      VendorAppNonLogoutHandoffProof.self,
+      from: JSONSerialization.data(withJSONObject: object)
+    )
 
-    let armed = try syntheticCursor(inode: 72)
-    let proven = try armed.proving(syntheticProof(for: armed))
-    let provenMaterial = try vendorAppMaterial()
-    let current = VendorAppSessionProviderState(
-      cursor: proven,
-      material: provenMaterial,
-      handoffProofIsCurrent: { cursor, _ in cursor.handoffProof != nil }
-    )
-    #expect(current.isAvailable)
-    #expect(current.readinessCandidate()?.summary.displayName == "login21")
-    #expect(!provenMaterial.isErased)
+    #expect(!tampered.isStructurallyValid)
+    #expect(throws: VendorAppOnboardingCursorError.self) {
+      _ = try cursor.proving(tampered)
+    }
   }
 
   private func syntheticCursor(inode: UInt64) throws -> VendorAppOnboardingCursor {

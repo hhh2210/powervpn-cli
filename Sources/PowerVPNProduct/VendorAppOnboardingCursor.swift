@@ -34,7 +34,7 @@ package enum VendorAppOnboardingCursorError: Error, Equatable, Sendable {
 
 /// Value-free boundary captured immediately before one official-app onboarding.
 package struct VendorAppOnboardingCursor: Codable, Equatable, Sendable {
-  package static let schemaVersion = 1
+  package static let schemaVersion = 2
   package static let installedSourcePath = "/var/log/vsgvpn.log"
   package static let stateFileName = "vendor-onboarding-cursor.json"
   private static let permissionMask = mode_t(0o7777)
@@ -48,6 +48,31 @@ package struct VendorAppOnboardingCursor: Codable, Equatable, Sendable {
   package let modificationTime: VendorAppCursorTimestamp
   package let changeTime: VendorAppCursorTimestamp
   package let capturedAt: VendorAppCursorTimestamp
+  package let handoffProof: VendorAppNonLogoutHandoffProof?
+
+  package init(
+    schema: Int,
+    device: UInt64,
+    inode: UInt64,
+    size: UInt64,
+    ownerUID: UInt32,
+    mode: UInt32,
+    modificationTime: VendorAppCursorTimestamp,
+    changeTime: VendorAppCursorTimestamp,
+    capturedAt: VendorAppCursorTimestamp,
+    handoffProof: VendorAppNonLogoutHandoffProof? = nil
+  ) {
+    self.schema = schema
+    self.device = device
+    self.inode = inode
+    self.size = size
+    self.ownerUID = ownerUID
+    self.mode = mode
+    self.modificationTime = modificationTime
+    self.changeTime = changeTime
+    self.capturedAt = capturedAt
+    self.handoffProof = handoffProof
+  }
 
   package static var defaultPath: String {
     FileManager.default.homeDirectoryForCurrentUser
@@ -94,7 +119,8 @@ package struct VendorAppOnboardingCursor: Codable, Equatable, Sendable {
       mode: UInt32(observed.st_mode),
       modificationTime: VendorAppCursorTimestamp(observed.st_mtimespec),
       changeTime: VendorAppCursorTimestamp(observed.st_ctimespec),
-      capturedAt: VendorAppCursorTimestamp(clock)
+      capturedAt: VendorAppCursorTimestamp(clock),
+      handoffProof: nil
     )
   }
 
@@ -164,8 +190,27 @@ package struct VendorAppOnboardingCursor: Codable, Equatable, Sendable {
       size <= UInt64(Int64.max),
       (0..<1_000_000_000).contains(modificationTime.nanoseconds),
       (0..<1_000_000_000).contains(changeTime.nanoseconds),
-      (0..<1_000_000_000).contains(capturedAt.nanoseconds)
+      (0..<1_000_000_000).contains(capturedAt.nanoseconds),
+      handoffProof.map({ $0.isBound(to: self) }) ?? true
     else { throw VendorAppOnboardingCursorError.invalidCursor }
+  }
+
+  package func proving(_ proof: VendorAppNonLogoutHandoffProof) throws -> Self {
+    guard handoffProof == nil, proof.isBound(to: self) else {
+      throw VendorAppOnboardingCursorError.invalidCursor
+    }
+    return Self(
+      schema: schema,
+      device: device,
+      inode: inode,
+      size: size,
+      ownerUID: ownerUID,
+      mode: mode,
+      modificationTime: modificationTime,
+      changeTime: changeTime,
+      capturedAt: capturedAt,
+      handoffProof: proof
+    )
   }
 
   private static func validateInstalledSource(_ metadata: stat) throws {

@@ -11,17 +11,20 @@ final class VendorAppSessionSnapshotMaterial: @unchecked Sendable {
     displayName: resourceName
   )
   private let buffers: [SecureBytes]
-  private let sourceSeal: VendorAppSessionSourceSeal?
+  let sourceSeal: VendorAppSessionSourceSeal?
+  private let sourceCurrent: @Sendable () -> Bool
 
   init(
     root: VendorAppSessionLogNode,
     bytes: UnsafeRawBufferPointer,
-    sourceSeal: VendorAppSessionSourceSeal? = nil
+    sourceSeal: VendorAppSessionSourceSeal? = nil,
+    sourceCurrent: (@Sendable () -> Bool)? = nil
   ) throws {
     var builder = VendorAppSessionCandidateBuilder(bytes: bytes)
     candidate = try builder.build(root: root)
     buffers = builder.buffers
     self.sourceSeal = sourceSeal
+    self.sourceCurrent = sourceCurrent ?? { sourceSeal?.isCurrent() ?? true }
   }
 
   var validation: VendorCharonStartValidation {
@@ -37,7 +40,7 @@ final class VendorAppSessionSnapshotMaterial: @unchecked Sendable {
   }
 
   var sourceIsCurrent: Bool {
-    sourceSeal?.isCurrent() ?? true
+    sourceCurrent()
   }
 
   deinit {

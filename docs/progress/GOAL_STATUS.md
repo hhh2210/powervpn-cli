@@ -1397,3 +1397,55 @@ and complete `login21` snapshot now exist, and failure cleanup is proven on the
 real machine. A usable connection is still absent because the vendor helper did
 not accept/reach connected state with the just-onboarded material after GUI
 exit. No automatic relogin or second connection attempt was made.
+
+## 2026-08-11 — Non-logout vendor-once handoff implemented offline
+
+Root-cause refinement: static inspection of the official app's normal
+termination path proved that Cmd-Q calls the vendor logout stack and initiates
+`/vpn/user/logout`. The first M2 attempt therefore tested material after a
+normal vendor logout, not a session-preserving handoff. Value-free timing also
+showed the M2 helper had already emitted its allowlisted failure marker 150 ms
+after start, while nine observed successful vendor starts reached connected
+status within 182–371 ms. Extending the two-second start timer was not selected
+as the next experiment.
+
+Production change: `powervpn vendor-once handoff --json` replaces the dead
+`vendor-once begin` flow. A foreground Product coordinator keeps one network
+capture window, one pre-login cursor and the exact `NSRunningApplication`
+receiver returned by its own normal LaunchServices start. It requires a first
+TTY code before any coordinator construction or app launch and a second fresh
+code after the user confirms `login21` is connected in the official app. The
+only permitted termination mutation is `forceTerminate()` on that retained
+receiver; PID signalling, Cmd-Q, normal termination and fallback rediscovery
+are absent. A synthetic current-machine probe confirmed that this API delivered
+SIGTERM without entering AppKit's graceful termination callbacks on macOS build
+`26A5406e`; the production gate also pins PowerVPN 3.2.1 build 24572 and its
+installed signature identity.
+
+Proof publication is fail closed. A callback that launched an app but could not
+seal the exact receiver is reported as `launchedButUnusable` and retains only a
+read-only running observation. Cancellation is rechecked immediately before
+force. After an accepted force, cleanup continues outside inherited task
+cancellation and polls network restoration and final source stability within
+one 60-second absolute deadline. The CLI converts SIGHUP, SIGINT and SIGTERM to
+Task cancellation and continues awaiting that shielded cleanup instead of
+allowing the process to abandon it. Only a terminated exact receiver, absent
+GUI and vendor helpers, restored pre-login network state, a complete no-logout
+source generation and the final inactive helper generation can atomically
+upgrade the armed cursor to a current-machine proof. Legacy proof-less cursors
+are rejected, and M2 still consumes a successful proof exactly once.
+
+Verification: the handoff coordinator, exact-receiver bridge, proof/provider
+gate and two-approval CLI suites are synthetic and do not construct the default
+launcher in tests. They cover identity drift, already-launched-but-unusable
+truth, cancellation immediately before and during force, incomplete cleanup,
+later-restored network and later-stable source observations. No official app,
+helper, XPC session, network request or SSH connection ran during this
+implementation.
+
+Current status: **M1 PASS, M2 NOT PASS, Goal ACTIVE**. The next live action is
+one explicitly approved `vendor-once handoff`, followed by `resources`,
+`snapshot --dry-run`, and exactly one bounded `login21`/`thu21` M2 transaction.
+There will be no retry or second login. Success still requires connected status,
+selected-route evidence, fresh SSH proof, stop and complete cleanup; otherwise
+the result remains the exact value-free blocker from that one experiment.

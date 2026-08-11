@@ -23,11 +23,11 @@ One separate explicit command performs the bounded local helper probe:
 powervpn helper status --probe --json
 ```
 
-One narrow onboarding command records a value-free boundary immediately before
-the official app is used:
+One narrow, two-approval onboarding supervisor owns the complete official-app
+handoff window:
 
 ```sh
-powervpn vendor-once begin --json
+powervpn vendor-once handoff --json
 ```
 
 On this Mac they currently establish:
@@ -40,10 +40,10 @@ On this Mac they currently establish:
   `directXPCStatus=not_probed`. One explicit arm64 product probe issued only the
   fixed `get_version` request and returned `current_reachable`. A second fixed
   reachability request after the first real M2 attempt also succeeded;
-- `onboardingMode=vendor_once` now uses a pre-GUI cursor and only the official
-  app's subsequent normal-login generation. The official app auto-started its
-  resources; normal Cmd-Q then closed the GUI/helper path without an explicit
-  Portal logout;
+- `onboardingMode=vendor_once` uses a pre-GUI cursor and only the official
+  app's subsequent normal-login generation. Static inspection after the first
+  experiment proved that normal Cmd-Q also initiates the vendor Portal logout,
+  so legacy `vendor-once begin` cursors are now rejected;
 - the passive resource catalog exposed exactly one selectable resource,
   `login21`. `snapshot --dry-run` constructed its complete snapshot in memory,
   reported no missing field and serialized none of the snapshot material;
@@ -115,13 +115,23 @@ refusing to call them verified. A deadline report maps to exit `124`, while
 unproven cleanup retains the higher-priority exit `74`.
 
 The development `vendor_once` adapter is deliberately narrow. It does not
-reimplement Portal login or copy the vendor's TLS behavior. `vendor-once begin`
-persists only the pre-GUI source cursor; after normal official-app login and
-Cmd-Q, Product accepts only the new complete generation after that cursor,
-filters it to exactly one `login21` candidate, owns the material only in memory
-and consumes the cursor when the mutating acquisition is claimed. The signed
-bundle template, preferences and credential-history database remain rejected
-as authorization sources.
+reimplement Portal login or copy the vendor's TLS behavior. The foreground
+`vendor-once handoff` supervisor requires one TTY approval before it constructs
+the Product coordinator or launches the official app, and a second fresh code
+after the user confirms `login21` is connected in the official app window. It
+holds the exact `NSRunningApplication` receiver returned by that launch and,
+only after the second approval, invokes that receiver's `forceTerminate()`;
+there is no PID lookup, Cmd-Q, normal terminate, AppleScript or fallback.
+
+This current-machine development path is pinned to macOS build `26A5406e` and
+PowerVPN 3.2.1 build 24572. It publishes the one-shot cursor proof only after
+the exact receiver has terminated, all vendor processes and helpers are absent,
+the pre-login route/DNS/interface/utun/Surge state is restored, and the final
+source generation remains complete and stable. Cleanup and final source checks
+poll within one 60-second absolute post-termination deadline. The proof filters
+the vendor record to exactly one `login21` candidate, retains its material only
+in erasable memory, and is consumed when M2 claims it. The signed bundle
+template, preferences and credential-history database remain rejected sources.
 
 The first real M2 transaction has now run, but it did **not** connect. It
 submitted exactly one `start_connection`; that request timed out before any
@@ -133,12 +143,12 @@ this path is now canonicalized without weakening the required destination,
 interface or flags checks.
 
 One allowlisted `invalid HASH_V1` marker was observed after the M2 start. A
-subsequent fixed `get_version` request succeeded, so the current blocker is not
-generic XPC reachability and the complete dry-run excludes a missing snapshot
-field. The exact live blocker is the vendor start/session-reuse boundary after
-normal official-app Cmd-Q. The marker narrows that boundary but is not claimed
-as a fully isolated cryptographic root cause. The product is therefore still
-not a usable VPN and the Goal remains **ACTIVE**.
+subsequent fixed `get_version` request succeeded, so the failure was not generic
+XPC reachability and the complete dry-run excluded a missing snapshot field.
+The exact old-path blocker is now known: normal Cmd-Q initiated Portal logout
+before M2 reused the snapshot. The non-logout handoff is implemented and
+offline-verified but has not yet received approval for its one live experiment.
+The product is therefore still not a usable VPN and the Goal remains **ACTIVE**.
 
 ## Development
 

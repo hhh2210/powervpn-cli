@@ -27,13 +27,35 @@ struct M2TTYApproval: Sendable {
     resourceDisplayName: String,
     sshTarget: String
   ) -> M2TTYApprovalOutcome {
-    guard Self.validCode(code) else { return .unavailable }
     let prompt =
       "PowerVPN M2 one-time approval\n"
       + "Resource: \(resourceDisplayName)\n"
       + "SSH target: \(sshTarget)\n"
       + "This will acquire one authorized resource, run start_connection, perform a fresh SSH proof, stop, and verify cleanup.\n"
       + "Type \(code) exactly and press Return to continue: "
+    return request(code: code, prompt: prompt)
+  }
+
+  func requestVendorHandoffLaunch(code: String) -> M2TTYApprovalOutcome {
+    let prompt =
+      "PowerVPN vendor-once handoff approval 1 of 2\n"
+      + "This will normally launch the official PowerVPN App so you can log in through its normal UI.\n"
+      + "After login, a second approval will ask you to confirm that login21 is connected before handoff.\n"
+      + "Type \(code) exactly and press Return to launch the official App: "
+    return request(code: code, prompt: prompt)
+  }
+
+  func requestVendorHandoffTermination(code: String) -> M2TTYApprovalOutcome {
+    let prompt =
+      "PowerVPN vendor-once handoff approval 2 of 2\n"
+      + "Confirm that the official PowerVPN App completed a normal login and displays login21 connected.\n"
+      + "This will call forceTerminate only on the exact App receiver retained from this launch; it will not use Cmd-Q or request a normal quit.\n"
+      + "Type \(code) exactly and press Return to perform the handoff: "
+    return request(code: code, prompt: prompt)
+  }
+
+  private func request(code: String, prompt: String) -> M2TTYApprovalOutcome {
+    guard Self.validCode(code) else { return .unavailable }
     switch exchange(prompt) {
     case .line(let response): return response == code ? .accepted : .denied
     case .unavailable: return .unavailable
