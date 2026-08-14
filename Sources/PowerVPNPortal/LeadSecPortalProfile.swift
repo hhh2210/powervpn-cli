@@ -24,10 +24,32 @@ enum LeadSecPortalProfile {
   static func passwordDecision(
     _ document: PortalXMLDocument
   ) throws -> LeadSecLoginDecision {
-    guard let code = try scalar(at: ["RESPONSE", "RESULT", "code"], in: document) else {
+    guard document.root.name == "RESPONSE" else {
       throw LeadSecPortalProfileError.missingLoginCode
     }
-    let numeric = try code.withUnsafeBytes { bytes in
+    var resultLikeCount = document.root.attributes.reduce(0) {
+      $0 + (hasASCIILocalName($1.name, equalTo: "RESULT") ? 1 : 0)
+    }
+    var result: PortalXMLElement?
+    for child in document.root.childElements
+    where hasASCIILocalName(child.name, equalTo: "RESULT") {
+      resultLikeCount += 1
+      if child.name == "RESULT" { result = child }
+    }
+    guard resultLikeCount == 1, let result else {
+      throw LeadSecPortalProfileError.missingLoginCode
+    }
+
+    var codeLikeCount = result.attributes.reduce(0) {
+      $0 + (hasASCIILocalName($1.name, equalTo: "code") ? 1 : 0)
+    }
+    for child in result.childElements where hasASCIILocalName(child.name, equalTo: "code") {
+      codeLikeCount += 1
+    }
+    guard codeLikeCount == 1, let code = result.attribute(named: "code") else {
+      throw LeadSecPortalProfileError.missingLoginCode
+    }
+    let numeric = try code.withValueBytes { bytes in
       guard let value = strictHex(bytes) else {
         throw LeadSecPortalProfileError.malformedLoginCode
       }
@@ -111,6 +133,26 @@ enum LeadSecPortalProfile {
       current = match
     }
     return current
+  }
+
+  private static func hasASCIILocalName(
+    _ name: String,
+    equalTo expected: StaticString
+  ) -> Bool {
+    let bytes = name.utf8
+    let start = bytes.lastIndex(of: 0x3a).map { bytes.index(after: $0) } ?? bytes.startIndex
+    guard bytes.distance(from: start, to: bytes.endIndex) == expected.utf8CodeUnitCount else {
+      return false
+    }
+    return expected.withUTF8Buffer { expectedBytes in
+      zip(bytes[start...], expectedBytes).allSatisfy {
+        asciiLowercased($0) == asciiLowercased($1)
+      }
+    }
+  }
+
+  private static func asciiLowercased(_ byte: UInt8) -> UInt8 {
+    (0x41...0x5a).contains(byte) ? byte + 0x20 : byte
   }
 
   private static func strictHex(_ raw: UnsafeRawBufferPointer) -> UInt64? {

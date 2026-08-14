@@ -202,7 +202,7 @@ func syntheticSerial(
   )
 }
 
-let acceptedLoginXML = "<ROOT><RESPONSE><RESULT><code>0</code></RESULT></RESPONSE></ROOT>"
+let acceptedLoginXML = "<RESPONSE><RESULT code=\"0\"/></RESPONSE>"
 let acceptedResourceXML = "<ROOT><INTERGRATION_INFO><RESOURCE_LIST/></INTERGRATION_INFO></ROOT>"
 let acceptedSessionXML = "<ROOT><RESPONSE><RESULT><code>0</code></RESULT></RESPONSE></ROOT>"
 let invalidSessionXML =

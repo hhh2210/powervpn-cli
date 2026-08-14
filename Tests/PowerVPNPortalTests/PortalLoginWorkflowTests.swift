@@ -195,7 +195,7 @@ import Testing
   }
 
   private func loginXML(_ code: String) -> String {
-    "<ROOT><RESPONSE><RESULT><code>\(code)</code></RESULT></RESPONSE></ROOT>"
+    "<RESPONSE><RESULT code=\"\(code)\"/></RESPONSE>"
   }
 
   private var passwordBody: String {
