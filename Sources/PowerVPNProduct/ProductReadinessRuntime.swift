@@ -59,8 +59,8 @@ public struct InstalledProductReadinessObserver: ProductReadinessObserving {
     let preflightSafe = InstalledVendorXPCPreflightChecker()
       .check(generation: generation).safeToProbe
     let profileSource: ProductProfileSource =
-      (try? InstalledConfigDiscovery.discoverCurrentMachine()) == nil
-      ? .unavailable : .sealedInstalledConfiguration
+      (try? PortalFixedTOFUAuthority.currentProfile()) == nil
+      ? .unavailable : .operatorApprovedFixedOrigin
     return ProductReadinessObservation(
       installedVersion: installation.appVersion,
       installedBuild: installation.appBuild,
@@ -215,7 +215,7 @@ public struct ProductReadinessRuntime: Sendable {
       return .helperUnavailable
     }
     if observation.profileSource == .unavailable {
-      return .installedConfigurationUnavailable
+      return .portalProfileUnavailable
     }
     if let blocker = snapshot.blocker {
       return blocker

@@ -18,7 +18,7 @@ public enum DirectXPCStatus: String, Codable, Equatable, Sendable {
 }
 
 public enum ProductProfileSource: String, Codable, Equatable, Sendable {
-  case sealedInstalledConfiguration = "sealed_installed_configuration"
+  case operatorApprovedFixedOrigin = "operator_approved_fixed_origin"
   case unavailable
 }
 
@@ -32,7 +32,7 @@ public enum ProductBlocker: String, Codable, Equatable, Sendable {
   case officialGUIRunning = "official_gui_running"
   case helperUnavailable = "helper_unavailable"
   case helperGenerationUnavailable = "helper_generation_unavailable"
-  case installedConfigurationUnavailable = "installed_configuration_unavailable"
+  case portalProfileUnavailable = "portal_profile_unavailable"
   case directXPCNotProbed = "direct_xpc_not_probed"
   case directXPCUnreachable = "direct_xpc_unreachable"
   case directXPCPreflightUnsafe = "direct_xpc_preflight_unsafe"

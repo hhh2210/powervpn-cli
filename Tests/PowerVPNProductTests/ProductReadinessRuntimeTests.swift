@@ -13,7 +13,7 @@ import Testing
     let doctor = runtime.doctor()
     #expect(doctor.productState == .blocked)
     #expect(doctor.onboardingMode == .nativePortal)
-    #expect(doctor.profileSource == .sealedInstalledConfiguration)
+    #expect(doctor.profileSource == .operatorApprovedFixedOrigin)
     #expect(doctor.resourceSource == .unavailable)
     #expect(doctor.firstMissingField == .sessionID)
     #expect(doctor.blocker == .authorizedResourceProviderUnavailable)
@@ -93,13 +93,13 @@ import Testing
     #expect(!snapshot.snapshotSerialized)
   }
 
-  @Test func missingInstalledProfileTakesPriorityInDoctor() {
+  @Test func missingFixedPortalProfileTakesPriorityInDoctor() {
     let observation = makeObservation(profileSource: .unavailable)
     let report = ProductReadinessRuntime(
       observer: FixedProductObservation(observation)
     ).doctor()
 
-    #expect(report.blocker == .installedConfigurationUnavailable)
+    #expect(report.blocker == .portalProfileUnavailable)
     #expect(report.firstMissingField == .sessionID)
   }
 
@@ -178,7 +178,7 @@ import Testing
   private func makeObservation(
     directXPCStatus: DirectXPCStatus = .notProbed,
     directXPCPreflightSafe: Bool = true,
-    profileSource: ProductProfileSource = .sealedInstalledConfiguration,
+    profileSource: ProductProfileSource = .operatorApprovedFixedOrigin,
     resourceSource: ProductResourceSource = .unavailable,
     resourceCandidates: [ProductResourceCandidate] = []
   ) -> ProductReadinessObservation {

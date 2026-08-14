@@ -104,7 +104,7 @@ private struct ProductCommandFixedObservation: ProductReadinessObserving {
       ),
       directXPCStatus: .notProbed,
       directXPCPreflightSafe: true,
-      profileSource: .sealedInstalledConfiguration,
+      profileSource: .operatorApprovedFixedOrigin,
       resourceSource: .unavailable,
       resourceCandidates: []
     )

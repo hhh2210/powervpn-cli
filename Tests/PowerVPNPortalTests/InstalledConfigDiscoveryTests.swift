@@ -28,6 +28,9 @@ import Testing
     #expect(throws: InstalledConfigDiscoveryError.missingArtifact) {
       _ = try discover(fixture)
     }
+
+    let fixed = try PortalFixedTOFUAuthority.currentProfile()
+    #expect(fixed.selectionSemantics == .operatorApprovedFixedOrigin)
   }
 
   @Test func symbolicLinkArtifactFailsClosed() throws {
@@ -163,6 +166,10 @@ import Testing
         _ = try discover(fixture)
       }
     }
+
+    let fixed = try PortalFixedTOFUAuthority.currentProfile()
+    #expect(fixed.origin.absoluteString == "https://166.111.143.19:4443")
+    #expect(fixed.selectionSemantics == .operatorApprovedFixedOrigin)
   }
 
   @Test func resourceXMLIsExplicitlyForbidden() throws {

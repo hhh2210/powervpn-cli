@@ -20,8 +20,7 @@ static bool pvcurl_has_https(const curl_version_info_data *version) {
   if (version->protocols == NULL) {
     return false;
   }
-  for (const char *const *protocol = version->protocols;
-       *protocol != NULL;
+  for (const char *const *protocol = version->protocols; *protocol != NULL;
        ++protocol) {
     if (strcmp(*protocol, "https") == 0) {
       return true;
@@ -46,13 +45,11 @@ pvcurl_status_t pvcurl_runtime_preflight(void) {
   if (easy == NULL) {
     return PVCURL_STATUS_SETUP_FAILED;
   }
+  pvcurl_status_t trust_status = pvcurl_apply_approved_trust(easy);
   curl_easy_cleanup(easy);
-  return PVCURL_STATUS_OK;
+  return trust_status;
 }
-static size_t pvcurl_body_callback(
-    char *buffer,
-    size_t size,
-    size_t item_count,
+static size_t pvcurl_body_callback(char *buffer, size_t size, size_t item_count,
     void *context) {
   pvcurl_transfer_t *transfer = (pvcurl_transfer_t *)context;
   if (transfer == NULL || buffer == NULL ||
@@ -60,8 +57,7 @@ static size_t pvcurl_body_callback(
     return 0U;
   }
   size_t length = size * item_count;
-  if (atomic_load_explicit(
-          &transfer->request->cancelled,
+  if (atomic_load_explicit(&transfer->request->cancelled,
           memory_order_acquire)) {
     return 0U;
   }
@@ -75,9 +71,7 @@ static size_t pvcurl_body_callback(
   transfer->body_length += length;
   return length;
 }
-static int pvcurl_progress_callback(
-    void *context,
-    curl_off_t download_total,
+static int pvcurl_progress_callback(void *context, curl_off_t download_total,
     curl_off_t download_now,
     curl_off_t upload_total,
     curl_off_t upload_now) {
@@ -86,21 +80,21 @@ static int pvcurl_progress_callback(
   (void)upload_total;
   (void)upload_now;
   pvcurl_request_t *request = (pvcurl_request_t *)context;
-  return atomic_load_explicit(&request->cancelled, memory_order_acquire) ? 1 : 0;
+  return atomic_load_explicit(&request->cancelled, memory_order_acquire) ? 1
+                                                                         : 0;
 }
 static bool pvcurl_trust_error(CURLcode code) {
   switch (code) {
     case CURLE_PEER_FAILED_VERIFICATION:
     case CURLE_SSL_ISSUER_ERROR:
+  case CURLE_SSL_PINNEDPUBKEYNOTMATCH:
       return true;
     default:
       return false;
   }
 }
 
-pvcurl_status_t pvcurl_finalize_status(
-    int curl_code,
-    bool cancelled,
+pvcurl_status_t pvcurl_finalize_status(int curl_code, bool cancelled,
     pvcurl_status_t callback_failure,
     uint16_t http_status,
     bool effective_url_exact) {
@@ -130,12 +124,11 @@ pvcurl_status_t pvcurl_finalize_status(
   if (http_status < 200U || http_status > 599U) {
     return PVCURL_STATUS_HEADER_FRAMING_REJECTED;
   }
-  return effective_url_exact ? PVCURL_STATUS_OK : PVCURL_STATUS_REDIRECT_REJECTED;
+  return effective_url_exact ? PVCURL_STATUS_OK
+                             : PVCURL_STATUS_REDIRECT_REJECTED;
 }
 
-static pvcurl_status_t pvcurl_configure(
-    CURL *curl,
-    pvcurl_request_t *request,
+static pvcurl_status_t pvcurl_configure(CURL *curl, pvcurl_request_t *request,
     struct curl_slist *headers,
     pvcurl_header_parser_t *parser,
     pvcurl_transfer_t *transfer) {
@@ -153,16 +146,24 @@ static pvcurl_status_t pvcurl_configure(
   PVCURL_SET(CURLOPT_FOLLOWLOCATION, 0L);
   PVCURL_SET(CURLOPT_MAXREDIRS, 0L);
   PVCURL_SET(CURLOPT_HTTP_VERSION, (long)CURL_HTTP_VERSION_1_1);
-  PVCURL_SET(CURLOPT_SSL_VERIFYPEER, 1L);
-  PVCURL_SET(CURLOPT_SSL_VERIFYHOST, 2L);
+  pvcurl_status_t trust_status = pvcurl_apply_approved_trust(curl);
+  if (trust_status != PVCURL_STATUS_OK) {
+    return trust_status;
+  }
   PVCURL_SET(CURLOPT_NETRC, (long)CURL_NETRC_IGNORED);
   PVCURL_SET(CURLOPT_NOSIGNAL, 1L);
   PVCURL_SET(CURLOPT_TIMEOUT_MS, (long)request->timeout_milliseconds);
   PVCURL_SET(CURLOPT_CONNECTTIMEOUT_MS, (long)request->timeout_milliseconds);
   PVCURL_SET(CURLOPT_FAILONERROR, 0L);
+  if (request->method == PVCURL_METHOD_GET) {
+    PVCURL_SET(CURLOPT_HTTPGET, 1L);
+  } else {
   PVCURL_SET(CURLOPT_POST, 1L);
+    if (request->body_length > 0U) {
   PVCURL_SET(CURLOPT_POSTFIELDS, (void *)request->body);
+    }
   PVCURL_SET(CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)request->body_length);
+  }
   PVCURL_SET(CURLOPT_HTTPHEADER, headers);
   PVCURL_SET(CURLOPT_HEADERFUNCTION, pvcurl_header_callback);
   PVCURL_SET(CURLOPT_HEADERDATA, parser);
@@ -175,19 +176,15 @@ static pvcurl_status_t pvcurl_configure(
   return PVCURL_STATUS_OK;
 }
 
-pvcurl_status_t pvcurl_request_perform(
-    pvcurl_request_t *request,
+pvcurl_status_t pvcurl_request_perform(pvcurl_request_t *request,
     pvcurl_response_t *response_out) {
   if (request == NULL || response_out == NULL) {
     return PVCURL_STATUS_INVALID_ARGUMENT;
   }
   memset(response_out, 0, sizeof(*response_out));
   unsigned int expected_state = 0U;
-  if (!atomic_compare_exchange_strong_explicit(
-          &request->state,
-          &expected_state,
-          1U,
-          memory_order_acq_rel,
+  if (!atomic_compare_exchange_strong_explicit(&request->state, &expected_state,
+                                               1U, memory_order_acq_rel,
           memory_order_acquire)) {
     return PVCURL_STATUS_INVALID_ARGUMENT;
   }
@@ -201,16 +198,16 @@ pvcurl_status_t pvcurl_request_perform(
   pvcurl_transfer_t transfer = {.request = request};
   pvcurl_response_t response = {0};
   if (result == PVCURL_STATUS_OK) {
-    result = pvcurl_header_parser_create(
-        request->maximum_response_header_bytes,
+    result =
+        pvcurl_header_parser_create(request->maximum_response_header_bytes,
         request->maximum_response_header_line_bytes,
-        request->maximum_set_cookie_bytes,
-        &parser);
+                                    request->maximum_set_cookie_bytes, &parser);
   }
   if (result == PVCURL_STATUS_OK) {
     transfer.body_capacity = request->maximum_response_body_bytes;
     transfer.body = (uint8_t *)calloc(transfer.body_capacity, 1U);
-    result = transfer.body == NULL ? PVCURL_STATUS_SETUP_FAILED : PVCURL_STATUS_OK;
+    result =
+        transfer.body == NULL ? PVCURL_STATUS_SETUP_FAILED : PVCURL_STATUS_OK;
   }
   if (result == PVCURL_STATUS_OK) {
     result = pvcurl_request_build_headers(request, &headers);
@@ -229,10 +226,14 @@ pvcurl_status_t pvcurl_request_perform(
     long http_version = 0L;
     long redirect_count = 0L;
     bool info_valid =
-        curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &effective_url) == CURLE_OK &&
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &curl_status) == CURLE_OK &&
-        curl_easy_getinfo(curl, CURLINFO_HTTP_VERSION, &http_version) == CURLE_OK &&
-        curl_easy_getinfo(curl, CURLINFO_REDIRECT_COUNT, &redirect_count) == CURLE_OK &&
+        curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &effective_url) ==
+            CURLE_OK &&
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &curl_status) ==
+            CURLE_OK &&
+        curl_easy_getinfo(curl, CURLINFO_HTTP_VERSION, &http_version) ==
+            CURLE_OK &&
+        curl_easy_getinfo(curl, CURLINFO_REDIRECT_COUNT, &redirect_count) ==
+            CURLE_OK &&
         curl_status >= 0L && curl_status <= 65535L;
     bool wire_metadata_exact =
         http_version == CURL_HTTP_VERSION_1_1 && redirect_count == 0L;
@@ -245,20 +246,16 @@ pvcurl_status_t pvcurl_request_perform(
       callback_failure = pvcurl_header_parser_failure(parser);
     }
     if (code == CURLE_OK && callback_failure == PVCURL_STATUS_OK) {
-      if (info_valid &&
-          ((curl_status >= 300L && curl_status <= 399L) ||
+      if (info_valid && ((curl_status >= 300L && curl_status <= 399L) ||
            curl_status == 401L || curl_status == 407L)) {
         response.http_status = (uint16_t)curl_status;
       } else {
         callback_failure = pvcurl_header_parser_finish(
-            parser,
-            &response.http_status,
-            &response.set_cookie,
-            &response.set_cookie_length);
+            parser, request->require_set_cookie, &response.http_status,
+            &response.set_cookie, &response.set_cookie_length);
       }
     }
-    if (code == CURLE_OK &&
-        (!info_valid || !wire_metadata_exact ||
+    if (code == CURLE_OK && (!info_valid || !wire_metadata_exact ||
          (response.http_status != 0U &&
           response.http_status != (uint16_t)curl_status))) {
       callback_failure = PVCURL_STATUS_HEADER_FRAMING_REJECTED;
@@ -267,13 +264,17 @@ pvcurl_status_t pvcurl_request_perform(
     result = pvcurl_finalize_status(
         (int)code,
         atomic_load_explicit(&request->cancelled, memory_order_acquire),
-        callback_failure,
-        response.http_status,
-        exact);
+        callback_failure, response.http_status, exact);
   }
+  request->diagnostics.status = result;
+  pvcurl_header_parser_export_diagnostics(parser, &request->diagnostics);
   if (result == PVCURL_STATUS_OK) {
     response.body = transfer.body;
     response.body_length = transfer.body_length;
+    response.set_cookie_field_count =
+        request->diagnostics.set_cookie_field_count;
+    response.set_cookie_selection =
+        request->diagnostics.set_cookie_selection;
     transfer.body = NULL;
     *response_out = response;
     memset(&response, 0, sizeof(response));

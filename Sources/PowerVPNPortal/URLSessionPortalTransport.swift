@@ -108,10 +108,10 @@ struct URLSessionPortalTransport: PortalTransporting {
       throw PortalTransportError.invalidRequest
     }
     guard allowedOrigin.matches(request.url) else { throw PortalTransportError.originMismatch }
-    if request.method == .post, request.url.path == PortalWireContract.passwordPath,
-      session.passwordSetCookieProjection != .provenSingleWireHeader
-    {
-      throw PortalTransportError.setCookieFramingUnavailable
+    if request.method == .post, request.url.path == PortalWireContract.passwordPath {
+      guard case .provenLastFieldWins(let fieldCount) = session.passwordSetCookieProjection,
+        fieldCount > 0
+      else { throw PortalTransportError.setCookieFramingUnavailable }
     }
     if request.method == .get, request.requestBody != nil {
       throw PortalTransportError.invalidRequest

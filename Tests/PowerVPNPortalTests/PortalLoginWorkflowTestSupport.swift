@@ -45,7 +45,8 @@ actor SyntheticPortalTransport: PortalTransporting {
         statusCode: status,
         body: try SecureBytes(copying: Array(body.utf8)),
         setCookieHeader: secureCookie,
-        setCookieProjection: secureCookie == nil ? .unavailableOrAmbiguous : .provenSingleWireHeader
+        setCookieProjection: secureCookie == nil
+          ? .unavailableOrAmbiguous : .provenLastFieldWins(fieldCount: 1)
       )
       retainedResponses.append(response)
       return response

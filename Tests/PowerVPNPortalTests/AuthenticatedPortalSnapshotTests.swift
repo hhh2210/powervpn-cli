@@ -242,7 +242,7 @@ import Testing
       statusCode: 200,
       body: try SecureBytes(copying: Array(acceptedLoginXML.utf8)),
       setCookieHeader: try SecureBytes(copying: Array(cookie.utf8)),
-      setCookieProjection: .provenSingleWireHeader
+      setCookieProjection: .provenLastFieldWins(fieldCount: 1)
     )
   }
 

@@ -215,7 +215,8 @@ private enum ScriptedSessionBehavior {
 }
 
 private final class ScriptedPortalSession: @unchecked Sendable, PortalURLSessionPerforming {
-  let passwordSetCookieProjection = LeadSecSetCookieProjection.provenSingleWireHeader
+  let passwordSetCookieProjection =
+    LeadSecSetCookieProjection.provenLastFieldWins(fieldCount: 1)
   private let lock = NSLock()
   private let behavior: ScriptedSessionBehavior
   private var opens = 0
@@ -261,7 +262,8 @@ private final class ScriptedPortalSession: @unchecked Sendable, PortalURLSession
           statusCode: status,
           finalURL: finalURL,
           setCookieHeader: cookie,
-          setCookieProjection: cookie == nil ? .unavailableOrAmbiguous : .provenSingleWireHeader
+          setCookieProjection: cookie == nil
+            ? .unavailableOrAmbiguous : .provenLastFieldWins(fieldCount: 1)
         ),
         bytes: stream,
         cancel: { [weak self] in

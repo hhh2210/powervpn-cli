@@ -1,3 +1,4 @@
+import CPortalCurl
 import Foundation
 import Testing
 
@@ -42,7 +43,11 @@ import Testing
       #expect(!json.contains(forbidden))
     }
     #expect(report.safety.credentialSource == "controlling_tty_no_echo")
-    #expect(report.safety.endpointSource == "sealed_installed_configuration")
+    #expect(report.safety.endpointSource == "operator_approved_fixed_local_mvp")
+    #expect(report.safety.trustMode == "operator_approved_tofu")
+    #expect(report.safety.fixedSPKIPinRequired)
+    #expect(!report.safety.systemTrustRequired)
+    #expect(!report.safety.releaseReady)
     #expect(!report.safety.credentialInArguments)
     #expect(!report.safety.credentialInEnvironment)
     #expect(!report.safety.credentialWrittenToFile)
@@ -131,8 +136,11 @@ import Testing
     #expect(report.ownedMaterial.sessionMaterialErased)
   }
 
-  @Test func transportPreflightFailureOccursBeforeTTY() async {
+  @Test func transportPreflightFailureOccursBeforeTTY() async throws {
     let trace = RuntimeTrace()
+    let failure = try #require(
+      CPortalCurlDriver.normalizedFailure(PVCURL_STATUS_SETUP_FAILED)
+    )
     let dependencies = PortalLoginRuntimeDependencies(
       discoverProfile: {
         trace.append("discover_profile")
@@ -140,7 +148,7 @@ import Testing
       },
       makeTransport: { _ in
         trace.append("make_transport")
-        throw PortalTransportError.unavailable
+        throw failure
       },
       credentialReader: RuntimeCredentialReader(trace: trace, outcome: .success),
       serialReader: RuntimeSerialReader(trace: trace),
@@ -150,8 +158,14 @@ import Testing
         return "synthetic-os"
       }
     )
-    let report = await PortalLoginRuntimeRunner(dependencies: dependencies).run()
+    let result = await PortalLoginRuntimeRunner(dependencies: dependencies).acquire()
+    guard case .rejected(let report) = result else {
+      Issue.record("unexpected accepted acquisition")
+      return
+    }
     #expect(report.status == .configurationRejected)
+    #expect(report.transportFailure?.category == .setupFailed)
+    #expect(report.transportFailure?.setCookieFieldCount == nil)
     #expect(
       trace.snapshot == ["discover_profile", "operating_system", "make_transport"]
     )

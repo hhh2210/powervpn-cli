@@ -45,7 +45,7 @@ import Testing
       statusCode: 200,
       body: try SecureBytes(copying: []),
       setCookieHeader: try SecureBytes(copying: Array(syntheticSessionCookie.utf8)),
-      setCookieProjection: .provenSingleWireHeader
+      setCookieProjection: .provenLastFieldWins(fieldCount: 1)
     )
     defer { response.erase() }
     try factory.acceptPasswordSession(from: response, passwordURL: password.url)
@@ -96,7 +96,7 @@ import Testing
       statusCode: 200,
       body: try SecureBytes(copying: []),
       setCookieHeader: try SecureBytes(copying: Array("OTHER=value".utf8)),
-      setCookieProjection: .provenSingleWireHeader
+      setCookieProjection: .provenLastFieldWins(fieldCount: 1)
     )
     defer { response.erase() }
     #expect(throws: LeadSecPortalCookieJarError.unsupportedSetCookie) {

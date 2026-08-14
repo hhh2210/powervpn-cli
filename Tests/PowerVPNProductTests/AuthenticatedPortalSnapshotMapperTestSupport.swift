@@ -29,7 +29,7 @@ func resourceXML(displayName: String, sessionID: String) -> String {
 final class AuthenticatedSnapshotFixture {
   let snapshot: AuthenticatedPortalSnapshot
   private let request: PortalHTTPRequest
-  private let factory: PortalRequestFactory
+  let factory: PortalRequestFactory
 
   init(
     snapshot: AuthenticatedPortalSnapshot,
@@ -68,7 +68,7 @@ func authenticatedSnapshot(
     setCookieHeader: try SecureBytes(
       copying: Array("VSG_SESSIONID=\(cookie); Path=/; Secure".utf8)
     ),
-    setCookieProjection: .provenSingleWireHeader
+    setCookieProjection: .provenLastFieldWins(fieldCount: 1)
   )
   defer { passwordResponse.erase() }
   try factory.acceptPasswordSession(
@@ -116,7 +116,7 @@ struct MapperProductObservation: ProductReadinessObserving {
       ),
       directXPCStatus: .notProbed,
       directXPCPreflightSafe: true,
-      profileSource: .sealedInstalledConfiguration,
+      profileSource: .operatorApprovedFixedOrigin,
       resourceSource: .unavailable,
       resourceCandidates: []
     )

@@ -24,22 +24,16 @@ struct PortalLoginRuntimeDependencies: Sendable {
   let operatingSystemVersion: @Sendable () -> String
 
   static let currentMachine = PortalLoginRuntimeDependencies(
-    discoverProfile: { try InstalledConfigDiscovery.discoverCurrentMachine() },
+    discoverProfile: { try PortalFixedTOFUVerifier.currentMachine().profile },
     makeTransport: { profile in
-      guard let host = profile.origin.host else {
+      let verifier = try PortalFixedTOFUVerifier.currentMachine()
+      guard profile == verifier.profile else {
         throw PortalTransportError.invalidOrigin
       }
-      let origin = try PortalHTTPOrigin(host: host, port: profile.origin.port ?? 443)
-      let passwordTransport = try CurlPasswordPortalTransport(allowedOrigin: origin)
-      let delegate = try PortalURLSessionDelegate.currentMachine()
-      let sessionTransport = try URLSessionPortalTransport(
-        allowedOrigin: origin,
-        delegate: delegate
-      )
+      let transport = try CurlPortalTransport(allowedOrigin: verifier.origin)
       return LeadSecPortalTransport(
-        allowedOrigin: origin,
-        passwordTransport: passwordTransport,
-        sessionTransport: sessionTransport
+        allowedOrigin: verifier.origin,
+        transport: transport
       )
     },
     credentialReader: DarwinSecureTerminalCredentialReader(),
@@ -59,7 +53,10 @@ struct PortalLoginRuntimeRunner: Sendable {
     do {
       prepared = try prepare()
     } catch {
-      return closedReport(status: .configurationRejected)
+      return closedReport(
+        status: .configurationRejected,
+        transportFailure: (error as? PortalTransportFailure)?.evidence
+      )
     }
 
     if Task.isCancelled {
@@ -100,7 +97,11 @@ struct PortalLoginRuntimeRunner: Sendable {
     do {
       prepared = try prepare()
     } catch {
-      return .rejected(closedReport(status: .configurationRejected))
+      return .rejected(
+        closedReport(
+          status: .configurationRejected,
+          transportFailure: (error as? PortalTransportFailure)?.evidence
+        ))
     }
     if Task.isCancelled {
       prepared.erase()
@@ -147,7 +148,10 @@ struct PortalLoginRuntimeRunner: Sendable {
     )
   }
 
-  private func closedReport(status: PortalLoginStatus) -> PortalLoginReport {
+  private func closedReport(
+    status: PortalLoginStatus,
+    transportFailure: PortalTransportFailureEvidence? = nil
+  ) -> PortalLoginReport {
     PortalLoginReport(
       status: status,
       operations: PortalOperationEvidence(
@@ -165,7 +169,8 @@ struct PortalLoginRuntimeRunner: Sendable {
         requestBodiesErased: true,
         responseBodiesErased: true,
         sessionMaterialErased: true
-      )
+      ),
+      transportFailure: transportFailure
     )
   }
 }

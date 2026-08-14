@@ -130,7 +130,7 @@ private func gatewayContextFixture() throws -> GatewayContextFixture {
     setCookieHeader: try SecureBytes(
       copying: Array("VSG_SESSIONID=gateway-test; Path=/; Secure".utf8)
     ),
-    setCookieProjection: .provenSingleWireHeader
+    setCookieProjection: .provenLastFieldWins(fieldCount: 1)
   )
   defer { response.erase() }
   try factory.acceptPasswordSession(

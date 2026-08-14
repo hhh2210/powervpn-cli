@@ -7,7 +7,7 @@ import Testing
 @Suite struct SecureTerminalCredentialsTests {
   @Test func readsExactlyTwoClosedNoEchoPromptsAndCascadesErase() throws {
     let ledger = ErasureLedger()
-    let driver = ScriptedReadPassphraseDriver([
+    let driver = ScriptedTerminalCredentialDriver([
       .value(.username, Array("user-sentinel".utf8)),
       .value(.password, Array("password-sentinel".utf8)),
     ])
@@ -15,7 +15,7 @@ import Testing
     let credentials = try reader.readCredentials()
 
     #expect(driver.calls.map(\.prompt) == [.username, .password])
-    #expect(driver.calls.allSatisfy { $0.flags == RPP_ECHO_OFF | RPP_REQUIRE_TTY })
+    #expect(driver.calls.allSatisfy { $0.disableEcho })
     #expect(credentials.usernameByteCount == 13)
     #expect(credentials.passwordByteCount == 17)
     #expect(
@@ -50,9 +50,9 @@ import Testing
   @Test func passwordCancellationErasesPartialUsernameAndBothCBuffers() throws {
     let sentinel = "partial-username-sentinel"
     let ledger = ErasureLedger()
-    let driver = ScriptedReadPassphraseDriver([
+    let driver = ScriptedTerminalCredentialDriver([
       .value(.username, Array(sentinel.utf8)),
-      .failure(.password, EINTR),
+      .cancelled(.password),
     ])
 
     #expect(throws: SecureTerminalCredentialError.cancelled) {
@@ -71,7 +71,7 @@ import Testing
       emptyPrompt == .username
       ? [.value(.username, [])]
       : [.value(.username, Array("user".utf8)), .value(.password, [])]
-    let driver = ScriptedReadPassphraseDriver(steps)
+    let driver = ScriptedTerminalCredentialDriver(steps)
 
     do {
       _ = try testReader(driver: driver, ledger: ledger).readCredentials()
@@ -99,7 +99,7 @@ import Testing
       longPrompt == .username
       ? [.value(.username, oversized)]
       : [.value(.username, Array("user".utf8)), .value(.password, oversized)]
-    let driver = ScriptedReadPassphraseDriver(steps)
+    let driver = ScriptedTerminalCredentialDriver(steps)
 
     #expect(throws: SecureTerminalCredentialError.inputTooLong(longPrompt)) {
       _ = try testReader(driver: driver, ledger: ledger).readCredentials()
@@ -109,10 +109,10 @@ import Testing
     #expect(ledger.secureErased == (longPrompt == .username ? [] : [.username]))
   }
 
-  @Test func nonInterruptDriverFailureIsNormalizedAndValueFree() {
+  @Test func driverFailureIsNormalizedAndValueFree() {
     let sentinel = "foreign-driver-error-sentinel"
     let ledger = ErasureLedger()
-    let driver = ScriptedReadPassphraseDriver([.failure(.username, EIO)])
+    let driver = ScriptedTerminalCredentialDriver([.failure(.username)])
     do {
       _ = try testReader(driver: driver, ledger: ledger).readCredentials()
       Issue.record("expected unavailable terminal")
@@ -125,10 +125,41 @@ import Testing
     #expect(ledger.bufferErased == [.username])
     #expect(ledger.onlyZeroes)
   }
+
+  @Test func cancellationImmediatelyAfterGateAcquisitionPromptsNothingAndReleasesGate() async {
+    let canceller = OneShotTaskCanceller()
+    let gate = TerminalCredentialTransactionGate(
+      acquisitionObserver: { canceller.cancelCurrentTask() }
+    )
+    let driver = ScriptedTerminalCredentialDriver([
+      .value(.username, Array("unused-user".utf8)),
+      .value(.password, Array("unused-password".utf8)),
+    ])
+    let reader = DarwinSecureTerminalCredentialReader(
+      driver: driver,
+      transactionGate: gate
+    )
+
+    let outcome = await Task.detached { () -> SecureTerminalCredentialError? in
+      do {
+        _ = try reader.readCredentials()
+        return nil
+      } catch let error as SecureTerminalCredentialError {
+        return error
+      } catch {
+        return .unavailable
+      }
+    }.value
+
+    #expect(outcome == .cancelled)
+    #expect(driver.calls.isEmpty)
+    #expect(gate.acquire())
+    gate.release()
+  }
 }
 
 private func testReader(
-  driver: ScriptedReadPassphraseDriver,
+  driver: ScriptedTerminalCredentialDriver,
   ledger: ErasureLedger
 ) -> DarwinSecureTerminalCredentialReader {
   DarwinSecureTerminalCredentialReader(
@@ -138,21 +169,40 @@ private func testReader(
   )
 }
 
-private enum ReadStep: Sendable {
-  case value(SecureTerminalCredentialPrompt, [UInt8])
-  case failure(SecureTerminalCredentialPrompt, Int32)
+private final class OneShotTaskCanceller: @unchecked Sendable {
+  private let lock = NSLock()
+  private var used = false
 
-  var prompt: SecureTerminalCredentialPrompt {
-    switch self {
-    case .value(let prompt, _), .failure(let prompt, _): prompt
+  func cancelCurrentTask() {
+    let shouldCancel = lock.withLock {
+      guard !used else { return false }
+      used = true
+      return true
+    }
+    if shouldCancel {
+      withUnsafeCurrentTask { $0?.cancel() }
     }
   }
 }
 
-private final class ScriptedReadPassphraseDriver: @unchecked Sendable, ReadPassphraseDriving {
+private enum ReadStep: Sendable {
+  case value(SecureTerminalCredentialPrompt, [UInt8])
+  case cancelled(SecureTerminalCredentialPrompt)
+  case failure(SecureTerminalCredentialPrompt)
+
+  var prompt: SecureTerminalCredentialPrompt {
+    switch self {
+    case .value(let prompt, _), .cancelled(let prompt), .failure(let prompt): prompt
+    }
+  }
+}
+
+private final class ScriptedTerminalCredentialDriver: @unchecked Sendable,
+  TerminalCredentialDriving
+{
   struct Call: Sendable {
     let prompt: SecureTerminalCredentialPrompt
-    let flags: Int32
+    let disableEcho: Bool
   }
 
   private let lock = NSLock()
@@ -171,22 +221,24 @@ private final class ScriptedReadPassphraseDriver: @unchecked Sendable, ReadPassp
     prompt: SecureTerminalCredentialPrompt,
     into buffer: UnsafeMutablePointer<CChar>,
     capacity: Int,
-    flags: Int32
-  ) -> ReadPassphraseDriverResult {
+    disableEcho: Bool
+  ) -> TerminalCredentialDriverResult {
     lock.withLock {
-      recordedCalls.append(Call(prompt: prompt, flags: flags))
+      recordedCalls.append(Call(prompt: prompt, disableEcho: disableEcho))
       guard !steps.isEmpty else { return .failure(EIO) }
       let step = steps.removeFirst()
       guard step.prompt == prompt else { return .failure(EINVAL) }
       switch step {
-      case .failure(_, let errorNumber):
-        return .failure(errorNumber)
+      case .cancelled:
+        return .cancelled
+      case .failure:
+        return .failure(EIO)
       case .value(_, let bytes):
         let copied = min(bytes.count, capacity - 1)
         for index in 0..<copied {
           buffer[index] = CChar(bitPattern: bytes[index])
         }
-        return .success
+        return .success(copied)
       }
     }
   }

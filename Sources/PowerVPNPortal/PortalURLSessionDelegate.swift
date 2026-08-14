@@ -3,8 +3,8 @@ import Security
 
 typealias PortalSystemTrustEvaluator = (SecTrust, String) -> Bool
 
-/// URLSession's closed trust boundary for the sealed installed portal. The
-/// production factory accepts no host, CA, pin, or insecure-mode input.
+/// Internal URLSession test seam. Production Portal traffic is exclusively
+/// connection-bound through the fixed pinned libcurl transport.
 public final class PortalURLSessionDelegate:
   NSObject,
   URLSessionDelegate,
@@ -13,14 +13,6 @@ public final class PortalURLSessionDelegate:
 {
   private let policy: PortalTrustPolicy
   private let evaluateSystemTrust: PortalSystemTrustEvaluator
-
-  public static func currentMachine() throws -> PortalURLSessionDelegate {
-    let profile = try InstalledConfigDiscovery.discoverCurrentMachine()
-    return PortalURLSessionDelegate(
-      policy: PortalTrustPolicy(profile: profile),
-      evaluateSystemTrust: evaluateWithSystemAnchors
-    )
-  }
 
   init(
     policy: PortalTrustPolicy,
@@ -77,10 +69,4 @@ public final class PortalURLSessionDelegate:
   ) {
     completionHandler(nil)
   }
-}
-
-private func evaluateWithSystemAnchors(_ trust: SecTrust, host: String) -> Bool {
-  let policy = SecPolicyCreateSSL(true, host as CFString)
-  guard SecTrustSetPolicies(trust, policy) == errSecSuccess else { return false }
-  return SecTrustEvaluateWithError(trust, nil)
 }

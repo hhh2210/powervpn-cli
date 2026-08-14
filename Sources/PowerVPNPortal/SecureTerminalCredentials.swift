@@ -1,4 +1,5 @@
 import Darwin
+import Dispatch
 
 public enum SecureTerminalCredentialPrompt: String, CaseIterable, Sendable {
   case username = "PowerVPN Username: "
@@ -49,36 +50,85 @@ public final class PortalCredentials: @unchecked Sendable {
 public protocol SecureTerminalCredentialReading: Sendable {
   func readCredentials() throws -> PortalCredentials
 }
+final class TerminalCredentialTransactionGate: @unchecked Sendable {
+  static let controllingTTY = TerminalCredentialTransactionGate()
+  static let cancellationCheckMilliseconds = 50
+
+  private let semaphore = DispatchSemaphore(value: 1)
+  private let waitObserver: (@Sendable () -> Void)?
+  private let acquisitionObserver: (@Sendable () -> Void)?
+
+  init(
+    waitObserver: (@Sendable () -> Void)? = nil,
+    acquisitionObserver: (@Sendable () -> Void)? = nil
+  ) {
+    self.waitObserver = waitObserver
+    self.acquisitionObserver = acquisitionObserver
+  }
+
+  func acquire() -> Bool {
+    while true {
+      guard !Task.isCancelled else { return false }
+      let result = semaphore.wait(
+        timeout: .now() + .milliseconds(Self.cancellationCheckMilliseconds)
+      )
+      guard result == .success else {
+        waitObserver?()
+        continue
+      }
+      acquisitionObserver?()
+      guard !Task.isCancelled else {
+        semaphore.signal()
+        return false
+      }
+      return true
+    }
+  }
+
+  func release() {
+    semaphore.signal()
+  }
+}
 
 public struct DarwinSecureTerminalCredentialReader: SecureTerminalCredentialReading {
   static let bufferCapacity = 4_096
-  private static let readFlags = RPP_ECHO_OFF | RPP_REQUIRE_TTY
 
-  private let driver: any ReadPassphraseDriving
+  private let driver: any TerminalCredentialDriving
+  private let transactionGate: TerminalCredentialTransactionGate
   private let bufferEraseObserver:
     (@Sendable (SecureTerminalCredentialPrompt, UnsafeRawBufferPointer) -> Void)?
   private let secureEraseObserver:
     (@Sendable (SecureTerminalCredentialPrompt, UnsafeRawBufferPointer) -> Void)?
 
   public init() {
-    driver = DarwinReadPassphraseDriver()
+    driver = DarwinTerminalCredentialDriver()
+    transactionGate = .controllingTTY
     bufferEraseObserver = nil
     secureEraseObserver = nil
   }
 
   init(
-    driver: any ReadPassphraseDriving,
+    driver: any TerminalCredentialDriving,
+    transactionGate: TerminalCredentialTransactionGate = .controllingTTY,
     bufferEraseObserver:
       (@Sendable (SecureTerminalCredentialPrompt, UnsafeRawBufferPointer) -> Void)? = nil,
     secureEraseObserver:
       (@Sendable (SecureTerminalCredentialPrompt, UnsafeRawBufferPointer) -> Void)? = nil
   ) {
     self.driver = driver
+    self.transactionGate = transactionGate
     self.bufferEraseObserver = bufferEraseObserver
     self.secureEraseObserver = secureEraseObserver
   }
 
   public func readCredentials() throws -> PortalCredentials {
+    guard transactionGate.acquire() else {
+      throw SecureTerminalCredentialError.cancelled
+    }
+    defer { transactionGate.release() }
+    guard !Task.isCancelled else {
+      throw SecureTerminalCredentialError.cancelled
+    }
     let username: SecureBytes
     do {
       username = try read(.username)
@@ -107,19 +157,21 @@ public struct DarwinSecureTerminalCredentialReader: SecureTerminalCredentialRead
       buffer.deallocate()
     }
 
+    let count: Int
     switch driver.read(
       prompt: prompt,
       into: buffer,
       capacity: Self.bufferCapacity,
-      flags: Self.readFlags
+      disableEcho: true
     ) {
-    case .success:
-      break
-    case .failure(let errorNumber):
-      throw errorNumber == EINTR ? SecureTerminalCredentialError.cancelled : .unavailable
+    case .success(let byteCount):
+      count = byteCount
+    case .cancelled:
+      throw SecureTerminalCredentialError.cancelled
+    case .failure:
+      throw SecureTerminalCredentialError.unavailable
     }
 
-    let count = strnlen(buffer, Self.bufferCapacity)
     guard count > 0 else { throw SecureTerminalCredentialError.empty(prompt) }
     guard count < Self.bufferCapacity - 1 else {
       throw SecureTerminalCredentialError.inputTooLong(prompt)
@@ -134,34 +186,5 @@ public struct DarwinSecureTerminalCredentialReader: SecureTerminalCredentialRead
 
   private func normalize(_ error: Error) -> SecureTerminalCredentialError {
     (error as? SecureTerminalCredentialError) ?? .unavailable
-  }
-}
-
-enum ReadPassphraseDriverResult: Sendable {
-  case success
-  case failure(Int32)
-}
-
-protocol ReadPassphraseDriving: Sendable {
-  func read(
-    prompt: SecureTerminalCredentialPrompt,
-    into buffer: UnsafeMutablePointer<CChar>,
-    capacity: Int,
-    flags: Int32
-  ) -> ReadPassphraseDriverResult
-}
-
-private struct DarwinReadPassphraseDriver: ReadPassphraseDriving {
-  func read(
-    prompt: SecureTerminalCredentialPrompt,
-    into buffer: UnsafeMutablePointer<CChar>,
-    capacity: Int,
-    flags: Int32
-  ) -> ReadPassphraseDriverResult {
-    errno = 0
-    let result = prompt.rawValue.withCString {
-      readpassphrase($0, buffer, capacity, flags)
-    }
-    return result == nil ? .failure(errno) : .success
   }
 }

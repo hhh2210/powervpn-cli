@@ -19,6 +19,11 @@ import Testing
         "6e30d009f3a7d6cde66c692bfffb91f2c8861a918ea6950f527147381f45f3c8",
         "15c9842af15a8c819ac0941d560485b708d8d1b3642f0c329def9fb9fdefcedc"
       ),
+      (
+        "portal-leaf",
+        "5deeda7e8e1371c816ae036a20b4c206c75bd6785dafd4e9555057ed4c1e661b",
+        "b7d82d5baa74d6bc8e45062475b54e81ebd2d2cabb6d01e0a0049677cd0eab54"
+      ),
     ]
   )
   func rsaAndECDifferentialVectors(

@@ -50,10 +50,16 @@ r2_raw_tests_aggregate() {
 	test_lines=$(
 		for file in Tests/CPortalCurlTests/CPortalCurlHeaderTests.c \
 			Tests/CPortalCurlTests/CPortalCurlStatusTests.c \
-			Tests/PowerVPNPortalTests/CurlPasswordPortalTransportTests.swift \
+			Tests/CPortalCurlTests/CPortalCurlTrustContractClient.c \
+			Tests/CPortalCurlTests/LocalTLSTrustContractServer.py \
+			Tests/PowerVPNPortalTests/CurlPortalTransportTests.swift \
+			Tests/PowerVPNPortalTests/CurlPortalTransportTestSupport.swift \
+			Tests/PowerVPNPortalTests/InstalledConfigDiscoveryTests.swift \
 			Tests/PowerVPNPortalTests/LeadSecPortalTransportTests.swift \
-			Tests/PowerVPNPortalTests/PortalRequestFactoryTests.swift \
-			Tests/PowerVPNPortalTests/FoundationPortalURLSessionReuseTests.swift; do
+			Tests/PowerVPNPortalTests/PortalFixedTOFUVerifierTests.swift \
+			Tests/PowerVPNProductTests/AuthenticatedPortalSnapshotMapperTests.swift \
+			Tests/PowerVPNProductTests/ProductReadinessRuntimeTests.swift \
+			scripts/verify/cportalcurl_trust_contract.sh; do
 			[ -f "$R2_REPO_ROOT/$file" ] && [ ! -L "$R2_REPO_ROOT/$file" ] || exit 1
 			printf '%s  %s\n' "$(r2_hash_file "$R2_REPO_ROOT/$file")" "$file" || exit 1
 		done
@@ -280,14 +286,31 @@ r2_reconstruct_report() {
 	input_fifo=$1; output_file=$2; safe_stage="$output_file.safe.$$"
 	[ -p "$input_fifo" ] && [ ! -e "$output_file" ] && [ ! -L "$output_file" ] || return 1
 	jq -ce '
-    if keys == ["mode","operations","ownedMaterial","safety","schemaVersion","status","transactionAccepted"] and
-      .schemaVersion == 1 and .mode == "r2_username_password_portal_login" and
+    def transport_category:
+      IN("invalid_request","setup_failed","trust_rejected","redirect_rejected",
+        "http_authentication_rejected","header_framing_rejected",
+        "response_too_large","cancelled","timed_out","unavailable");
+    def transport_failure:
+      type == "object" and
+      ((keys == ["category"] and (.category | transport_category)) or
+       (keys == ["category","duplicateSetCookieRejected","setCookieFieldCount"] and
+        (.category | transport_category) and
+        (.setCookieFieldCount | type == "number" and . == floor and . >= 0 and . <= 2) and
+        (.duplicateSetCookieRejected | type == "boolean") and
+        (.duplicateSetCookieRejected == (.setCookieFieldCount == 2)) and
+        ((.duplicateSetCookieRejected | not) or .category == "header_framing_rejected")));
+    if (keys == ["mode","operations","ownedMaterial","safety","schemaVersion","status","transactionAccepted"] or
+        keys == ["mode","operations","ownedMaterial","safety","schemaVersion","status","transactionAccepted","transportFailure"]) and
+      .schemaVersion == 2 and .mode == "r2_username_password_portal_login" and
       (.status | IN("accepted","configuration_rejected","credential_input_rejected","transport_rejected","tls_rejected","redirect_rejected","login_rejected","challenge_required","login_response_rejected","session_rejected","resource_list_rejected","logout_rejected","cancelled","internal_failure")) and
       (.operations | keys) == ["loginAccepted","loginRequested","logoutAccepted","logoutRequested","resourceListAccepted","resourceListRequested","sessionCheckAccepted","sessionCheckRequested"] and all(.operations[]; type == "boolean") and
       (.ownedMaterial | keys) == ["credentialsErased","requestBodiesErased","responseBodiesErased","sessionMaterialErased"] and all(.ownedMaterial[]; type == "boolean") and
-      .safety == {appOwnedSecureBuffersErasureObserved:true,credentialInArguments:false,credentialInEnvironment:false,credentialSource:"controlling_tty_no_echo",credentialWrittenToFile:false,endpointSource:"sealed_installed_configuration",endpointValueRetainedInEvidence:false,helperMutationRequested:false,ikeTrafficRequested:false,platformSerialValueRetainedInEvidence:false,portalHTTPSAllowed:true,rawRequestRetainedInEvidence:false,rawResponseRetainedInEvidence:false,redirectsAllowed:false,resourceValueRetainedInEvidence:false,sessionValueRetainedInEvidence:false,swiftAndFoundationBridgeCopiesErasureClaimed:false,systemTrustRequired:true,viciUsed:false,xpcUsed:false} and
-      (.transactionAccepted | type) == "boolean"
-    then {schemaVersion,mode,status,operations,ownedMaterial,safety,transactionAccepted}
+      .safety == {appOwnedSecureBuffersErasureObserved:true,credentialInArguments:false,credentialInEnvironment:false,credentialSource:"controlling_tty_no_echo",credentialWrittenToFile:false,endpointSource:"operator_approved_fixed_local_mvp",endpointValueRetainedInEvidence:false,fixedSPKIPinRequired:true,helperMutationRequested:false,ikeTrafficRequested:false,platformSerialValueRetainedInEvidence:false,portalHTTPSAllowed:true,rawRequestRetainedInEvidence:false,rawResponseRetainedInEvidence:false,redirectsAllowed:false,releaseReady:false,resourceValueRetainedInEvidence:false,sessionValueRetainedInEvidence:false,swiftAndFoundationBridgeCopiesErasureClaimed:false,systemTrustRequired:false,trustMode:"operator_approved_tofu",viciUsed:false,xpcUsed:false} and
+      (.transactionAccepted | type) == "boolean" and
+      ((has("transportFailure") | not) or
+       (.status != "accepted" and (.transportFailure | transport_failure)))
+    then {schemaVersion,mode,status,operations,ownedMaterial,safety,transactionAccepted} +
+      (if has("transportFailure") then {transportFailure} else {} end)
     else error("closed portal report schema rejected") end
   ' <"$input_fifo" >"$safe_stage" 2>/dev/null || { rm -f "$safe_stage"; return 1; }
 	chmod 600 "$safe_stage"

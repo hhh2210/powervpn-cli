@@ -124,7 +124,7 @@ func m2ConnectOnceExitCode(_ report: ProductM2ConnectReport) -> Int32 {
   return 1
 }
 
-private func validResourceDisplayName(_ value: String) -> Bool {
+func validResourceDisplayName(_ value: String) -> Bool {
   (1...256).contains(value.utf8.count)
     && !value.unicodeScalars.contains {
       CharacterSet.controlCharacters.contains($0) || CharacterSet.newlines.contains($0)

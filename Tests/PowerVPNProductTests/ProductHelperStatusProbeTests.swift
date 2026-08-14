@@ -110,7 +110,7 @@ import Testing
       generation: generation(runs: 19),
       directXPCStatus: .notProbed,
       directXPCPreflightSafe: true,
-      profileSource: .sealedInstalledConfiguration,
+      profileSource: .operatorApprovedFixedOrigin,
       resourceSource: .unavailable,
       resourceCandidates: []
     )

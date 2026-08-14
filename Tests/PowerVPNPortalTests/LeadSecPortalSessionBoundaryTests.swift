@@ -16,7 +16,7 @@ import Testing
     }
     try jar.acceptPasswordResponse(
       setCookieHeader: setCookie,
-      projection: .provenSingleWireHeader,
+      projection: .provenLastFieldWins(fieldCount: 1),
       passwordURL: url
     )
     let generation = try jar.currentAuthenticationGeneration()
@@ -48,7 +48,7 @@ import Testing
     #expect(throws: LeadSecPortalCookieJarError.unsupportedSetCookie) {
       try jar.acceptPasswordResponse(
         setCookieHeader: setCookie,
-        projection: .provenSingleWireHeader,
+        projection: .provenLastFieldWins(fieldCount: 1),
         passwordURL: url
       )
     }

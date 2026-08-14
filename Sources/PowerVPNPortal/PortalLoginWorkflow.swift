@@ -34,10 +34,11 @@ struct PortalLoginWorkflow: Sendable {
     platformSerial: SecureBytes
   ) async -> PortalLoginReport {
     var progress = PortalWorkflowProgress()
-    var stage = PortalWorkflowStage.authenticatedSnapshot
+    var stage = PortalWorkflowStage.login
     var logoutAttempted = false
     var finalStatus = PortalLoginStatus.internalFailure
     let materialTracker = PortalOwnedMaterialTracker()
+    var transportFailure: PortalTransportFailureEvidence?
 
     do {
       let snapshot = try await authenticationFlow.authenticateThroughResource(
@@ -86,6 +87,7 @@ struct PortalLoginWorkflow: Sendable {
     } catch PortalWorkflowStop.status(let status) {
       finalStatus = status
     } catch {
+      transportFailure = (error as? PortalTransportFailure)?.evidence
       finalStatus = PortalWorkflowErrorNormalizer.status(for: error, at: stage)
     }
 
@@ -104,7 +106,8 @@ struct PortalLoginWorkflow: Sendable {
       progress: progress,
       credentials: credentials,
       platformSerial: platformSerial,
-      tracker: materialTracker
+      tracker: materialTracker,
+      transportFailure: transportFailure
     )
   }
 
@@ -190,7 +193,8 @@ struct PortalLoginWorkflow: Sendable {
           progress: progress,
           credentials: credentials,
           platformSerial: platformSerial,
-          tracker: tracker
+          tracker: tracker,
+          transportFailure: (error as? PortalTransportFailure)?.evidence
         )
       )
     }
@@ -201,7 +205,8 @@ struct PortalLoginWorkflow: Sendable {
     progress: PortalWorkflowProgress,
     credentials: PortalCredentials,
     platformSerial: SecureBytes,
-    tracker: PortalOwnedMaterialTracker
+    tracker: PortalOwnedMaterialTracker,
+    transportFailure: PortalTransportFailureEvidence? = nil
   ) -> PortalLoginReport {
     let cleanup = tracker.snapshot
     return PortalLoginReport(
@@ -214,7 +219,8 @@ struct PortalLoginWorkflow: Sendable {
         requestBodiesErased: cleanup.requests,
         responseBodiesErased: cleanup.responses,
         sessionMaterialErased: factory.retainedSessionByteCount == 0
-      )
+      ),
+      transportFailure: transportFailure
     )
   }
 

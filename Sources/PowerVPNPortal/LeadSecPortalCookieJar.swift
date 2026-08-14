@@ -8,7 +8,7 @@ enum LeadSecPortalCookieJarError: Error, Equatable, Sendable {
 }
 
 enum LeadSecSetCookieProjection: Equatable, Sendable {
-  case provenSingleWireHeader
+  case provenLastFieldWins(fieldCount: UInt32)
   /// Foundation may fold repeated fields, so its value cannot prove wire
   /// multiplicity and is never accepted by the compatibility profile.
   case foundationFoldedValue
@@ -74,7 +74,7 @@ final class LeadSecPortalCookieJar: @unchecked Sendable {
         throw LeadSecPortalCookieJarError.sessionAlreadyStored
       }
       guard let setCookieHeader else { throw LeadSecPortalCookieJarError.missingSetCookie }
-      guard projection == .provenSingleWireHeader else {
+      guard case .provenLastFieldWins(let fieldCount) = projection, fieldCount > 0 else {
         throw LeadSecPortalCookieJarError.ambiguousSetCookieFraming
       }
       sessionEntry = try Self.makeSessionEntry(

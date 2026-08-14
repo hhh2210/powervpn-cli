@@ -1,4 +1,5 @@
 #include "CPortalCurlInternal.h"
+#include "CPortalCurlTrustProfile.h"
 
 #include <curl/curl.h>
 #include <stdio.h>
@@ -18,9 +19,7 @@ void pvcurl_clear(void *pointer, size_t length) {
   }
 }
 
-static bool pvcurl_valid_bytes(
-    pvcurl_bytes_t value,
-    size_t maximum,
+static bool pvcurl_valid_bytes(pvcurl_bytes_t value, size_t maximum,
     uint8_t minimum_byte) {
   if (value.pointer == NULL || value.length == 0U || value.length > maximum) {
     return false;
@@ -33,19 +32,31 @@ static bool pvcurl_valid_bytes(
   return true;
 }
 
-static bool pvcurl_valid_config(const pvcurl_password_request_config_t *config) {
-  static const uint8_t https_prefix[] = "https://";
+static bool pvcurl_absent(pvcurl_bytes_t value) {
+  return value.pointer == NULL && value.length == 0U;
+}
+
+static bool pvcurl_valid_config(const pvcurl_request_config_t *config) {
+  static const uint8_t approved_url_prefix[] = PVCURL_APPROVED_URL_PREFIX;
+  static const uint8_t approved_host[] = PVCURL_APPROVED_HOST;
   if (config == NULL ||
+      (config->method != PVCURL_METHOD_GET &&
+       config->method != PVCURL_METHOD_POST) ||
       !pvcurl_valid_bytes(config->url, 4096U, 0x21U) ||
-      config->url.length <= sizeof(https_prefix) - 1U ||
-      memcmp(config->url.pointer, https_prefix, sizeof(https_prefix) - 1U) != 0 ||
-      !pvcurl_valid_bytes(config->host_header, 512U, 0x21U) ||
+      config->url.length <= sizeof(approved_url_prefix) - 1U ||
+      memcmp(config->url.pointer, approved_url_prefix,
+             sizeof(approved_url_prefix) - 1U) != 0 ||
+      config->host_header.length != sizeof(approved_host) - 1U ||
+      memcmp(config->host_header.pointer, approved_host,
+             sizeof(approved_host) - 1U) != 0 ||
       !pvcurl_valid_bytes(config->accept_header, 8192U, 0x20U) ||
       !pvcurl_valid_bytes(config->user_agent_header, 8192U, 0x20U) ||
-      !pvcurl_valid_bytes(config->content_type_header, 8192U, 0x20U) ||
-      !pvcurl_valid_bytes(config->cookie_header, PVCURL_MAX_COOKIE_BYTES, 0x20U) ||
-      config->body.pointer == NULL || config->body.length == 0U ||
+      !pvcurl_valid_bytes(config->cookie_header, PVCURL_MAX_COOKIE_BYTES,
+                          0x20U) ||
       config->body.length > PVCURL_MAX_BODY_BYTES ||
+      (config->body.pointer == NULL) != (config->body.length == 0U) ||
+      (config->content_type_header.pointer == NULL) !=
+          (config->content_type_header.length == 0U) ||
       config->timeout_milliseconds == 0U ||
       config->timeout_milliseconds > 60000U ||
       config->maximum_response_body_bytes == 0U ||
@@ -62,28 +73,28 @@ static bool pvcurl_valid_config(const pvcurl_password_request_config_t *config) 
           config->maximum_response_header_line_bytes) {
     return false;
   }
-  if (memchr(config->url.pointer, '#', config->url.length) != NULL) {
+  bool body_absent = pvcurl_absent(config->body);
+  bool content_type_absent = pvcurl_absent(config->content_type_header);
+  if ((config->method == PVCURL_METHOD_GET &&
+       (!body_absent || !content_type_absent)) ||
+      (config->method == PVCURL_METHOD_POST &&
+       body_absent != content_type_absent) ||
+      (!content_type_absent &&
+       !pvcurl_valid_bytes(config->content_type_header, 8192U, 0x20U))) {
     return false;
   }
-  size_t authority_start = sizeof(https_prefix) - 1U;
-  size_t authority_end = authority_start;
-  while (authority_end < config->url.length &&
-         config->url.pointer[authority_end] != (uint8_t)'/' &&
-         config->url.pointer[authority_end] != (uint8_t)'?') {
-    ++authority_end;
-  }
-  return authority_end > authority_start &&
-      memchr(
-          config->url.pointer + authority_start,
-          '@',
-          authority_end - authority_start) == NULL;
+  return memchr(config->url.pointer, '#', config->url.length) == NULL;
 }
 
-static pvcurl_status_t pvcurl_copy(
-    pvcurl_bytes_t source,
+static pvcurl_status_t pvcurl_copy(pvcurl_bytes_t source,
     pvcurl_owned_bytes_t *destination) {
   if (source.length == SIZE_MAX) {
     return PVCURL_STATUS_INVALID_ARGUMENT;
+  }
+  if (source.length == 0U) {
+    destination->pointer = NULL;
+    destination->length = 0U;
+    return PVCURL_STATUS_OK;
   }
   destination->pointer = (uint8_t *)malloc(source.length + 1U);
   if (destination->pointer == NULL) {
@@ -104,8 +115,7 @@ static void pvcurl_owned_destroy(pvcurl_owned_bytes_t *value) {
   value->length = 0U;
 }
 
-pvcurl_status_t pvcurl_password_request_create(
-    const pvcurl_password_request_config_t *config,
+pvcurl_status_t pvcurl_request_create(const pvcurl_request_config_t *config,
     pvcurl_request_t **request_out) {
   if (request_out == NULL) {
     return PVCURL_STATUS_INVALID_ARGUMENT;
@@ -120,6 +130,8 @@ pvcurl_status_t pvcurl_password_request_create(
   }
   atomic_init(&request->cancelled, false);
   atomic_init(&request->state, 0U);
+  request->method = config->method;
+  request->require_set_cookie = config->require_set_cookie;
 #define PVCURL_COPY_FIELD(field)                                                \
   do {                                                                          \
     pvcurl_status_t copy_status = pvcurl_copy(config->field, &request->field);  \
@@ -139,7 +151,8 @@ pvcurl_status_t pvcurl_password_request_create(
   request->body_length = config->body.length;
   request->timeout_milliseconds = config->timeout_milliseconds;
   request->maximum_response_body_bytes = config->maximum_response_body_bytes;
-  request->maximum_response_header_bytes = config->maximum_response_header_bytes;
+  request->maximum_response_header_bytes =
+      config->maximum_response_header_bytes;
   request->maximum_response_header_line_bytes =
       config->maximum_response_header_line_bytes;
   request->maximum_set_cookie_bytes = config->maximum_set_cookie_bytes;
@@ -147,8 +160,7 @@ pvcurl_status_t pvcurl_password_request_create(
   return PVCURL_STATUS_OK;
 }
 
-static pvcurl_status_t pvcurl_append_header(
-    struct curl_slist **headers,
+static pvcurl_status_t pvcurl_append_header(struct curl_slist **headers,
     const char *name,
     const uint8_t *value,
     size_t value_length) {
@@ -177,15 +189,15 @@ static pvcurl_status_t pvcurl_append_header(
   return PVCURL_STATUS_OK;
 }
 
-pvcurl_status_t pvcurl_request_build_headers(
-    const pvcurl_request_t *request,
+pvcurl_status_t pvcurl_request_build_headers(const pvcurl_request_t *request,
     struct curl_slist **headers_out) {
   if (request == NULL || headers_out == NULL) {
     return PVCURL_STATUS_INVALID_ARGUMENT;
   }
   *headers_out = NULL;
   char content_length[32];
-  int rendered = snprintf(content_length, sizeof(content_length), "%zu", request->body_length);
+  int rendered = snprintf(content_length, sizeof(content_length), "%zu",
+                          request->body_length);
   if (rendered <= 0 || (size_t)rendered >= sizeof(content_length)) {
     return PVCURL_STATUS_SETUP_FAILED;
   }
@@ -202,15 +214,21 @@ pvcurl_status_t pvcurl_request_build_headers(
   PVCURL_ADD("Host", host_header);
   PVCURL_ADD("Accept", accept_header);
   PVCURL_ADD("User-Agent", user_agent_header);
+  pvcurl_status_t status = PVCURL_STATUS_OK;
+  if (request->method == PVCURL_METHOD_POST) {
+    if (request->content_type_header.length > 0U) {
   PVCURL_ADD("Content-Type", content_type_header);
-  pvcurl_status_t status = pvcurl_append_header(
-      headers_out, "Content-Length", (const uint8_t *)content_length, (size_t)rendered);
+    }
+    status =
+        pvcurl_append_header(headers_out, "Content-Length",
+                             (const uint8_t *)content_length, (size_t)rendered);
   if (status == PVCURL_STATUS_OK) {
     struct curl_slist *updated = curl_slist_append(*headers_out, "Expect:");
     status = updated == NULL ? PVCURL_STATUS_SETUP_FAILED : PVCURL_STATUS_OK;
     if (updated != NULL) {
       *headers_out = updated;
     }
+  }
   }
   if (status == PVCURL_STATUS_OK) {
     PVCURL_ADD("Cookie", cookie_header);
@@ -231,6 +249,18 @@ void pvcurl_slist_destroy_secure(struct curl_slist *headers) {
     }
   }
   curl_slist_free_all(headers);
+}
+
+pvcurl_status_t pvcurl_request_get_diagnostics(pvcurl_request_t *request,
+    pvcurl_transfer_diagnostics_t *diagnostics_out) {
+  if (request == NULL || diagnostics_out == NULL)
+    return PVCURL_STATUS_INVALID_ARGUMENT;
+  memset(diagnostics_out, 0, sizeof(*diagnostics_out));
+  if (atomic_load_explicit(&request->state, memory_order_acquire) != 2U) {
+    return PVCURL_STATUS_INVALID_ARGUMENT;
+  }
+  *diagnostics_out = request->diagnostics;
+  return PVCURL_STATUS_OK;
 }
 
 void pvcurl_request_cancel(pvcurl_request_t *request) {

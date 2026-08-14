@@ -24,8 +24,26 @@ scratch_identity() {
 	fi
 }
 synthetic_report() {
-	jq -n '{schemaVersion:1,mode:"r2_username_password_portal_login",status:"accepted",operations:{loginRequested:true,loginAccepted:true,sessionCheckRequested:true,sessionCheckAccepted:true,resourceListRequested:true,resourceListAccepted:true,logoutRequested:true,logoutAccepted:true},ownedMaterial:{credentialsErased:true,requestBodiesErased:true,responseBodiesErased:true,sessionMaterialErased:true},safety:{credentialSource:"controlling_tty_no_echo",endpointSource:"sealed_installed_configuration",systemTrustRequired:true,redirectsAllowed:false,credentialInArguments:false,credentialInEnvironment:false,credentialWrittenToFile:false,endpointValueRetainedInEvidence:false,platformSerialValueRetainedInEvidence:false,rawRequestRetainedInEvidence:false,rawResponseRetainedInEvidence:false,sessionValueRetainedInEvidence:false,resourceValueRetainedInEvidence:false,portalHTTPSAllowed:true,helperMutationRequested:false,xpcUsed:false,viciUsed:false,ikeTrafficRequested:false,appOwnedSecureBuffersErasureObserved:true,swiftAndFoundationBridgeCopiesErasureClaimed:false},transactionAccepted:true}'
+	jq -n '{schemaVersion:2,mode:"r2_username_password_portal_login",status:"accepted",operations:{loginRequested:true,loginAccepted:true,sessionCheckRequested:true,sessionCheckAccepted:true,resourceListRequested:true,resourceListAccepted:true,logoutRequested:true,logoutAccepted:true},ownedMaterial:{credentialsErased:true,requestBodiesErased:true,responseBodiesErased:true,sessionMaterialErased:true},safety:{credentialSource:"controlling_tty_no_echo",endpointSource:"operator_approved_fixed_local_mvp",trustMode:"operator_approved_tofu",releaseReady:false,fixedSPKIPinRequired:true,systemTrustRequired:false,redirectsAllowed:false,credentialInArguments:false,credentialInEnvironment:false,credentialWrittenToFile:false,endpointValueRetainedInEvidence:false,platformSerialValueRetainedInEvidence:false,rawRequestRetainedInEvidence:false,rawResponseRetainedInEvidence:false,sessionValueRetainedInEvidence:false,resourceValueRetainedInEvidence:false,portalHTTPSAllowed:true,helperMutationRequested:false,xpcUsed:false,viciUsed:false,ikeTrafficRequested:false,appOwnedSecureBuffersErasureObserved:true,swiftAndFoundationBridgeCopiesErasureClaimed:false},transactionAccepted:true}'
 }
+reconstruct_source() {
+	source=$1; output=$2; source_fifo="$output.fifo"
+	mkfifo "$source_fifo"; chmod 600 "$source_fifo"
+	cat "$source" >"$source_fifo" & source_writer=$!
+	source_rc=0
+	r2_reconstruct_report "$source_fifo" "$output" || source_rc=$?
+	wait "$source_writer"; rm -f "$source_fifo"
+	return "$source_rc"
+}
+assert_transport_mutation_rejected() {
+	mutation_name=$1; mutation_filter=$2
+	mutation_source="$fixture_root/$mutation_name-source.json"
+	mutation_output="$fixture_root/$mutation_name-output.json"
+	jq "$mutation_filter" "$transport_source" >"$mutation_source"
+	if reconstruct_source "$mutation_source" "$mutation_output"; then return 1; fi
+	[ ! -e "$mutation_output" ]
+}
+
 
 runs_anchor=$(r2_launchd_runs) || exit 1
 [ "$runs_anchor" -eq 19 ] || {
@@ -36,7 +54,7 @@ assert_system_unchanged
 
 [ -x "$harness" ] && [ -f "$runtime" ]
 [ "$(wc -l <"$harness" | tr -d ' ')" -lt 300 ]
-[ "$(wc -l <"$runtime" | tr -d ' ')" -lt 300 ]
+[ "$(wc -l <"$runtime" | tr -d ' ')" -lt 340 ]
 [ "$(wc -l <"$0" | tr -d ' ')" -lt 300 ]
 sh -n "$harness" "$runtime" "$0"
 shellcheck -x "$harness" "$runtime" "$0"
@@ -146,6 +164,72 @@ wait "$writer_pid"
 [ "$(stat -f '%Lp' "$report")" = 600 ]
 jq -e '.transactionAccepted==true and .status=="accepted" and .safety.credentialInArguments==false' "$report" >/dev/null
 [ "$(wc -l <"$report" | tr -d ' ')" -eq 1 ]
+
+transport_source="$fixture_root/transport-source.json"
+synthetic_report | jq '
+  .status="transport_rejected" | .transactionAccepted=false |
+  .transportFailure={category:"header_framing_rejected",
+    setCookieFieldCount:2,duplicateSetCookieRejected:true}
+' >"$transport_source"
+transport_report="$fixture_root/transport-report.json"
+reconstruct_source "$transport_source" "$transport_report"
+jq -e '
+  .transportFailure == {category:"header_framing_rejected",
+    setCookieFieldCount:2,duplicateSetCookieRejected:true}
+' "$transport_report" >/dev/null
+
+for count in 0 1; do
+	count_source="$fixture_root/count-$count-source.json"
+	count_report="$fixture_root/count-$count-report.json"
+	jq --argjson count "$count" '
+    .transportFailure={category:"http_authentication_rejected",
+      setCookieFieldCount:$count,duplicateSetCookieRejected:false}
+  ' "$transport_source" >"$count_source"
+	reconstruct_source "$count_source" "$count_report"
+	jq -e --argjson count "$count" '
+    .transportFailure.setCookieFieldCount == $count and
+    .transportFailure.duplicateSetCookieRejected == false
+  ' "$count_report" >/dev/null
+done
+
+for category in invalid_request setup_failed trust_rejected redirect_rejected \
+	http_authentication_rejected header_framing_rejected response_too_large \
+	cancelled timed_out unavailable; do
+	category_source="$fixture_root/category-$category-source.json"
+	category_report="$fixture_root/category-$category-report.json"
+	jq --arg category '.transportFailure={category:$category}' \
+		"$transport_source" >"$category_source"
+	reconstruct_source "$category_source" "$category_report"
+	jq -e --arg category '.transportFailure == {category:$category}' \
+		"$category_report" >/dev/null
+done
+
+assert_transport_mutation_rejected transport-string \
+	'.transportFailure="server-cookie-value"'
+assert_transport_mutation_rejected unknown-category \
+	'.transportFailure.category="server-cookie-value"'
+assert_transport_mutation_rejected unknown-key \
+	'.transportFailure.serverValue="server-cookie-value"'
+assert_transport_mutation_rejected missing-count \
+	'del(.transportFailure.setCookieFieldCount)'
+assert_transport_mutation_rejected missing-duplicate \
+	'del(.transportFailure.duplicateSetCookieRejected)'
+assert_transport_mutation_rejected string-count \
+	'.transportFailure.setCookieFieldCount="2"'
+assert_transport_mutation_rejected negative-count \
+	'.transportFailure.setCookieFieldCount=-1'
+assert_transport_mutation_rejected fractional-count \
+	'.transportFailure.setCookieFieldCount=1.5'
+assert_transport_mutation_rejected excessive-count \
+	'.transportFailure.setCookieFieldCount=3'
+assert_transport_mutation_rejected inconsistent-zero \
+	'.transportFailure.setCookieFieldCount=0'
+assert_transport_mutation_rejected inconsistent-two \
+	'.transportFailure.duplicateSetCookieRejected=false'
+assert_transport_mutation_rejected wrong-duplicate-category \
+	'.transportFailure.category="timed_out"'
+assert_transport_mutation_rejected accepted-with-failure \
+	'.status="accepted"'
 
 bad_fifo="$fixture_root/bad.fifo"; bad_report="$fixture_root/bad.json"
 mkfifo "$bad_fifo"; chmod 600 "$bad_fifo"

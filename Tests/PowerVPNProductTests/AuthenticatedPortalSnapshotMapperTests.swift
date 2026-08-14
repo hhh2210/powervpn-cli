@@ -18,6 +18,7 @@ import Testing
     let runtime = ProductReadinessRuntime(observer: MapperProductObservation())
 
     let resources = try runtime.resources(from: fixture.snapshot)
+    #expect(resources.profileSource == .operatorApprovedFixedOrigin)
     let resource = try #require(resources.selectableResources.first)
     #expect(resources.schemaVersion == 3)
     #expect(resources.selectableResources.count == 1)
@@ -32,6 +33,7 @@ import Testing
     #expect(repeatedResources.selectableResources.first?.handle == resource.handle)
 
     let report = try runtime.snapshotDryRun(from: fixture.snapshot)
+    #expect(report.profileSource == .operatorApprovedFixedOrigin)
     let session = try #require(
       report.fields.first { $0.field == .sessionID }
     )

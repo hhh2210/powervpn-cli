@@ -39,6 +39,9 @@ public struct PortalOwnedMaterialEvidence: Encodable, Equatable, Sendable {
 public struct PortalSafetyEvidence: Encodable, Equatable, Sendable {
   public let credentialSource: String
   public let endpointSource: String
+  public let trustMode: String
+  public let releaseReady: Bool
+  public let fixedSPKIPinRequired: Bool
   public let systemTrustRequired: Bool
   public let redirectsAllowed: Bool
   public let credentialInArguments: Bool
@@ -58,10 +61,13 @@ public struct PortalSafetyEvidence: Encodable, Equatable, Sendable {
   public let appOwnedSecureBuffersErasureObserved: Bool
   public let swiftAndFoundationBridgeCopiesErasureClaimed: Bool
 
-  static let r2 = PortalSafetyEvidence(
+  static let localMVP = PortalSafetyEvidence(
     credentialSource: "controlling_tty_no_echo",
-    endpointSource: "sealed_installed_configuration",
-    systemTrustRequired: true,
+    endpointSource: "operator_approved_fixed_local_mvp",
+    trustMode: PortalFixedTOFUVerifier.trustMode.rawValue,
+    releaseReady: PortalFixedTOFUVerifier.releaseReady,
+    fixedSPKIPinRequired: true,
+    systemTrustRequired: false,
     redirectsAllowed: false,
     credentialInArguments: false,
     credentialInEnvironment: false,
@@ -82,6 +88,31 @@ public struct PortalSafetyEvidence: Encodable, Equatable, Sendable {
   )
 }
 
+public enum PortalTransportFailureCategory: String, Encodable, Equatable, Sendable {
+  case invalidRequest = "invalid_request"
+  case setupFailed = "setup_failed"
+  case trustRejected = "trust_rejected"
+  case redirectRejected = "redirect_rejected"
+  case httpAuthenticationRejected = "http_authentication_rejected"
+  case headerFramingRejected = "header_framing_rejected"
+  case responseTooLarge = "response_too_large"
+  case cancelled
+  case timedOut = "timed_out"
+  case unavailable
+}
+
+public enum PortalSetCookieWireSelection: String, Encodable, Equatable, Sendable {
+  case lastFieldWins = "last_field_wins"
+}
+
+public struct PortalTransportFailureEvidence: Encodable, Equatable, Sendable {
+  public let category: PortalTransportFailureCategory
+  public let setCookieFieldCount: UInt32?
+  public let setCookieWireSelection: PortalSetCookieWireSelection?
+  public let duplicateSetCookieRejected: Bool?
+
+}
+
 public struct PortalLoginReport: Encodable, Equatable, Sendable {
   public let schemaVersion: Int
   public let mode: String
@@ -89,6 +120,7 @@ public struct PortalLoginReport: Encodable, Equatable, Sendable {
   public let operations: PortalOperationEvidence
   public let ownedMaterial: PortalOwnedMaterialEvidence
   public let safety: PortalSafetyEvidence
+  public let transportFailure: PortalTransportFailureEvidence?
   public let transactionAccepted: Bool
 
   private static func accepts(
@@ -110,7 +142,10 @@ public struct PortalLoginReport: Encodable, Equatable, Sendable {
       && ownedMaterial.requestBodiesErased
       && ownedMaterial.responseBodiesErased
       && ownedMaterial.sessionMaterialErased
-      && safety.systemTrustRequired
+      && safety.trustMode == PortalFixedTOFUVerifier.trustMode.rawValue
+      && !safety.releaseReady
+      && safety.fixedSPKIPinRequired
+      && !safety.systemTrustRequired
       && !safety.redirectsAllowed
       && !safety.credentialInArguments
       && !safety.credentialInEnvironment
@@ -134,14 +169,16 @@ public struct PortalLoginReport: Encodable, Equatable, Sendable {
     status: PortalLoginStatus,
     operations: PortalOperationEvidence,
     ownedMaterial: PortalOwnedMaterialEvidence,
-    safety: PortalSafetyEvidence = .r2
+    safety: PortalSafetyEvidence = .localMVP,
+    transportFailure: PortalTransportFailureEvidence? = nil
   ) {
-    schemaVersion = 1
+    schemaVersion = 2
     mode = "r2_username_password_portal_login"
     self.status = status
     self.operations = operations
     self.ownedMaterial = ownedMaterial
     self.safety = safety
+    self.transportFailure = status == .accepted ? nil : transportFailure
     transactionAccepted = Self.accepts(
       status: status,
       operations: operations,

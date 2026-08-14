@@ -149,7 +149,7 @@ private func authenticatedContextFactory() throws -> PortalRequestFactory {
     setCookieHeader: try SecureBytes(
       copying: Array("VSG_SESSIONID=context-test; Path=/; Secure".utf8)
     ),
-    setCookieProjection: .provenSingleWireHeader
+    setCookieProjection: .provenLastFieldWins(fieldCount: 1)
   )
   defer { response.erase() }
   try factory.acceptPasswordSession(

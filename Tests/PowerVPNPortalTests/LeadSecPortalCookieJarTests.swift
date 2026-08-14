@@ -37,7 +37,7 @@ import Testing
     #expect(try text(header) == "  VSG_LANGUAGE=en_US; ")
   }
 
-  @Test func acceptedSessionIsStoredRawWithOriginAndReused() throws {
+  @Test func finalSessionFieldIsStoredWithLastWinsProvenance() throws {
     let jar = try LeadSecPortalCookieJar(languageIndex: 0)
     let setCookie = try secure("VSG_SESSIONID=synthetic; Path=/; Secure")
     let url = try secure(passwordURL)
@@ -49,7 +49,7 @@ import Testing
 
     try jar.acceptPasswordResponse(
       setCookieHeader: setCookie,
-      projection: .provenSingleWireHeader,
+      projection: .provenLastFieldWins(fieldCount: 2),
       passwordURL: url
     )
     let first = try jar.makeOutgoingCookieHeader()
@@ -77,7 +77,7 @@ import Testing
     }
     try jar.acceptPasswordResponse(
       setCookieHeader: setCookie,
-      projection: .provenSingleWireHeader,
+      projection: .provenLastFieldWins(fieldCount: 1),
       passwordURL: url
     )
     let header = try jar.makeOutgoingCookieHeader()
@@ -106,7 +106,7 @@ import Testing
     #expect(throws: LeadSecPortalCookieJarError.unsupportedSetCookie) {
       try jar.acceptPasswordResponse(
         setCookieHeader: setCookie,
-        projection: .provenSingleWireHeader,
+        projection: .provenLastFieldWins(fieldCount: 2),
         passwordURL: url
       )
     }
@@ -126,6 +126,7 @@ import Testing
     for projection in [
       LeadSecSetCookieProjection.foundationFoldedValue,
       .unavailableOrAmbiguous,
+      .provenLastFieldWins(fieldCount: 0),
     ] {
       #expect(throws: LeadSecPortalCookieJarError.ambiguousSetCookieFraming) {
         try jar.acceptPasswordResponse(
@@ -159,7 +160,7 @@ import Testing
     #expect(throws: LeadSecPortalCookieJarError.unsupportedSetCookie) {
       try jar.acceptPasswordResponse(
         setCookieHeader: setCookie,
-        projection: .provenSingleWireHeader,
+        projection: .provenLastFieldWins(fieldCount: 1),
         passwordURL: url
       )
     }
@@ -179,7 +180,7 @@ import Testing
     }
     try jar.acceptPasswordResponse(
       setCookieHeader: firstCookie,
-      projection: .provenSingleWireHeader,
+      projection: .provenLastFieldWins(fieldCount: 1),
       passwordURL: url
     )
     let retainedCount = jar.retainedSessionByteCount
@@ -187,7 +188,7 @@ import Testing
     #expect(throws: LeadSecPortalCookieJarError.sessionAlreadyStored) {
       try jar.acceptPasswordResponse(
         setCookieHeader: secondCookie,
-        projection: .provenSingleWireHeader,
+        projection: .provenLastFieldWins(fieldCount: 1),
         passwordURL: url
       )
     }
@@ -211,14 +212,14 @@ import Testing
     #expect(throws: LeadSecPortalCookieJarError.invalidPasswordURL) {
       try jar.acceptPasswordResponse(
         setCookieHeader: setCookie,
-        projection: .provenSingleWireHeader,
+        projection: .provenLastFieldWins(fieldCount: 1),
         passwordURL: wrongURL
       )
     }
     #expect(throws: LeadSecPortalCookieJarError.invalidSetCookieBytes) {
       try jar.acceptPasswordResponse(
         setCookieHeader: controlCookie,
-        projection: .provenSingleWireHeader,
+        projection: .provenLastFieldWins(fieldCount: 1),
         passwordURL: url
       )
     }
@@ -234,7 +235,7 @@ import Testing
     }
     try jar.acceptPasswordResponse(
       setCookieHeader: setCookie,
-      projection: .provenSingleWireHeader,
+      projection: .provenLastFieldWins(fieldCount: 1),
       passwordURL: url
     )
 

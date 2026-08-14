@@ -11,6 +11,9 @@ struct PowerVPNCommand {
     } catch let error as M2ConnectOnceCommandError {
       FileHandle.standardError.write(Data("error: \(error)\n".utf8))
       Foundation.exit(64)
+    } catch let error as PortalDryRunCommandError {
+      FileHandle.standardError.write(Data("error: \(error)\n".utf8))
+      Foundation.exit(64)
     } catch let error as LegacyNetworkCommandError {
       FileHandle.standardError.write(Data("error: \(error)\n".utf8))
       Foundation.exit(64)
@@ -50,6 +53,12 @@ struct PowerVPNCommand {
       try await runVendorXPCCommand(arguments, json: json)
     case "login":
       let result = try await runPortalLoginCommand(arguments)
+      print(result.standardOutput)
+      if result.exitCode != 0 {
+        Foundation.exit(result.exitCode)
+      }
+    case "portal":
+      let result = try await runPortalDryRunCommand(arguments)
       print(result.standardOutput)
       if result.exitCode != 0 {
         Foundation.exit(result.exitCode)

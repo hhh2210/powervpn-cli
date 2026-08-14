@@ -2,11 +2,12 @@ import Foundation
 
 public enum PortalAddressSelectionSemantics: String, Sendable {
   case latestPrimaryKeyFallback = "latest_pk_fallback"
+  case operatorApprovedFixedOrigin = "operator_approved_fixed_origin"
 }
 
-/// A non-secret endpoint proven by the sealed, current-machine installation
-/// evidence. There is intentionally no public initializer: callers cannot
-/// turn gateway or port input into a compatibility profile.
+/// A non-secret endpoint authority created only by internal validated sources:
+/// either sealed installed evidence or the operator-approved fixed profile.
+/// There is no public initializer for caller-supplied gateway or port input.
 public struct InstalledPortalProfile: Equatable, Sendable {
   public let origin: URL
   public let portalVersion: String

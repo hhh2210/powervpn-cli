@@ -62,6 +62,8 @@ struct PortalAuthenticationFlow: Sendable {
       }
     } catch let stop as PortalWorkflowStop {
       throw stop
+    } catch let failure as PortalTransportFailure {
+      throw failure
     } catch {
       throw PortalWorkflowStop.status(
         PortalWorkflowErrorNormalizer.status(for: error, at: .login)
@@ -85,6 +87,8 @@ struct PortalAuthenticationFlow: Sendable {
       return snapshot
     } catch let stop as PortalWorkflowStop {
       throw stop
+    } catch let failure as PortalTransportFailure {
+      throw failure
     } catch {
       throw PortalWorkflowStop.status(
         PortalWorkflowErrorNormalizer.status(for: error, at: .resource)
@@ -177,7 +181,10 @@ enum PortalWorkflowErrorNormalizer {
     at stage: PortalWorkflowStage
   ) -> PortalLoginStatus {
     if Task.isCancelled || error is CancellationError { return .cancelled }
-    if let transportError = error as? PortalTransportError {
+    let transportError =
+      (error as? PortalTransportFailure)?.transportError
+      ?? (error as? PortalTransportError)
+    if let transportError {
       switch transportError {
       case .cancelled: return .cancelled
       case .trustRejected: return .tlsRejected
@@ -186,7 +193,7 @@ enum PortalWorkflowErrorNormalizer {
       }
     }
     switch stage {
-    case .login: return error is PortalTransportError ? .transportRejected : .loginResponseRejected
+    case .login: return transportError == nil ? .loginResponseRejected : .transportRejected
     case .resource: return .resourceListRejected
     case .authenticatedSnapshot: return .authenticatedSnapshotRejected
     case .delay: return .cancelled

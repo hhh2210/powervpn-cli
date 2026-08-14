@@ -6,24 +6,13 @@ import Testing
 @Suite struct LeadSecPortalTransportTests {
   private let origin = try! PortalHTTPOrigin(host: "166.111.143.19", port: 4_443)
 
-  @Test func exactPasswordPostUsesOnlyRawHeaderLane() async throws {
-    let password = RoutingPortalTransport()
-    let session = RoutingPortalTransport()
-    let transport = composite(password: password, session: session)
-
-    _ = try await transport.perform(factoryPasswordRequest())
-
-    #expect(password.paths == [PortalWireContract.passwordPath])
-    #expect(session.paths.isEmpty)
-  }
-
-  @Test func resourceSessionAndLogoutStayOnFoundationLane() async throws {
-    let password = RoutingPortalTransport()
-    let session = RoutingPortalTransport()
-    let transport = composite(password: password, session: session)
+  @Test func allFourExactOperationsUseOnlyTheSharedPinnedLane() async throws {
+    let lane = RoutingPortalTransport()
+    let transport = composite(lane)
     let factory = try authenticatedFactory()
     defer { factory.eraseSession() }
 
+    _ = try await transport.perform(factoryPasswordRequest())
     for request in [
       try factory.makeResourceRequest(),
       try factory.makeSessionCheckRequest(),
@@ -32,19 +21,18 @@ import Testing
       _ = try await transport.perform(request)
     }
 
-    #expect(password.paths.isEmpty)
     #expect(
-      session.paths == [
+      lane.paths == [
+        PortalWireContract.passwordPath,
         PortalWireContract.resourcePath,
         PortalWireContract.sessionCheckPath,
         PortalWireContract.logoutPath,
       ])
   }
 
-  @Test func nearMissesAreRejectedBeforeEitherLane() async throws {
-    let password = RoutingPortalTransport()
-    let session = RoutingPortalTransport()
-    let transport = composite(password: password, session: session)
+  @Test func nearMissesAreRejectedBeforeSharedLane() async throws {
+    let lane = RoutingPortalTransport()
+    let transport = composite(lane)
     let nearMisses: [(PortalHTTPMethod, String)] = [
       (.post, "https://166.111.143.19:4443/vpn/user/auth/password?extra=1"),
       (.post, "https://other.example.invalid/vpn/user/auth/password"),
@@ -64,14 +52,12 @@ import Testing
       }
     }
 
-    #expect(password.paths.isEmpty)
-    #expect(session.paths.isEmpty)
+    #expect(lane.paths.isEmpty)
   }
 
-  @Test func directBodyCookieAndUserAgentNearMissesReachNeitherLane() async throws {
-    let password = RoutingPortalTransport()
-    let session = RoutingPortalTransport()
-    let transport = composite(password: password, session: session)
+  @Test func directBodyCookieAndUserAgentNearMissesReachNoLane() async throws {
+    let lane = RoutingPortalTransport()
+    let transport = composite(lane)
     let url = "https://166.111.143.19:4443/vpn/user/auth/password"
     let requests = [
       request(.post, url, body: "factory_bypass=body"),
@@ -85,29 +71,22 @@ import Testing
       }
     }
 
-    #expect(password.paths.isEmpty)
-    #expect(session.paths.isEmpty)
+    #expect(lane.paths.isEmpty)
   }
 
-  @Test func cancellationIsForwardedToBothLanes() {
-    let password = RoutingPortalTransport()
-    let session = RoutingPortalTransport()
-    let transport = composite(password: password, session: session)
+  @Test func cancellationIsForwardedOnceToSharedLane() {
+    let lane = RoutingPortalTransport()
+    let transport = composite(lane)
 
     transport.cancel()
 
-    #expect(password.cancelCount == 1)
-    #expect(session.cancelCount == 1)
+    #expect(lane.cancelCount == 1)
   }
 
-  private func composite(
-    password: RoutingPortalTransport,
-    session: RoutingPortalTransport
-  ) -> LeadSecPortalTransport {
+  private func composite(_ lane: RoutingPortalTransport) -> LeadSecPortalTransport {
     LeadSecPortalTransport(
       allowedOrigin: origin,
-      passwordTransport: password,
-      sessionTransport: session
+      transport: lane
     )
   }
 
@@ -132,7 +111,7 @@ import Testing
       statusCode: 200,
       body: try SecureBytes(copying: []),
       setCookieHeader: try SecureBytes(copying: Array(syntheticSessionCookie.utf8)),
-      setCookieProjection: .provenSingleWireHeader
+      setCookieProjection: .provenLastFieldWins(fieldCount: 1)
     )
     defer {
       password.erase()
