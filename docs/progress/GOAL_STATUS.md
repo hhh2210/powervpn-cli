@@ -1597,3 +1597,42 @@ Ranked offline work:
 
 Next end-to-end action: implement and review the value-free mapper/logout
 classifier offline. No Portal, helper, SSH, or M2 action is authorized.
+
+## 2026-08-14 — Value-free catalog and logout failure diagnostics
+
+The schema-2 Portal dry-run report gained two additive optional fields,
+`resourceCatalogFailure` and `logoutFailureClass`; success reports omit both
+and no existing field was renamed or reinterpreted. Catalog classification is
+typed and value-free: scope-stage failures (INTERGRATION_INFO, RESOURCE_LIST,
+VERSION@major) carry a closed class token with no ordinal, while per-resource
+failures add the failing `NC_RESOURCE` entry's one-based document ordinal and
+a structural field-path token. Field paths come only from compile-time
+literals at the throw sites; the server-controlled raw XML token never reaches
+the report, and the old catch-all `map` remains untouched for fail-closed
+consumers.
+
+Logout rejection now classifies into `request_construction_failed`,
+`transport_failed`, or `completed_remote_exchange`, with cancellation keeping
+its own status and no failure class. The official fire-and-forget semantics are
+evidence-cited in the code: the `-[VSGAuthManager logout]` completion block
+(`0x1000a6a80`) never reads its `NSError` slot or parsed object, deletes every
+`VSG_SESSIONID` cookie (`0x1000a6af1`–`0x1000a6cc0`), and reports literal `0`
+to the delegate (`0x1000a6d7a`–`0x1000a6def`). Native acceptance still requires
+exactly HTTP 200; no acceptance predicate was loosened and local erasure stays
+unconditional.
+
+The taxonomy is driven by official contract facts: the per-tunnel status
+`intValue` gate (`0x100067846`–`0x1000678b7`) is the only integer coercion in
+the whole SP2 mapping, all other fields pass through as raw strings,
+`VERSION@major` is compared by string equality against '1'/'0'/'2'
+(`0x1000aa4af`, `0x1000656f4`–`0x10006580c`), and the XMLReader collision
+arrays (`0x100135459`–`0x1001354c0`) motivate fail-closed collision handling.
+
+Offline fixtures reproduce the real two-entry `NC_RESOURCE` catalog shape
+(login21 and login52); a broken second entry reports ordinal 2 across
+duplicate-field, invalid-integer, and display-name-missing classes. Gates
+passed: 654 tests (37/176/168/273 across suites), the arm64 product build,
+strict format lint, `git diff --check`, and the no-secrets scan with 0 leaks.
+The sole integrated review verdict is **GO** with zero P0/P1 findings. This
+work ran no live Portal request, read no credential, launched no app, and
+invoked no helper, SSH, or M2 action; no new retry authorization is granted.
