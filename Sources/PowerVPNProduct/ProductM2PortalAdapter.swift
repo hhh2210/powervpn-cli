@@ -137,7 +137,8 @@ package struct ProductM2PortalAdapter: ProductM2AuthorizedResourceProviding {
             serverContactRequested: false
           )
         }
-        let status = await portalLease.logoutAndErase()
+        let logout = await portalLease.logoutAndErase()
+        let status = logout.status
         return ProductM2AuthorizationCloseReceipt(
           outcome: ProductM2AuthorizationCloseOutcome(status),
           ownedMaterialErased: portalLease.snapshot.isErased,

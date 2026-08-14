@@ -144,7 +144,7 @@ import Testing
     )
     defer { fixture.erase() }
 
-    #expect(throws: AuthenticatedPortalSnapshotMappingError.invalidDisplayName) {
+    #expect(throws: AuthenticatedPortalSnapshotMappingError.missingDisplayName) {
       _ = try AuthenticatedPortalSnapshotMapper.map(fixture.snapshot)
     }
   }

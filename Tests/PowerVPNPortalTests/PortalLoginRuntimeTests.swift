@@ -81,7 +81,7 @@ import Testing
       ]
     )
     #expect(await transport.snapshots().map(\.method) == [.post, .get])
-    #expect(await lease.logoutAndErase() == .accepted)
+    #expect(await lease.logoutAndErase() == PortalLeaseLogoutResult(status: .accepted))
     #expect(await transport.snapshots().map(\.method) == [.post, .get, .post])
   }
 

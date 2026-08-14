@@ -26,7 +26,7 @@ enum AuthenticatedPortalSP2Mapper {
   ) throws -> (ProductResourceSummary, VendorCharonStartValidation) {
     let tunnelElements = try PortalSP2Tree.children(named: "TUNNEL", of: resource)
     guard let firstTunnel = tunnelElements.first else {
-      throw AuthenticatedPortalSnapshotMappingError.invalidDisplayName
+      throw AuthenticatedPortalSnapshotMappingError.missingTunnelElement
     }
     let displayName = try PortalSP2Tree.displayName(of: firstTunnel)
     let commonIKE = try commonIKE(resource: resource, tunnels: tunnelElements)

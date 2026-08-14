@@ -63,7 +63,7 @@ enum PortalSP2Tree {
     of tunnel: AuthenticatedPortalResourceElement
   ) throws -> String {
     guard let scalar = try attribute(named: "tunnel-name", of: tunnel) else {
-      throw AuthenticatedPortalSnapshotMappingError.invalidDisplayName
+      throw AuthenticatedPortalSnapshotMappingError.missingDisplayName
     }
     return try scalar.withBytes { bytes in
       guard (1...256).contains(bytes.count), !bytes.contains(0),

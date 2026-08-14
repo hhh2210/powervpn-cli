@@ -30,10 +30,10 @@ import Testing
     #expect(await transport.snapshots().map(\.method) == [.post, .get])
     #expect(!lease.snapshot.isErased)
     #expect(lease.snapshot.isAccessible)
-    #expect(await lease.logoutAndErase() == .accepted)
+    #expect(await lease.logoutAndErase() == PortalLeaseLogoutResult(status: .accepted))
     #expect(lease.snapshot.isErased)
     #expect(!lease.snapshot.isAccessible)
-    #expect(await lease.logoutAndErase() == .alreadyClosed)
+    #expect(await lease.logoutAndErase() == PortalLeaseLogoutResult(status: .alreadyClosed))
     #expect(await transport.snapshots().map(\.method) == [.post, .get, .post])
   }
 
@@ -62,7 +62,7 @@ import Testing
       returning: [PortalLeaseLogoutStatus].self
     ) { group in
       for _ in 0..<8 {
-        group.addTask { await lease.logoutAndErase() }
+        group.addTask { await lease.logoutAndErase().status }
       }
       var statuses: [PortalLeaseLogoutStatus] = []
       for await status in group { statuses.append(status) }
@@ -128,17 +128,24 @@ import Testing
       return
     }
 
-    #expect(await lease.logoutAndErase() == .timedOut)
+    #expect(await lease.logoutAndErase() == PortalLeaseLogoutResult(status: .timedOut))
     #expect(lease.snapshot.isErased)
-    #expect(await lease.logoutAndErase() == .alreadyClosed)
+    #expect(await lease.logoutAndErase() == PortalLeaseLogoutResult(status: .alreadyClosed))
     #expect(await transport.allOwnedRequestMaterialErased())
     #expect(await transport.allOwnedResponseMaterialErased())
   }
 
   @Test func rejectedAndCancelledLogoutBothCloseAndEraseTheLease() async throws {
-    let cases: [(SyntheticTransportStep, PortalLeaseLogoutStatus)] = [
-      (.response(status: 500, body: ""), .rejected),
-      (.failure(.cancelled), .cancelled),
+    let cases: [(SyntheticTransportStep, PortalLeaseLogoutResult)] = [
+      (
+        .response(status: 500, body: ""),
+        PortalLeaseLogoutResult(status: .rejected, failureClass: .completedRemoteExchange)
+      ),
+      (
+        .failure(.unavailable),
+        PortalLeaseLogoutResult(status: .rejected, failureClass: .transportFailed)
+      ),
+      (.failure(.cancelled), PortalLeaseLogoutResult(status: .cancelled)),
     ]
     for (logoutStep, expected) in cases {
       let transport = SyntheticPortalTransport([
@@ -162,10 +169,45 @@ import Testing
 
       #expect(await lease.logoutAndErase() == expected)
       #expect(lease.snapshot.isErased)
-      #expect(await lease.logoutAndErase() == .alreadyClosed)
+      #expect(await lease.logoutAndErase() == PortalLeaseLogoutResult(status: .alreadyClosed))
       #expect(await transport.snapshots().map(\.method) == [.post, .get, .post])
       #expect(await transport.allOwnedRequestMaterialErased())
       #expect(await transport.allOwnedResponseMaterialErased())
     }
+  }
+
+  @Test func erasedSessionClassifiesLogoutConstructionFailure() async throws {
+    let transport = SyntheticPortalTransport([
+      .response(status: 200, body: acceptedLoginXML, setCookie: syntheticSessionCookie),
+      .response(status: 200, body: acceptedResourceXML),
+      .response(status: 200, body: ""),
+    ])
+    let factory = try syntheticRequestFactory()
+    let workflow = try PortalLoginWorkflow(
+      factory: factory,
+      transport: transport,
+      sleeper: SyntheticPortalSleeper()
+    )
+    let result = await workflow.acquire(
+      credentials: try syntheticCredentials(),
+      platformSerial: try syntheticSerial()
+    )
+    guard case .acquired(let lease) = result else {
+      Issue.record("unexpected acquisition rejection")
+      return
+    }
+    factory.eraseSession()
+
+    #expect(
+      await lease.logoutAndErase()
+        == PortalLeaseLogoutResult(
+          status: .rejected,
+          failureClass: .requestConstructionFailed
+        )
+    )
+    #expect(lease.snapshot.isErased)
+    // The logout request was never constructed, so no third wire request
+    // exists to erase.
+    #expect(await transport.snapshots().map(\.method) == [.post, .get])
   }
 }

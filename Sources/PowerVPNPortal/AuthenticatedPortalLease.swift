@@ -8,6 +8,38 @@ package enum PortalLeaseLogoutStatus: String, Sendable {
   case alreadyClosed = "already_closed"
 }
 
+/// Value-free class of a rejected logout: whether the request could not be
+/// constructed, the transport failed, or the remote exchange completed.
+///
+/// Official-contract context (PowerVPN 3.2.1 (24572) static dossier,
+/// 2026-08-14, `-[VSGAuthManager logout]` `0x1000a6810`): the official
+/// completion block (`0x1000a6a80`) never reads its `NSError` slot or the
+/// parsed object — it deletes every `VSG_SESSIONID` cookie
+/// (`0x1000a6af1`–`0x1000a6cc0`) and reports literal `0` to the delegate
+/// (`0x1000a6d7a`–`0x1000a6def`). A completed exchange is therefore
+/// officially non-failing regardless of HTTP status. Native acceptance stays
+/// exactly-200 (a separate compatibility decision); local erasure is
+/// unconditional either way.
+package enum PortalLeaseLogoutFailureClass: String, Equatable, Sendable {
+  case requestConstructionFailed = "request_construction_failed"
+  case transportFailed = "transport_failed"
+  case completedRemoteExchange = "completed_remote_exchange"
+}
+
+package struct PortalLeaseLogoutResult: Equatable, Sendable {
+  package let status: PortalLeaseLogoutStatus
+  /// Present only when `status == .rejected`.
+  package let failureClass: PortalLeaseLogoutFailureClass?
+
+  package init(
+    status: PortalLeaseLogoutStatus,
+    failureClass: PortalLeaseLogoutFailureClass? = nil
+  ) {
+    self.status = status
+    self.failureClass = failureClass
+  }
+}
+
 package enum PortalSnapshotAcquisitionResult: Sendable {
   case acquired(AuthenticatedPortalLease)
   case rejected(PortalLoginReport)
@@ -36,8 +68,8 @@ package actor AuthenticatedPortalLease {
     self.logoutBounder = logoutBounder
   }
 
-  package func logoutAndErase() async -> PortalLeaseLogoutStatus {
-    guard !closed else { return .alreadyClosed }
+  package func logoutAndErase() async -> PortalLeaseLogoutResult {
+    guard !closed else { return PortalLeaseLogoutResult(status: .alreadyClosed) }
     closed = true
     snapshot.erase()
     defer {
@@ -49,7 +81,10 @@ package actor AuthenticatedPortalLease {
     do {
       request = try factory.makeLogoutRequest()
     } catch {
-      return .rejected
+      return PortalLeaseLogoutResult(
+        status: .rejected,
+        failureClass: .requestConstructionFailed
+      )
     }
     let observation = PortalLeaseLogoutObservation()
     let transport = self.transport
@@ -59,23 +94,39 @@ package actor AuthenticatedPortalLease {
         request.erase()
         let accepted = response.statusCode == 200
         response.erase()
-        observation.complete(accepted ? .accepted : .rejected)
+        observation.complete(
+          accepted
+            ? PortalLeaseLogoutResult(status: .accepted)
+            : PortalLeaseLogoutResult(
+              status: .rejected,
+              failureClass: .completedRemoteExchange
+            )
+        )
       } catch {
         request.erase()
         if error is CancellationError
           || (error as? PortalTransportError) == .cancelled
         {
-          observation.complete(.cancelled)
+          observation.complete(PortalLeaseLogoutResult(status: .cancelled))
         } else {
-          observation.complete(.rejected)
+          observation.complete(
+            PortalLeaseLogoutResult(
+              status: .rejected,
+              failureClass: .transportFailed
+            )
+          )
         }
       }
     }
     guard finished else {
       request.erase()
-      return .timedOut
+      return PortalLeaseLogoutResult(status: .timedOut)
     }
-    return observation.status ?? .rejected
+    return observation.logoutResult
+      ?? PortalLeaseLogoutResult(
+        status: .rejected,
+        failureClass: .requestConstructionFailed
+      )
   }
 
   deinit {
@@ -87,13 +138,13 @@ package actor AuthenticatedPortalLease {
 
 private final class PortalLeaseLogoutObservation: @unchecked Sendable {
   private let lock = NSLock()
-  private var result: PortalLeaseLogoutStatus?
+  private var result: PortalLeaseLogoutResult?
 
-  func complete(_ status: PortalLeaseLogoutStatus) {
+  func complete(_ result: PortalLeaseLogoutResult) {
     lock.withLock {
-      if result == nil { result = status }
+      if self.result == nil { self.result = result }
     }
   }
 
-  var status: PortalLeaseLogoutStatus? { lock.withLock { result } }
+  var logoutResult: PortalLeaseLogoutResult? { lock.withLock { result } }
 }
