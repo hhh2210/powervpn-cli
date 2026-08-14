@@ -1516,6 +1516,161 @@ inert `native_portal/provider_unavailable` gate; readiness may inspect only the
 sealed installed profile and publishes no resource until native Portal trust
 and authorization are explicitly implemented.
 
+
+## 2026-08-11 — Local-MVP fixed-TOFU debt
+
+This local MVP remains `releaseReady=false`; it does not restart or supersede
+R2 evidence, and this implementation window sent no Portal request and read no
+credential.
+
+Trust boundary: the SecureTransport curl adapter keeps
+`CURLOPT_SSL_VERIFYPEER=1` and validates against the compiled saved leaf through
+`CURLOPT_CAINFO_BLOB`, then requires the compiled SPKI pin on that same
+connection. The approved leaf has no SAN and names `GateWay`, so
+`CURLOPT_SSL_VERIFYHOST=0` is narrowly compensated inside this adapter by C-side
+validation of the exact `166.111.143.19:4443` URL authority and Host, the
+immutable leaf anchor, and the immutable SPKI. It is not a caller-selectable
+insecure mode, and there is no weaker fallback.
+
+- **Rotation / revocation / multipin:** production has one immutable
+  operator-approved SPKI pin and no runtime replacement, overlap set, or
+  revocation signal. Rotation requires new saved-certificate evidence, a source
+  change, and review; compromised-but-unchanged key material cannot be revoked
+  by this TOFU profile.
+- **Cookie multiplicity:** every response accepts zero or one raw `Set-Cookie`
+  field and rejects duplicates. Password XML is classified before session-cookie
+  validation; only an accepted login code requires one valid session cookie
+  before resource acquisition.
+
+## 2026-08-11 — Portal-only product dry-run added offline
+
+The explicit `portal dry-run` command now acquires one native Portal lease,
+requires one exact resource display-name match, validates a complete in-memory
+start snapshot and the selected SSH target route, then performs bounded logout
+and erasure. Its JSON is value-free and records that helper mutation, SSH, and
+M2 coordination were not requested. Synthetic dependency-injected tests pass;
+this implementation sent no Portal request and read no credential.
+
+Both authorized live invocations—the initial attempt and the one approved
+retry—produced the legacy schema-1 `portal_acquisition_rejected` report with
+`loginRequested=true` and `loginAccepted=false`. Both reported no resource
+list, start snapshot, required logout, helper mutation, SSH, or M2 coordination.
+Schema 1 cannot be retroactively narrowed to the Portal failure class; schema 2
+can classify only future attempts. No third login is authorized.
+
+## 2026-08-11 — Password response decision-order correction
+
+Static inspection of installed PowerVPN 3.2.1 (24572) proved that its password
+callback captures available cookies at `0x10003345f`–`0x1000334d3` without an
+absence/count gate, then parses `RESPONSE/RESULT/code` at
+`0x100033536`–`0x100033723`. The native lane now matches that order: raw framing
+accepts zero or one `Set-Cookie`, duplicate fields still fail closed, rejection
+and challenge XML need no cookie, and an accepted code still requires one valid
+session cookie before resource acquisition.
+
+The production fixed-TOFU path independently passed one credential-free
+connect-only handshake with zero HTTP application bytes; redacted evidence is
+`/Users/larry_1/scratch-data/powervpn-fixed-tofu-connect-only-2026-08-11/result.json`,
+SHA-256 `387de42847ca8d0ba0296f2a7d2cbcc53e044bec1cbc2f8fea5378be3f9e46f6`.
+This correction ran no Portal request and read no credential. The two schema-1
+login results remain unclassified, do not prove that credentials were wrong,
+and authorize no third login.
+
+## 2026-08-11 — Portal transport discriminator added offline
+
+Schema-2 Portal dry-run rejection reports now preserve the fixed C transfer
+category and, when response headers were observed, only the bounded
+`Set-Cookie` field count and duplicate-rejection flag. Duplicate fields still
+fail closed; pre-header failures emit no header counters. Focused C and
+Portal/Product tests passed without a Portal request, credential read, helper
+mutation, SSH, or M2 action.
+
+## 2026-08-11 — Official-compatible `Set-Cookie` wire order
+
+The installed PowerVPN 3.2.1 evidence is limited to its x86_64 slice; the app
+contains no arm64 slice. In that slice, `BBHTTPRequestContext
+parseHeaderLine:andAddToResponse:` (`0x1001acfb0`–`0x1001ad23c`) reaches
+`BBHTTPResponse setValue:forHeader:` (`0x1001af330`–`0x1001af3b1`), whose
+`NSMutableDictionary` keyed-subscript store (`0x1001af375`–`0x1001af38c`)
+makes repeated exact `Set-Cookie` fields last-wins. Completion reads only the
+final `headers["Set-Cookie"]` (`0x100177577`–`0x10017758b`), checks its
+`VSG_SESSIONID` prefix (`0x100177688`–`0x10017769e`), and stores that entire
+final raw value with `ORIGINURL` (`0x1001776ba`–`0x1001776ff`). The password
+callback has no cookie-count gate (`0x10003345f`–`0x1000334d3`); XML handling
+begins at `0x100033536`.
+
+The native C parser now counts bounded wire fields, zeroizes and frees the
+previous value before processing every later exact `Set-Cookie`, and retains
+only the final raw field. Invalid or oversized final fields erase the earlier
+secret and fail closed. C response metadata and additive schema-2 diagnostics
+expose only the final field count and closed `last_field_wins` provenance;
+`duplicateSetCookieRejected` remains false because replacement is not a
+duplicate-framing failure. The Portal cookie jar accepts only that provenance
+with a positive count and applies its existing strict raw-value validation to
+the final field alone.
+
+Offline verification passed: strict C header/status suites (13 and 7 tests),
+35 focused Portal/Product tests across 5 suites, and the full Swift suite
+(621 tests across 103 suites). The arm64 product built successfully and
+`.build/out/Products/Debug/powervpn --help` passed as an offline smoke test.
+At rebuild time, PID 60174 was the already-loaded old arm64 image launched at
+21:24:50 (SHA-256
+`d19786802648f0d2bb604adee16f37c717ec716db018048fcd7f38f411a8c73c`,
+size 7,526,192, inode 208878569); atomic on-disk replacement did not alter that
+loaded image, and this work neither signalled nor inspected the process. No
+Portal request, credential read, helper action, SSH, or M2 action was run.
+
+## 2026-08-12 — Official password HTTP status compatibility
+
+Read-only static analysis of installed PowerVPN 3.2.1 (24572), x86_64 binary
+SHA-256 `069dee7b624ff2d8a3714bfed06aa6444ad45406d102b5933b987b88a39c7a46`,
+establishes that `BBHTTPSelectiveDiscarder` accepts the closed HTTP status range
+200 through 204. The direct password path stores `VSGAuthUserName` then
+`VSGAuthPassword` and dispatches resource type 5/auth type 7 through
+`VSGService` to `VSGAuthManager`. Static reachability remains unresolved only
+for whether initialization invokes `authVerifycodeAction:` or another
+`_majorVersion`/`_minorVersion` producer before the password dispatch at
+`0x1000605c6`; no bootstrap requirement is inferred.
+
+The implementation now accepts 200...204 only at the password-response gate.
+Resource, session and logout status gates remain unchanged; XML/code/cookie
+validation remains strict, empty 204 still rejects, and malformed
+`strtoul`-to-zero behavior is not emulated. Password workflow behavior tests
+passed 9/9, and the full Swift suite, R2 raw-header offline checkpoint, arm64
+product build, strict Swift format lint and gitleaks scan all passed. The sole
+integrated review verdict is **GO**. This work made no live Portal request,
+launched no app, read no credential, invoked no helper/SSH/M2 action, and grants
+no new retry authorization.
+
+## 2026-08-12 — Approved official-status Portal-only discriminator
+
+The user-pasted canonical schema-2 result records `loginRequested=true`,
+`loginAccepted=false`, and `portalAcquisitionStatus=login_response_rejected`.
+No session check, resource-list request, snapshot construction or validation,
+target-route validation, helper mutation, SSH request, or M2 coordinator request
+occurred. Logout was `not_required`; `ownedMaterialErased=true` and
+`containsSecrets=false`.
+
+Accepting the official closed HTTP range 200...204 was insufficient to unlock
+Portal acquisition. Because the report contains no raw HTTP status, it neither
+falsifies the installed-client static status evidence nor proves that the new
+status gate was exercised. The one-attempt authorization is consumed; no retry
+is authorized.
+
+This is the current observed product blocker, not a demonstrated architectural
+impossibility: there is no lawful authorized-resource source, so M1 cannot
+construct a complete snapshot and M2 remains prohibited. The Goal is **ACTIVE**.
+The installed official PowerVPN 3.2.1 client is discontinued and frozen, with no
+future vendor updates or current-generation official handoff route; it remains
+a read-only static protocol oracle, never an authorization source. Its
+successful login and resource start observed on 2026-08-11 mean backend death
+is not proven, but do not establish current success.
+
+The next bounded offline work is exact compatibility with the official
+XMLReader/code coercion boundary first, without blindly copying malformed
+coercion behavior. Request/encoding details and pre-login bootstrap/cookie
+lifecycle remain unresolved; credential or account state is not ruled out.
+
 ## 2026-08-12 — Official XMLReader password-response compatibility
 
 Installed PowerVPN 3.2.1 XMLReader projection requires a direct `RESPONSE` root,
