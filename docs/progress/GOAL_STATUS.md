@@ -1515,3 +1515,85 @@ not authorize another handoff or retry. The current-machine default is now an
 inert `native_portal/provider_unavailable` gate; readiness may inspect only the
 sealed installed profile and publishes no resource until native Portal trust
 and authorization are explicitly implemented.
+
+## 2026-08-12 — Official XMLReader password-response compatibility
+
+Installed PowerVPN 3.2.1 XMLReader projection requires a direct `RESPONSE` root,
+one exact direct `RESULT` child, and its exact `code` attribute. The native
+password callback now matches that shape while retaining strict hexadecimal
+parsing and fail-closed rejection of case-folded or namespace-local-name
+collisions and child/attribute shadows. Request bytes, bootstrap/cookie
+lifecycle, credentials, and account state remain lower-ranked and unproven.
+
+Offline gates passed: `LeadSecPortalProfileTests` 12/12,
+`PortalLoginWorkflowTests` 9/9, the full Swift suite 632 tests across 105 suites,
+the arm64 build, strict format lint for the scoped files, `git diff --check`, and
+the approximately 2.81 MB no-secrets scan with 0 leaks. The sole integrated
+review P1 identified collision/shadow ambiguity; the implementation was made
+fail-closed and the affected gates were rerun successfully.
+
+This correction ran no live request, consumed no live authorization, launched
+no app, read no credential, and invoked no helper, SSH, or M2 action. The prior
+one-attempt authorization remains consumed. The next decision is whether to
+separately approve exactly one fresh Portal-only discriminator using the same
+command, resource `login21`, and target `thu21`; helper, SSH, M2, and retry
+remain prohibited.
+
+## 2026-08-12 — XMLReader-corrected Portal discriminator attempt 1
+
+State: **GOAL ACTIVE; VPN/M2 NO-GO.** The single approved Portal-only attempt is
+consumed. No retry is authorized.
+
+Canonical value-free evidence directory:
+`/Users/larry_1/scratch-data/powervpn-portal-xmlreader-2026-08-12.aHyIBv/`.
+The approved command's product binary
+`.build/out/Products/Debug/powervpn` has SHA-256
+`0189fbb9dd15c57954fba3b12c513a99d98b6f50a1ee07387945e826b6b7d839`
+and size 7,568,384 bytes; its observed modification time
+`2026-08-12T05:20:09Z` predates the run.
+
+Exact result: attempt 1 exited `69`; `portalAcquisitionStatus=accepted`;
+`loginAccepted=true`, `resourceListRequested=true`, and
+`resourceListAccepted=true`; `outcome=resource_catalog_rejected`; candidate,
+matching-candidate, and selected-candidate counts are all `0`; snapshot
+construction/completeness and target-route coverage are false; logout was
+attempted and rejected; `ownedMaterialErased=true`. The report also records
+`containsSecrets=false`, `helperMutationRequested=false`, `sshRequested=false`,
+and `m2CoordinatorRequested=false`.
+
+The three zero counts are **not evidence of an empty catalog**.
+`ProductPortalDryRunRuntime.inspect` catches an error from
+`AuthenticatedPortalSnapshotMapper.map` and returns before assigning
+`candidateCount`; a genuinely empty mapped resource list would instead reach
+`resource_not_found`. The XMLReader correction therefore unlocked password
+login and resource-catalog transport/profile acceptance. The current product
+blocker is value-free mapper-stage classification and compatibility: the
+catch-all cannot distinguish context/list/version shape failures from a
+per-`NC_RESOURCE` field failure.
+
+Logout rejection is separate and did not cause catalog mapping to fail.
+`AuthenticatedPortalLease.logoutAndErase` erased the local snapshot before the
+logout request and subsequently erased the locally owned session material, but
+the report cannot prove remote invalidation. Its `rejected` class conflates
+request construction, transport failure, and every HTTP status other than
+exactly 200. Existing official static evidence supports 200 through 204 as the
+shared accepted HTTP family, so logout compatibility warrants an independent
+offline investigation; the unseen response must not be inferred.
+
+This is a concrete current diagnosis/safety blocker, not a demonstrated
+architectural impossibility under `GOAL.md`. No legacy behavior has been shown
+irreproducible, but wrong-resource and ambiguity safety prohibit M2 while the
+mapper failure remains unclassified.
+
+Ranked offline work:
+
+1. Add value-free mapper-stage and typed failure diagnostics, with focused
+   offline fixtures distinguishing empty catalog, context/list/version failure,
+   and per-resource display/integer failure.
+2. Do not skip invalid siblings. Only after the classifier proves a safe
+   wrong-resource/ambiguity contract may per-resource handling be considered.
+3. Independently investigate and later implement logout 200...204 compatibility
+   from existing static evidence, with no live retry.
+
+Next end-to-end action: implement and review the value-free mapper/logout
+classifier offline. No Portal, helper, SSH, or M2 action is authorized.
