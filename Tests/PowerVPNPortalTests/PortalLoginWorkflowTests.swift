@@ -65,28 +65,105 @@ import Testing
     #expect(await transport.allOwnedResponseMaterialErased())
   }
 
-  @Test func challengeAndCredentialRejectionNeverStoreSessionOrLogout() async throws {
-    for (xml, status) in [
-      (loginXML("0x66600011"), PortalLoginStatus.challengeRequired),
-      (loginXML("0x66600010"), PortalLoginStatus.loginRejected),
-    ] {
-      let transport = SyntheticPortalTransport([
-        .response(status: 200, body: xml, setCookie: syntheticSessionCookie)
-      ])
+  @Test func passwordHTTPStatusCompatibilityPreservesClosedBoundaries() async throws {
+    let cases =
+      (200...204).map { ($0, true) }
+      + [(199, false), (205, false)]
+
+    for (passwordStatus, shouldAccept) in cases {
+      var steps: [SyntheticTransportStep] = [
+        .response(
+          status: passwordStatus,
+          body: acceptedLoginXML,
+          setCookie: syntheticSessionCookie
+        )
+      ]
+      if shouldAccept {
+        steps.append(contentsOf: [
+          .response(status: 200, body: acceptedResourceXML),
+          .response(status: 200, body: acceptedSessionXML),
+          .response(status: 200, body: ""),
+        ])
+      }
+      let transport = SyntheticPortalTransport(steps)
       let sleeper = SyntheticPortalSleeper()
-      let factory = try syntheticRequestFactory()
-      let report = try await syntheticLoginWorkflow(factory, transport, sleeper).run(
+      let report = try await syntheticLoginWorkflow(
+        try syntheticRequestFactory(), transport, sleeper
+      ).run(
         credentials: syntheticCredentials(),
         platformSerial: syntheticSerial()
       )
-      #expect(report.status == status)
-      #expect(report.operations.loginRequested)
-      #expect(!report.operations.loginAccepted)
-      #expect(!report.operations.logoutRequested)
-      #expect(factory.retainedSessionByteCount == 0)
-      #expect(await transport.snapshots().count == 1)
-      #expect(await sleeper.sleeps().isEmpty)
+
+      if shouldAccept {
+        #expect(report.status == .accepted)
+        #expect(report.transactionAccepted)
+        #expect(report.operations == fullyAcceptedOperations)
+        #expect(await sleeper.sleeps() == [60])
+      } else {
+        #expect(report.status == .loginResponseRejected)
+        #expect(!report.operations.loginAccepted)
+        #expect(!report.operations.resourceListRequested)
+        #expect(!report.operations.logoutRequested)
+        #expect(await sleeper.sleeps().isEmpty)
+      }
+      #expect(await transport.remainingStepCount() == 0)
+      #expect(await transport.allOwnedRequestMaterialErased())
+      #expect(await transport.allOwnedResponseMaterialErased())
     }
+  }
+
+  @Test func nonacceptingPasswordDecisionsNeverStoreSessionOrRequestResources() async throws {
+    for responseStatus in 200...204 {
+      for (xml, status) in [
+        (loginXML("0X66600011"), PortalLoginStatus.challengeRequired),
+        (loginXML("0x66600010"), PortalLoginStatus.loginRejected),
+        (loginXML("0junk"), PortalLoginStatus.loginResponseRejected),
+      ] {
+        let transport = SyntheticPortalTransport([
+          .response(
+            status: responseStatus,
+            body: xml,
+            setCookie: syntheticSessionCookie
+          )
+        ])
+        let sleeper = SyntheticPortalSleeper()
+        let factory = try syntheticRequestFactory()
+        let report = try await syntheticLoginWorkflow(factory, transport, sleeper).run(
+          credentials: syntheticCredentials(),
+          platformSerial: syntheticSerial()
+        )
+        #expect(report.status == status)
+        #expect(report.operations.loginRequested)
+        #expect(!report.operations.loginAccepted)
+        #expect(!report.operations.resourceListRequested)
+        #expect(!report.operations.logoutRequested)
+        #expect(factory.retainedSessionByteCount == 0)
+        #expect(await transport.snapshots().count == 1)
+        #expect(await transport.allOwnedResponseMaterialErased())
+        #expect(await sleeper.sleeps().isEmpty)
+      }
+    }
+  }
+
+  @Test func empty204PasswordResponseRemainsRejectedByXMLValidation() async throws {
+    let transport = SyntheticPortalTransport([
+      .response(status: 204, body: "", setCookie: syntheticSessionCookie)
+    ])
+    let report = try await syntheticLoginWorkflow(
+      try syntheticRequestFactory(), transport, SyntheticPortalSleeper()
+    ).run(
+      credentials: syntheticCredentials(),
+      platformSerial: syntheticSerial()
+    )
+
+    #expect(report.status == .loginResponseRejected)
+    #expect(report.operations.loginRequested)
+    #expect(!report.operations.loginAccepted)
+    #expect(!report.operations.resourceListRequested)
+    #expect(!report.operations.logoutRequested)
+    #expect(await transport.snapshots().count == 1)
+    #expect(await transport.allOwnedRequestMaterialErased())
+    #expect(await transport.allOwnedResponseMaterialErased())
   }
 
   @Test func resourceFailureTriggersExactlyOneLogoutWithoutDelay() async throws {

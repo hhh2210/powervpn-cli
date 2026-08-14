@@ -128,7 +128,7 @@ struct PortalAuthenticationFlow: Sendable {
       response.erase()
       tracker.observeErasedResponse(response)
     }
-    guard response.statusCode == 200 else {
+    guard (200...204).contains(response.statusCode) else {
       throw PortalWorkflowStop.status(.loginResponseRejected)
     }
     let document = try parse(response)
