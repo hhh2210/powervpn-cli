@@ -285,7 +285,9 @@ struct PortalLoginWorkflow: Sendable {
       let response = try await authenticationFlow.perform(request, tracker: tracker)
       response.erase()
       tracker.observeErasedResponse(response)
-      if response.statusCode == 200 { observation.markAccepted() }
+      if PortalLogoutOfficialAcceptance.statusCodes.contains(response.statusCode) {
+        observation.markAccepted()
+      }
     } catch {
       if Task.isCancelled || error is CancellationError
         || (error as? PortalTransportError) == .cancelled

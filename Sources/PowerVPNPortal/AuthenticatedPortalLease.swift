@@ -9,39 +9,34 @@ package enum PortalLeaseLogoutStatus: String, Sendable {
 }
 
 /// Value-free class accompanying a logout result: whether the request could
-/// not be constructed, the transport failed, or the remote exchange completed
-/// outside the official 200...204 acceptance family.
+/// not be constructed, the transport failed, or the remote exchange completed.
+/// The class is diagnostic and is independent of acceptance: every received
+/// HTTP response is `completed_remote_exchange`, while its status code decides
+/// whether the result is accepted.
 ///
 /// Official-contract context (PowerVPN 3.2.1 (24572) static dossier,
 /// 2026-08-14, `-[VSGAuthManager logout]` `0x1000a6810`): the official
 /// completion block (`0x1000a6a80`) never reads its `NSError` slot or the
 /// parsed object — it deletes every `VSG_SESSIONID` cookie
 /// (`0x1000a6af1`–`0x1000a6cc0`) and reports literal `0` to the delegate
-/// (`0x1000a6d7a`–`0x1000a6def`). A completed exchange is therefore
-/// officially non-failing regardless of HTTP status.
+/// (`0x1000a6d7a`–`0x1000a6def`).
 ///
-/// The native lease mirrors the transport-level half of that contract: the
-/// shared BBHTTPSelectiveDiscarder gate admits exactly 200–204 before any
+/// The native lease accepts the official transport family 200...204. The
+/// shared BBHTTPSelectiveDiscarder gate admits exactly that family before any
 /// body is read (construction `0x1001bc8b7`–`0x1001bc99b`, rejection
-/// `0x1001bcac0`), so a status inside 200...204 is `.accepted`, and a
-/// completed exchange outside the family is `.rejected` with the class kept
-/// populated for observability. A completed-remote-exchange rejection is a
-/// divergence marker, not an official failure mode. Local erasure stays
-/// unconditional either way.
+/// `0x1001bcac0`). A completed exchange outside the family stays rejected;
+/// local erasure stays unconditional on every path.
 package enum PortalLeaseLogoutFailureClass: String, Equatable, Sendable {
   case requestConstructionFailed = "request_construction_failed"
   case transportFailed = "transport_failed"
   case completedRemoteExchange = "completed_remote_exchange"
-  /// Accepted remote exchange outside plain 200, carried for observability
-  /// only; the status is `.accepted`.
-  case acceptedRemoteExchange = "accepted_remote_exchange"
 }
 
 package struct PortalLeaseLogoutResult: Equatable, Sendable {
   package let status: PortalLeaseLogoutStatus
-  /// Populated when the outcome carries a diagnostic class: non-nil for
-  /// `requestConstructionFailed`/`transportFailed` rejections and for an
-  /// `acceptedRemoteExchange` acceptance; nil otherwise.
+  /// Populated whenever a diagnostic class is known: request-construction and
+  /// transport failures, plus every completed HTTP exchange (accepted or
+  /// rejected).
   package let failureClass: PortalLeaseLogoutFailureClass?
 
   package init(
@@ -119,19 +114,12 @@ package actor AuthenticatedPortalLease {
         // the completion below mirrors that exact family.
         let statusCode = response.statusCode
         response.erase()
-        let accepted =
-          PortalLogoutOfficialAcceptance.statusCodes.contains(statusCode)
         observation.complete(
-          accepted
-            ? PortalLeaseLogoutResult(
-              status: .accepted,
-              failureClass: statusCode == 200
-                ? nil : .acceptedRemoteExchange
-            )
-            : PortalLeaseLogoutResult(
-              status: .rejected,
-              failureClass: .completedRemoteExchange
-            )
+          PortalLeaseLogoutResult(
+            status: PortalLogoutOfficialAcceptance.statusCodes.contains(statusCode)
+              ? .accepted : .rejected,
+            failureClass: .completedRemoteExchange
+          )
         )
       } catch {
         request.erase()

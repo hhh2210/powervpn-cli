@@ -30,7 +30,13 @@ import Testing
     #expect(await transport.snapshots().map(\.method) == [.post, .get])
     #expect(!lease.snapshot.isErased)
     #expect(lease.snapshot.isAccessible)
-    #expect(await lease.logoutAndErase() == PortalLeaseLogoutResult(status: .accepted))
+    #expect(
+      await lease.logoutAndErase()
+        == PortalLeaseLogoutResult(
+          status: .accepted,
+          failureClass: .completedRemoteExchange
+        )
+    )
     #expect(lease.snapshot.isErased)
     #expect(!lease.snapshot.isAccessible)
     #expect(await lease.logoutAndErase() == PortalLeaseLogoutResult(status: .alreadyClosed))
@@ -76,14 +82,17 @@ import Testing
     #expect(await transport.allOwnedResponseMaterialErased())
   }
 
-  @Test func acquisitionFailurePerformsOneCleanupLogout() async throws {
+  @Test(arguments: [200, 204])
+  func acquisitionFailureAcceptsOfficialCleanupLogoutBoundary(_ logoutStatus: Int)
+    async throws
+  {
     let transport = SyntheticPortalTransport([
       .response(status: 200, body: acceptedLoginXML, setCookie: syntheticSessionCookie),
       .response(
         status: 200,
         body: "<ROOT><RESPONSE><ERROR><code>1</code></ERROR></RESPONSE></ROOT>"
       ),
-      .response(status: 200, body: ""),
+      .response(status: logoutStatus, body: ""),
     ])
     let workflow = try PortalLoginWorkflow(
       factory: syntheticRequestFactory(),
@@ -146,7 +155,7 @@ import Testing
         PortalLeaseLogoutResult(status: .rejected, failureClass: .completedRemoteExchange)
       ),
       (
-        .response(status: 302, body: ""),
+        .response(status: 300, body: ""),
         PortalLeaseLogoutResult(status: .rejected, failureClass: .completedRemoteExchange)
       ),
       (
@@ -193,22 +202,15 @@ import Testing
   }
 
   /// Official logout transport gate (BBHTTPSelectiveDiscarder,
-  /// `0x1001bc8b7`–`0x1001bc99b`) admits exactly 200–204; the lease-level
-  /// gate mirrors that family, recording non-200 members as accepted remote
-  /// exchanges for observability.
+  /// `0x1001bc8b7`–`0x1001bc99b`) admits exactly 200–204; every completed
+  /// response keeps the existing value-free `completed_remote_exchange`
+  /// diagnostic while the status-family gate decides acceptance.
   @Test func officialAcceptedFamily200to204AcceptsLogout() async throws {
-    let cases: [(Int, PortalLeaseLogoutResult)] = [
-      (200, PortalLeaseLogoutResult(status: .accepted)),
-      (
-        201,
-        PortalLeaseLogoutResult(status: .accepted, failureClass: .acceptedRemoteExchange)
-      ),
-      (
-        204,
-        PortalLeaseLogoutResult(status: .accepted, failureClass: .acceptedRemoteExchange)
-      ),
-    ]
-    for (statusCode, expected) in cases {
+    let expected = PortalLeaseLogoutResult(
+      status: .accepted,
+      failureClass: .completedRemoteExchange
+    )
+    for statusCode in PortalLogoutOfficialAcceptance.statusCodes {
       let transport = SyntheticPortalTransport([
         .response(status: 200, body: acceptedLoginXML, setCookie: syntheticSessionCookie),
         .response(status: 200, body: acceptedResourceXML),

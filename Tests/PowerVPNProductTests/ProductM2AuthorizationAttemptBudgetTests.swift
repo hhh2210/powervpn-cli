@@ -84,15 +84,33 @@ import Testing
     #expect(full.transportRequests == 1)
   }
 
+  @Test func portalLogoutAcceptanceFlowsThroughProductCloseOutcome() async throws {
+    for (statusCode, expected) in [
+      (204, ProductM2AuthorizationCloseOutcome.accepted),
+      (205, .rejected),
+    ] {
+      let result = try await closePortalLease(
+        at: 74_000,
+        logoutStatusCode: statusCode
+      )
+      #expect(result.receipt.outcome == expected)
+      #expect(result.receipt.ownedMaterialErased)
+      #expect(result.receipt.sourceCloseRequested)
+      #expect(result.receipt.serverContactRequested)
+      #expect(result.transportRequests == 1)
+    }
+  }
+
   private func closePortalLease(
-    at milliseconds: UInt64
+    at milliseconds: UInt64,
+    logoutStatusCode: Int = 200
   ) async throws -> (
     receipt: ProductM2AuthorizationCloseReceipt,
     transportRequests: Int
   ) {
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
     defer { fixture.erase() }
-    let transport = ProductM2PortalTransportSpy()
+    let transport = ProductM2PortalTransportSpy(statusCode: logoutStatusCode)
     let portalLease = AuthenticatedPortalLease(
       snapshot: fixture.snapshot,
       factory: try productM2PortalRequestFactory(),
@@ -231,14 +249,19 @@ private actor ProductM2PortalInstallGap {
 
 private final class ProductM2PortalTransportSpy: @unchecked Sendable, PortalTransporting {
   private let lock = NSLock()
+  private let statusCode: Int
   private var requests = 0
+
+  init(statusCode: Int) {
+    self.statusCode = statusCode
+  }
 
   func perform(_ request: PortalHTTPRequest) async throws -> PortalHTTPResponse {
     guard request.begin() else { throw PortalTransportError.invalidRequest }
     lock.withLock { requests += 1 }
     request.erase()
     return PortalHTTPResponse(
-      statusCode: 200,
+      statusCode: statusCode,
       body: try SecureBytes(copying: [])
     )
   }

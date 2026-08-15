@@ -75,6 +75,7 @@ public struct ProductPortalDryRunRuntime: Sendable {
       ),
       candidateCount: inspection.candidateCount,
       matchingCandidateCount: inspection.matchingCandidateCount,
+      resourceDisplayNames: inspection.resourceDisplayNames,
       selectedCandidateCount: inspection.selectedCandidateCount,
       startSnapshotComplete: inspection.startSnapshotComplete,
       targetRouteCovered: inspection.targetRouteCovered,
@@ -99,6 +100,10 @@ public struct ProductPortalDryRunRuntime: Sendable {
       return
     }
     result.candidateCount = candidates.count
+    // Captured before selection filtering so a no-match dry-run reveals the
+    // live catalog's actual display names (same user-visible semantics as
+    // `resources --json`); nil whenever the catalog itself failed to map.
+    result.resourceDisplayNames = candidates.map(\.summary.displayName)
     let matches = candidates.filter { $0.summary.displayName == request.resourceDisplayName }
     result.matchingCandidateCount = matches.count
     guard !matches.isEmpty else {
@@ -147,6 +152,7 @@ private struct InspectionResult {
   var resourceCatalogFailure: ProductResourceCatalogFailure?
   var candidateCount = 0
   var matchingCandidateCount = 0
+  var resourceDisplayNames: [String]?
   var selectedCandidateCount = 0
   var validationRequested = false
   var startSnapshotComplete = false
@@ -173,7 +179,6 @@ extension ProductPortalLogoutFailureClass {
     case .requestConstructionFailed: self = .requestConstructionFailed
     case .transportFailed: self = .transportFailed
     case .completedRemoteExchange: self = .completedRemoteExchange
-    case .acceptedRemoteExchange: self = .acceptedRemoteExchange
     }
   }
 }

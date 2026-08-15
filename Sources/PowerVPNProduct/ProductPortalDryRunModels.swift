@@ -100,27 +100,24 @@ public struct ProductResourceCatalogFailure: Encodable, Equatable, Sendable {
 
 /// Value-free classification accompanying a logout outcome. Distinct from
 /// `ProductPortalDryRunLogoutOutcome` so schema-2 outcome meanings are
-/// unchanged; only rejected outcomes and accepted-but-off-family exchanges
-/// carry a class.
+/// unchanged. The class records whether construction failed, transport failed,
+/// or an HTTP exchange completed; it is present for both accepted and rejected
+/// completed exchanges.
 ///
 /// Official-contract context (PowerVPN 3.2.1 (24572) static dossier,
 /// 2026-08-14, `-[VSGAuthManager logout]` `0x1000a6810`): the official
 /// completion block (`0x1000a6a80`) never reads its `NSError` slot or the
 /// parsed object — it deletes every `VSG_SESSIONID` cookie
-/// (`0x1000a6af1`–`0x1000a6cc0`), reports literal `0` to the delegate
-/// (`0x1000a6d7a`–`0x1000a6def`), and clears cookies. So a completed remote
-/// exchange is officially non-failing regardless of status. Native acceptance
-/// mirrors the official transport family 200...204
-/// (BBHTTPSelectiveDiscarder `0x1001bc8b7`–`0x1001bc99b`): every status in
-/// the family accepts; a non-200 member is additionally recorded as
-/// `accepted_remote_exchange` for observability while remaining accepted, and
-/// a completed exchange outside the family is rejected as
-/// `completed_remote_exchange`. Local erasure stays unconditional.
+/// (`0x1000a6af1`–`0x1000a6cc0`) and reports literal `0` to the delegate
+/// (`0x1000a6d7a`–`0x1000a6def`). Native acceptance mirrors the official
+/// transport family 200...204 (BBHTTPSelectiveDiscarder
+/// `0x1001bc8b7`–`0x1001bc99b`): every response is classified as
+/// `completed_remote_exchange`, statuses inside the family accept, and
+/// statuses outside it reject. Local erasure stays unconditional.
 public enum ProductPortalLogoutFailureClass: String, Encodable, Equatable, Sendable {
   case requestConstructionFailed = "request_construction_failed"
   case transportFailed = "transport_failed"
   case completedRemoteExchange = "completed_remote_exchange"
-  case acceptedRemoteExchange = "accepted_remote_exchange"
 }
 
 public struct ProductPortalDryRunOperations: Encodable, Equatable, Sendable {
@@ -156,6 +153,7 @@ public struct ProductPortalDryRunReport: Encodable, Equatable, Sendable {
   public let operations: ProductPortalDryRunOperations
   public let candidateCount: Int
   public let matchingCandidateCount: Int
+  public let resourceDisplayNames: [String]?
   public let selectedCandidateCount: Int
   public let startSnapshotComplete: Bool
   public let targetRouteCovered: Bool
@@ -176,6 +174,7 @@ public struct ProductPortalDryRunReport: Encodable, Equatable, Sendable {
     operations: ProductPortalDryRunOperations,
     candidateCount: Int,
     matchingCandidateCount: Int,
+    resourceDisplayNames: [String]? = nil,
     selectedCandidateCount: Int,
     startSnapshotComplete: Bool,
     targetRouteCovered: Bool,
@@ -191,6 +190,7 @@ public struct ProductPortalDryRunReport: Encodable, Equatable, Sendable {
     self.operations = operations
     self.candidateCount = candidateCount
     self.matchingCandidateCount = matchingCandidateCount
+    self.resourceDisplayNames = resourceDisplayNames
     self.selectedCandidateCount = selectedCandidateCount
     self.startSnapshotComplete = startSnapshotComplete
     self.targetRouteCovered = targetRouteCovered

@@ -214,24 +214,29 @@ import Testing
     #expect(await transport.snapshots().count == 4)
   }
 
-  @Test func logoutFailureIsNotRetried() async throws {
-    let transport = SyntheticPortalTransport([
-      .response(status: 200, body: acceptedLoginXML, setCookie: syntheticSessionCookie),
-      .response(status: 200, body: acceptedResourceXML),
-      .response(status: 200, body: acceptedSessionXML),
-      .response(status: 500, body: ""),
-    ])
-    let report = try await syntheticLoginWorkflow(
-      try syntheticRequestFactory(), transport, SyntheticPortalSleeper()
-    ).run(
-      credentials: syntheticCredentials(),
-      platformSerial: syntheticSerial()
-    )
-    #expect(report.status == .logoutRejected)
-    #expect(report.operations.logoutRequested)
-    #expect(!report.operations.logoutAccepted)
-    #expect(await transport.snapshots().count == 4)
-    #expect(await transport.remainingStepCount() == 0)
+  @Test func logoutStatusesOutsideOfficialFamilyAreRejectedWithoutRetry() async throws {
+    for statusCode in [199, 205, 300] {
+      let transport = SyntheticPortalTransport([
+        .response(status: 200, body: acceptedLoginXML, setCookie: syntheticSessionCookie),
+        .response(status: 200, body: acceptedResourceXML),
+        .response(status: 200, body: acceptedSessionXML),
+        .response(status: statusCode, body: ""),
+      ])
+      let report = try await syntheticLoginWorkflow(
+        try syntheticRequestFactory(), transport, SyntheticPortalSleeper()
+      ).run(
+        credentials: syntheticCredentials(),
+        platformSerial: syntheticSerial()
+      )
+      #expect(report.status == .logoutRejected)
+      #expect(report.operations.logoutRequested)
+      #expect(!report.operations.logoutAccepted)
+      #expect(report.ownedMaterial.sessionMaterialErased)
+      #expect(await transport.snapshots().count == 4)
+      #expect(await transport.remainingStepCount() == 0)
+      #expect(await transport.allOwnedRequestMaterialErased())
+      #expect(await transport.allOwnedResponseMaterialErased())
+    }
   }
 
   @Test func cancellationDuringDelayStillAttemptsOneBoundedLogout() async throws {

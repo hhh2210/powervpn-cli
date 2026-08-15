@@ -26,7 +26,7 @@ struct ProductPortalDryRunRuntimeTests {
     #expect(report.startSnapshotComplete)
     #expect(report.targetRouteCovered)
     #expect(report.logoutOutcome == .accepted)
-    #expect(report.logoutFailureClass == nil)
+    #expect(report.logoutFailureClass == .completedRemoteExchange)
     #expect(report.resourceCatalogFailure == nil)
     #expect(report.ownedMaterialErased)
     #expect(report.dryRunAccepted)
@@ -53,13 +53,16 @@ struct ProductPortalDryRunRuntimeTests {
         data: JSONEncoder().encode(report),
         encoding: .utf8
       ))
-    #expect(!encoded.contains("login21"))
+    // Display names are established user-visible semantics (resources --json)
+    // and are now surfaced exactly once via resourceDisplayNames; value-freeness
+    // assertions below cover actual secret material.
+    #expect(encoded.contains("\"resourceDisplayNames\":[\"login21\"]"))
     #expect(!encoded.contains("helper-session-material"))
     #expect(!encoded.contains("psk-material"))
     #expect(!encoded.contains("11.11"))
     #expect(!encoded.contains("portalTransportFailure"))
     #expect(!encoded.contains("resourceCatalogFailure"))
-    #expect(!encoded.contains("logoutFailureClass"))
+    #expect(encoded.contains("\"logoutFailureClass\":\"completed_remote_exchange\""))
   }
 
   @Test func missingExactResourceFailsClosedAndLogsOut() async throws {
@@ -170,11 +173,10 @@ struct ProductPortalDryRunRuntimeTests {
   }
 
   /// Official logout transport admits exactly 200–204
-  /// (BBHTTPSelectiveDiscarder `0x1001bc8b7`–`0x1001bc99b`); an off-200
-  /// family member accepts the dry run, recording the class additively for
-  /// observability.
+  /// (BBHTTPSelectiveDiscarder `0x1001bc8b7`–`0x1001bc99b`); every member
+  /// accepts the dry run and keeps the existing completed-exchange diagnostic.
   @Test func officialFamilyLogoutStatusStillAcceptsDryRun() async throws {
-    for statusCode in [201, 204] {
+    for statusCode in 200...204 {
       let fixture = try portalDryRunLease(
         resourceXML: m2ResourceXML(["login21"]),
         logoutStatusCode: statusCode
@@ -187,7 +189,7 @@ struct ProductPortalDryRunRuntimeTests {
 
       #expect(report.outcome == .accepted)
       #expect(report.logoutOutcome == .accepted)
-      #expect(report.logoutFailureClass == .acceptedRemoteExchange)
+      #expect(report.logoutFailureClass == .completedRemoteExchange)
       #expect(report.operations.logoutAttempted)
       #expect(report.operations.logoutAccepted)
       #expect(report.ownedMaterialErased)

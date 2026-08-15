@@ -132,7 +132,29 @@ struct ProductPortalDryRunCatalogFailureTests {
     #expect(report.matchingCandidateCount == 1)
     #expect(report.selectedCandidateCount == 1)
     #expect(report.resourceCatalogFailure == nil)
-    #expect(report.dryRunAccepted)
+    #expect(report.resourceDisplayNames == ["login21", "login52"])
+  }
+
+  /// A no-match catalog must reveal the actual mapped display names (exact
+  /// bytes, before any selection filtering) so the next authorized dry-run can
+  /// distinguish wrong requested name from wrong mapping.
+  @Test func noMatchCatalogRevealsActualDisplayNames() async throws {
+    let xml = catalogXML(entries: [entry("login42"), entry("login52")])
+    let fixture = try portalDryRunLease(resourceXML: xml)
+    defer { fixture.erase() }
+    let lease = fixture.lease
+    let runtime = ProductPortalDryRunRuntime { .acquired(lease) }
+
+    let report = await runtime.run(request())
+
+    #expect(report.outcome == .resourceNotFound)
+    #expect(report.candidateCount == 2)
+    #expect(report.matchingCandidateCount == 0)
+    #expect(report.selectedCandidateCount == 0)
+    #expect(report.resourceDisplayNames == ["login42", "login52"])
+    #expect(report.resourceCatalogFailure == nil)
+    #expect(report.logoutOutcome == .accepted)
+    #expect(report.ownedMaterialErased)
   }
 
   /// Integer-leaf failures must pinpoint the exact strict-decimal leaf: the
@@ -450,6 +472,7 @@ struct ProductPortalDryRunCatalogFailureTests {
     #expect(report.outcome == .resourceCatalogRejected)
     #expect(report.portalAcquisitionStatus == .accepted)
     #expect(report.candidateCount == 0)
+    #expect(report.resourceDisplayNames == nil)
     #expect(report.logoutOutcome == .accepted)
     #expect(report.ownedMaterialErased)
     #expect(!report.dryRunAccepted)
