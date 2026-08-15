@@ -87,8 +87,17 @@ public enum VendorCharonStartContract {
     rule(.common, .required, .dictionary),
     rule(.tunnels, .required, .array),
     rule(.sessionID, .required, .string),
-    rule(.vip, .optional, .string),
-    rule(.vipv6, .optional, .string),
+    // Empty `vip`/`vipv6` are legal official input: the charon daemon's
+    // `_start_connection` reader guards both with `[NSString length] != 0`
+    // before `strcpy` (vip `0x1001aa676`–`0x1001aa6f7`, vipv6
+    // `0x1001aa703`–`0x1001aa77f`; sp2-startsnapshot dossier §4, 2026-08-11),
+    // so an empty value is simply skipped, and the retained official record
+    // logs `vip` as allow-empty quoted text (charon XPC audit E5, 2026-08-14).
+    // The crash-on-missing keys the daemon guards unconditionally —
+    // `sessionid` (`0x1001aa671`), `gateway` (`0x1001aa80a`–`0x1001aa844`),
+    // `ike`/`esp`/`psk` (`0x1001aab4c`–`0x1001aac26`) — stay non-empty-required.
+    rule(.vip, .optional, .string, allowsEmptyText: true),
+    rule(.vipv6, .optional, .string, allowsEmptyText: true),
     rule(.gateway, .required, .string),
     rule(.ikePort, .required, .int32),
     rule(.majorVersion, .required, .int32),

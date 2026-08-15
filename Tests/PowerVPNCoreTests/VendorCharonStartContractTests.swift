@@ -17,11 +17,42 @@ import Testing
     #expect(!VendorCharonStartField.allCases.map(\.rawValue).contains("common.hostItem"))
     #expect(rule(.vip).requirement == .optional)
     #expect(rule(.vipv6).requirement == .optional)
+    #expect(rule(.vip).allowsEmptyText)
+    #expect(rule(.vipv6).allowsEmptyText)
     #expect(rule(.negotiateMode).requirement == .optionalPerTunnel)
     #expect(rule(.routeNetwork).requirement == .requiredPerRoute)
     #expect(rule(.routePrefix).valueKind == .routePrefix)
     #expect(rule(.name).allowsEmptyText)
     #expect(!rule(.sessionID).allowsEmptyText)
+    #expect(!rule(.gateway).allowsEmptyText)
+    #expect(!rule(.psk).allowsEmptyText)
+  }
+
+  /// Mirrors the daemon reader exactly (sp2-startsnapshot dossier §4,
+  /// 2026-08-11): `vip`/`vipv6` are length-guarded (empty skipped,
+  /// `0x1001aa676`–`0x1001aa77f`) while `sessionid`/`gateway`/`psk` are
+  /// crash-on-missing (`0x1001aa671`, `0x1001aa80a`–`0x1001aa844`,
+  /// `0x1001aab4c`–`0x1001aac26`) and must stay non-empty.
+  @Test func emptyVipAndVipv6AreLegalWhileRequiredCommonTextStaysNonEmpty() throws {
+    let values = CoreStartTestValues()
+    let accepted = VendorCharonStartValidator.validate(
+      values.completeCandidate(vip: values.text(""), vipv6: values.text("")))
+
+    #expect(accepted.complete)
+    #expect(report(.vip, in: accepted).availability == .available)
+    #expect(report(.vipv6, in: accepted).availability == .available)
+    #expect(accepted.snapshot != nil)
+
+    for (field, candidate) in [
+      (VendorCharonStartField.sessionID, values.completeCandidate(sessionID: values.text(""))),
+      (VendorCharonStartField.gateway, values.completeCandidate(gateway: values.text(""))),
+      (VendorCharonStartField.psk, values.completeCandidate(psk: values.text(""))),
+    ] {
+      let validation = VendorCharonStartValidator.validate(candidate)
+      #expect(!validation.complete)
+      #expect(report(field, in: validation).availability == .invalid)
+      #expect(validation.snapshot == nil)
+    }
   }
 
   @Test func fieldNameSetCannotSubstituteForNestedTypedMaterial() {
@@ -231,16 +262,22 @@ struct CoreStartTestValues {
   }
 
   func completeCommon(
-    sessionID: VendorCharonStartTextValue
+    sessionID: VendorCharonStartTextValue? = nil,
+    vip: VendorCharonStartTextValue? = nil,
+    vipv6: VendorCharonStartTextValue? = nil,
+    gateway: VendorCharonStartTextValue? = nil,
+    psk: VendorCharonStartTextValue? = nil
   ) -> VendorCharonStartCommonCandidate {
     VendorCharonStartCommonCandidate(
-      sessionID: sessionID,
-      gateway: text("gateway"),
+      sessionID: sessionID ?? text("session"),
+      vip: vip,
+      vipv6: vipv6,
+      gateway: gateway ?? text("gateway"),
       ikePort: integer(500),
       majorVersion: integer(1),
       ike: text("ike"),
       esp: text("esp"),
-      psk: text("psk"),
+      psk: psk ?? text("psk"),
       ikeLifetime: integer(3_600),
       ipsecLifetime: integer(3_600)
     )
@@ -267,11 +304,22 @@ struct CoreStartTestValues {
   }
 
   func completeCandidate(
+    sessionID: VendorCharonStartTextValue? = nil,
+    vip: VendorCharonStartTextValue? = nil,
+    vipv6: VendorCharonStartTextValue? = nil,
+    gateway: VendorCharonStartTextValue? = nil,
+    psk: VendorCharonStartTextValue? = nil,
     routes: [VendorCharonStartRouteCandidate]? = nil
   ) -> VendorCharonStartCandidate {
     VendorCharonStartCandidate(
       lineage: lineage,
-      common: completeCommon(),
+      common: completeCommon(
+        sessionID: sessionID,
+        vip: vip,
+        vipv6: vipv6,
+        gateway: gateway,
+        psk: psk
+      ),
       tunnels: [completeTunnel(routes: routes)]
     )
   }

@@ -132,22 +132,67 @@ import Testing
     #expect(availability(of: .routeNetwork, in: candidate) == .available)
     #expect(availability(of: .routePrefix, in: candidate) == .available)
   }
+
+  /// Empty `vip` is legal official input: the charon daemon `_start_connection`
+  /// reader guards it with `[NSString length] != 0` before `strcpy`
+  /// (`0x1001aa676`–`0x1001aa6f7`; sp2-startsnapshot dossier §4, 2026-08-11),
+  /// so a present-but-empty attribute must survive the whole catalog→snapshot
+  /// chain instead of rejecting the resource.
+  @Test func emptyVipAttributeProducesAnAvailableCompleteCandidate() throws {
+    let fixture = try authenticatedSnapshot(
+      resourceXML: tunnelXML(
+        extensions: """
+          <PRIVATE-IP addr=""/>
+          <SECURED-ROUTES name="direct"><ROUTE addr="10.1.2.3/24"/></SECURED-ROUTES>
+          """,
+        ikeBody: completeSP2IKEBody
+      ))
+
+    let candidate = try #require(
+      AuthenticatedPortalSnapshotMapper.map(fixture.snapshot).first
+    )
+    #expect(availability(of: .vip, in: candidate) == .available)
+    #expect(candidate.snapshotComplete)
+    #expect(candidate.firstMissingField == nil)
+  }
+
+  /// A missing `addr` attribute (or a child-shaped `addr`) never fabricates
+  /// vip material: only the attribute shape is a helper scalar, and absence
+  /// stays the daemon-legal optional-absence, never an invented value.
+  @Test func missingOrChildShapedAddrAttributeNeverFabricatesVipMaterial() throws {
+    for extensions in [
+      "<PRIVATE-IP/>",
+      "<PRIVATE-IP><addr>10.10.10.4</addr></PRIVATE-IP>",
+    ] {
+      let fixture = try authenticatedSnapshot(
+        resourceXML: tunnelXML(extensions: extensions, ikeBody: completeSP2IKEBody))
+      defer { fixture.erase() }
+
+      let candidate = try #require(
+        AuthenticatedPortalSnapshotMapper.map(fixture.snapshot).first
+      )
+      #expect(availability(of: .vip, in: candidate) == .absentOptional)
+    }
+  }
 }
 
 private let completeSP2XML = tunnelXML(
-  extensions: """
-    <PRIVATE-IP addr="10.10.10.4"/>
-    <SECURED-ROUTES name="direct"><ROUTE addr="10.1.2.3/24"/></SECURED-ROUTES>
-    """,
-  ikeBody: """
-    <CLIENT id="helper-session-material"/><SERVER port="500"/>
-    <ISAKMP-SA><PROPOSAL><TRANSFORMS>
-      <TRANSFORM enc="null" hash="null" life-time="3600"/>
-    </TRANSFORMS></PROPOSAL></ISAKMP-SA>
-    <IPSEC-SA><PROPOSAL><TRANSFORMS>
-      <TRANSFORM enc="aes256" hash="sha256" life-time="1800"/>
-    </TRANSFORMS></PROPOSAL></IPSEC-SA><PSK key="psk-material"/>
-    """)
+  extensions: completeSP2Extensions, ikeBody: completeSP2IKEBody)
+
+private let completeSP2Extensions = """
+  <PRIVATE-IP addr="10.10.10.4"/>
+  <SECURED-ROUTES name="direct"><ROUTE addr="10.1.2.3/24"/></SECURED-ROUTES>
+  """
+
+private let completeSP2IKEBody = """
+  <CLIENT id="helper-session-material"/><SERVER port="500"/>
+  <ISAKMP-SA><PROPOSAL><TRANSFORMS>
+    <TRANSFORM enc="null" hash="null" life-time="3600"/>
+  </TRANSFORMS></PROPOSAL></ISAKMP-SA>
+  <IPSEC-SA><PROPOSAL><TRANSFORMS>
+    <TRANSFORM enc="aes256" hash="sha256" life-time="1800"/>
+  </TRANSFORMS></PROPOSAL></IPSEC-SA><PSK key="psk-material"/>
+  """
 
 private func proposalXML(transform: String) -> String {
   tunnelXML(
