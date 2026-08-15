@@ -91,6 +91,11 @@ Deferred evidence debt:
 Uncommitted files:
 None after this handoff's docs-only local commit.
 
+Superseded product-direction note (2026-08-12): the recommendation below is
+historical; the official client is discontinued and frozen, there is no
+current-generation official handoff route, and active work uses it only as a
+read-only static protocol oracle while native compatibility remains open.
+
 Next single product action:
 Obtain an official authorized-resource handoff, or make and separately review
 the product-security decision for a native onboarding path; then implement one

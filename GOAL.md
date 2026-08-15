@@ -2,11 +2,11 @@
 title: PowerVPN Native Rescue MVP
 goal_version: rescue-2-product-reset
 status: active
-updated: 2026-08-10
+updated: 2026-08-15
 repository: /Users/larry_1/Opensource/powervpn-cli
 strategy: product-first vertical slice over installed vendor helpers
-current_milestone: M1-helper-control-vertical-slice
-immediate_next: produce-one-usable-connect-disconnect-path
+current_milestone: M2-first-live-connect-once
+immediate_next: obtain-explicit-approval-for-one-bounded-login21-thu21-transaction
 assurance_mode: development
 review_budget: one review pass per milestone
 evidence_branch: rescue-state-machine
@@ -21,6 +21,12 @@ Build a native arm64 macOS client that replaces the official PowerVPN GUI for
 normal daily use while continuing to use the installed vendor tunnel helpers
 as the tunnel core.
 
+The installed official PowerVPN 3.2.1 client is discontinued and frozen, with
+no future vendor updates or current-generation handoff route. Server
+compatibility with its legacy protocol is unknown and may still work. Its
+successful login and resource start observed on 2026-08-11 mean backend death
+is not proven, but do not establish current success.
+
 The first usable product is not required to replace every vendor component.
 It must let the user, with the official GUI closed:
 
@@ -33,8 +39,8 @@ disconnect
 ```
 
 A fresh SSH connection through the selected resource is the primary end-to-end
-proof. Full native portal onboarding, recovery automation, packaging and a
-polished menu-bar UI are later milestones.
+proof. Recovery automation, packaging and a polished menu-bar UI are later
+milestones.
 
 ## 2. MVP definition
 
@@ -65,14 +71,19 @@ produced by this client's own code. Process memory, logs, helper output, cached
 official-client sessions and replayable installed artifacts are not
 authorization sources.
 
-Until native username/password Portal authorization has an approved TLS trust
-policy and is explicitly wired into Product, the current-machine provider must
-remain a local `native_portal/provider_unavailable` gate. It must not read TTY
-credentials, contact the Portal, launch the official app, inspect session logs,
-or mutate the helper.
+The installed client may be inspected read-only as a static protocol oracle,
+but it must never supply authorization.
 
-The sealed installed profile may support passive readiness, but it cannot make
-a resource catalog available by itself.
+Production may expose `native_portal` only when an approved TLS trust policy is
+explicitly composed into the Product current-machine runtime. Otherwise it must
+fail closed as `native_portal/provider_unavailable` before reading TTY
+credentials, contacting the Portal, launching the official app, inspecting
+session logs or mutating the helper. The current implementation composes an
+immutable operator-approved fixed-origin/SPKI TOFU authority while keeping
+runtime construction inert, but it has no fresh live M2 proof.
+
+Passive readiness may validate the fixed Portal profile, but it does not
+authenticate or make a resource catalog available by itself.
 
 ## 3. What is frozen
 
@@ -108,11 +119,11 @@ The following are explicitly deferred:
 - replacement of vendor helpers or removal of Rosetta;
 - native strongSwan/IKEv1 reimplementation.
 
-A generic `--insecure` TLS mode remains forbidden. If strict system trust is
-incompatible with the deployed portal, stop and make an explicit product
-security decision: retain the vendor-onboarding limitation, or design a
-separately reviewed certificate/SPKI pinning policy with out-of-band
-verification. Do not silently disable peer or hostname verification.
+A generic `--insecure` TLS mode remains forbidden. The current development-only
+fixed-origin/SPKI authority is `releaseReady=false`; any authority change or
+release trust policy requires a separate product-security review. No
+caller-selectable weaker fallback may silently disable peer or hostname
+verification outside that exact reviewed authority.
 
 ## 5. Development safety boundary
 
@@ -347,5 +358,7 @@ and must not restart the review loop.
 
 Stop only after either:
 A. the first usable connect/disconnect path works; or
-B. one concrete architectural blocker is demonstrated.
+B. a true architectural impossibility is demonstrated, such as required legacy
+protocol behavior being irreproducible. An open native compatibility gap or
+missing authorization source alone does not satisfy B.
 ```
