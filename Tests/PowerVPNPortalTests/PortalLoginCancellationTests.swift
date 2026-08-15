@@ -89,22 +89,33 @@ import Testing
     }
   }
 
-  @Test func acceptedCodeWithoutSessionCookieStillAttemptsOneCleanup() async throws {
+  @Test func acceptedCodeWithoutCookieFailsClosedAtRejectedResource() async throws {
     let transport = SyntheticPortalTransport([
       .response(status: 200, body: acceptedLoginXML),
       .response(status: 200, body: ""),
+      .response(status: 200, body: ""),
     ])
+    let factory = try syntheticRequestFactory()
     let report = try await syntheticLoginWorkflow(
-      try syntheticRequestFactory(), transport, SyntheticPortalSleeper()
+      factory, transport, SyntheticPortalSleeper()
     ).run(
       credentials: syntheticCredentials(),
       platformSerial: syntheticSerial()
     )
-    #expect(report.status == .loginResponseRejected)
+
+    #expect(report.status == .resourceListRejected)
     #expect(report.operations.loginAccepted)
+    #expect(report.operations.resourceListRequested)
+    #expect(!report.operations.resourceListAccepted)
     #expect(report.operations.logoutRequested)
     #expect(report.operations.logoutAccepted)
-    #expect(await transport.snapshots().map(\.method) == [.post, .post])
+    let snapshots = await transport.snapshots()
+    #expect(snapshots.map(\.method) == [.post, .get, .post])
+    #expect(
+      snapshots.map(\.cookie)
+        == Array(repeating: " VSG_LANGUAGE=zh_CN; ", count: 3)
+    )
+    #expect(factory.retainedSessionByteCount == 0)
   }
 
   @Test func cleanupDeadlineReturnsAndErasesRequestWithoutRetry() async throws {

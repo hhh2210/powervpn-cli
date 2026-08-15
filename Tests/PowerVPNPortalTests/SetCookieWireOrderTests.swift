@@ -35,7 +35,7 @@ import Testing
     #expect(!String(decoding: encoded, as: UTF8.self).contains("final-session"))
   }
 
-  @Test func sessionThenUnrelatedCannotRescueEarlySession() async throws {
+  @Test func sessionThenUnrelatedUsesFallbackWithoutRescuingEarlySession() async throws {
     let driver = LoginBoundaryCurlPortalDriver(
       passwordXML: acceptedLoginXML,
       passwordCookie: "unrelated=final",
@@ -47,11 +47,18 @@ import Testing
       platformSerial: syntheticSerial()
     )
 
-    #expect(report.status == .loginResponseRejected)
-    #expect(!report.operations.resourceListRequested)
-    #expect(!report.operations.sessionCheckRequested)
-    #expect(driver.paths == [PortalWireContract.passwordPath, PortalWireContract.logoutPath])
-    #expect(driver.cookies.allSatisfy { !$0.contains("VSG_SESSIONID=early-session") })
+    #expect(report.transactionAccepted)
+    #expect(
+      driver.paths == [
+        PortalWireContract.passwordPath,
+        PortalWireContract.resourcePath,
+        PortalWireContract.sessionCheckPath,
+        PortalWireContract.logoutPath,
+      ])
+    let scopedCookies = driver.cookies.dropFirst()
+    #expect(scopedCookies.count == 3)
+    #expect(scopedCookies.allSatisfy { $0 == " VSG_LANGUAGE=zh_CN; " })
+    #expect(scopedCookies.allSatisfy { !$0.contains("VSG_SESSIONID=early-session") })
   }
 
   @Test func swappingTwoSessionFieldsSwapsEveryScopedCookie() async throws {

@@ -144,7 +144,7 @@ import Testing
     #expect(await transport.allOwnedResponseMaterialErased())
   }
 
-  @Test func nonAcceptedLogoutRejectsClosesAndErasesTheLease() async throws {
+  @Test func offFamilyOrCancelledLogoutClosesAndErasesTheLease() async throws {
     let cases: [(SyntheticTransportStep, PortalLeaseLogoutResult)] = [
       (
         .response(status: 199, body: ""),
@@ -165,10 +165,6 @@ import Testing
       (
         .response(status: 500, body: ""),
         PortalLeaseLogoutResult(status: .rejected, failureClass: .completedRemoteExchange)
-      ),
-      (
-        .failure(.unavailable),
-        PortalLeaseLogoutResult(status: .rejected, failureClass: .transportFailed)
       ),
       (.failure(.cancelled), PortalLeaseLogoutResult(status: .cancelled)),
     ]
@@ -199,6 +195,43 @@ import Testing
       #expect(await transport.allOwnedRequestMaterialErased())
       #expect(await transport.allOwnedResponseMaterialErased())
     }
+  }
+
+  @Test(arguments: [PortalTransportError.unavailable, .timedOut])
+  func transportFailureAfterConstructedLogoutAcceptsAndRetainsClass(
+    _ transportError: PortalTransportError
+  ) async throws {
+    let transport = SyntheticPortalTransport([
+      .response(status: 200, body: acceptedLoginXML, setCookie: syntheticSessionCookie),
+      .response(status: 200, body: acceptedResourceXML),
+      .failure(transportError),
+    ])
+    let workflow = try PortalLoginWorkflow(
+      factory: try syntheticRequestFactory(),
+      transport: transport,
+      sleeper: SyntheticPortalSleeper()
+    )
+    let result = await workflow.acquire(
+      credentials: try syntheticCredentials(),
+      platformSerial: try syntheticSerial()
+    )
+    guard case .acquired(let lease) = result else {
+      Issue.record("unexpected acquisition rejection")
+      return
+    }
+
+    #expect(
+      await lease.logoutAndErase()
+        == PortalLeaseLogoutResult(
+          status: .accepted,
+          failureClass: .transportFailed
+        )
+    )
+    #expect(lease.snapshot.isErased)
+    #expect(await lease.logoutAndErase() == PortalLeaseLogoutResult(status: .alreadyClosed))
+    #expect(await transport.snapshots().map(\.method) == [.post, .get, .post])
+    #expect(await transport.allOwnedRequestMaterialErased())
+    #expect(await transport.allOwnedResponseMaterialErased())
   }
 
   /// Official logout transport gate (BBHTTPSelectiveDiscarder,

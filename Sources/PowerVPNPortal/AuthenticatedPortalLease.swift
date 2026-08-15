@@ -21,11 +21,13 @@ package enum PortalLeaseLogoutStatus: String, Sendable {
 /// (`0x1000a6af1`–`0x1000a6cc0`) and reports literal `0` to the delegate
 /// (`0x1000a6d7a`–`0x1000a6def`).
 ///
-/// The native lease accepts the official transport family 200...204. The
-/// shared BBHTTPSelectiveDiscarder gate admits exactly that family before any
-/// body is read (construction `0x1001bc8b7`–`0x1001bc99b`, rejection
-/// `0x1001bcac0`). A completed exchange outside the family stays rejected;
-/// local erasure stays unconditional on every path.
+/// The native lease accepts HTTP 200...204 and rejects completed exchanges
+/// outside that family, matching the shared BBHTTPSelectiveDiscarder gate
+/// (`0x1001bc8b7`–`0x1001bc99b`, rejection `0x1001bcac0`). Once a sealed
+/// logout request reaches the transport, a thrown transport error is accepted
+/// fire-and-forget while retaining `transport_failed`; cancellation and the
+/// outer 20-second bound remain distinct. Construction failure stays rejected,
+/// and local erasure stays unconditional on every path.
 package enum PortalLeaseLogoutFailureClass: String, Equatable, Sendable {
   case requestConstructionFailed = "request_construction_failed"
   case transportFailed = "transport_failed"
@@ -128,9 +130,12 @@ package actor AuthenticatedPortalLease {
         {
           observation.complete(PortalLeaseLogoutResult(status: .cancelled))
         } else {
+          // Official logout completion (`0x1000a6a80`) ignores NSError and
+          // reports literal 0 after an initiated exchange. Preserve the
+          // transport class without blocking cleanup acceptance.
           observation.complete(
             PortalLeaseLogoutResult(
-              status: .rejected,
+              status: .accepted,
               failureClass: .transportFailed
             )
           )

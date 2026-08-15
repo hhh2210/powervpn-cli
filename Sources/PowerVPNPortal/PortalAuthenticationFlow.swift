@@ -10,7 +10,6 @@ enum PortalWorkflowStop: Error {
 
 private enum PortalPasswordOutcome {
   case accepted
-  case acceptedWithoutUsableSession
   case challengeRequired
   case rejected
 }
@@ -52,9 +51,6 @@ struct PortalAuthenticationFlow: Sendable {
       ) {
       case .accepted:
         progress.loginAccepted = true
-      case .acceptedWithoutUsableSession:
-        progress.loginAccepted = true
-        throw PortalWorkflowStop.status(.loginResponseRejected)
       case .challengeRequired:
         throw PortalWorkflowStop.status(.challengeRequired)
       case .rejected:
@@ -135,12 +131,8 @@ struct PortalAuthenticationFlow: Sendable {
     defer { document.erase() }
     switch try LeadSecPortalProfile.passwordDecision(document) {
     case .accepted:
-      do {
-        try factory.acceptPasswordSession(from: response, passwordURL: requestURL)
-        return .accepted
-      } catch {
-        return .acceptedWithoutUsableSession
-      }
+      try factory.acceptPasswordSession(from: response, passwordURL: requestURL)
+      return .accepted
     case .challengeRequired:
       return .challengeRequired
     case .rejected:

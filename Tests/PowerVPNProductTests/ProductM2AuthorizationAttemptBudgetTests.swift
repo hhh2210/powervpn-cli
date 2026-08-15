@@ -99,18 +99,32 @@ import Testing
       #expect(result.receipt.serverContactRequested)
       #expect(result.transportRequests == 1)
     }
+
+    let transportFailure = try await closePortalLease(
+      at: 74_000,
+      logoutTransportError: .unavailable
+    )
+    #expect(transportFailure.receipt.outcome == .accepted)
+    #expect(transportFailure.receipt.ownedMaterialErased)
+    #expect(transportFailure.receipt.sourceCloseRequested)
+    #expect(transportFailure.receipt.serverContactRequested)
+    #expect(transportFailure.transportRequests == 1)
   }
 
   private func closePortalLease(
     at milliseconds: UInt64,
-    logoutStatusCode: Int = 200
+    logoutStatusCode: Int = 200,
+    logoutTransportError: PortalTransportError? = nil
   ) async throws -> (
     receipt: ProductM2AuthorizationCloseReceipt,
     transportRequests: Int
   ) {
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
     defer { fixture.erase() }
-    let transport = ProductM2PortalTransportSpy(statusCode: logoutStatusCode)
+    let transport = ProductM2PortalTransportSpy(
+      statusCode: logoutStatusCode,
+      error: logoutTransportError
+    )
     let portalLease = AuthenticatedPortalLease(
       snapshot: fixture.snapshot,
       factory: try productM2PortalRequestFactory(),
@@ -250,16 +264,19 @@ private actor ProductM2PortalInstallGap {
 private final class ProductM2PortalTransportSpy: @unchecked Sendable, PortalTransporting {
   private let lock = NSLock()
   private let statusCode: Int
+  private let error: PortalTransportError?
   private var requests = 0
 
-  init(statusCode: Int) {
+  init(statusCode: Int, error: PortalTransportError?) {
     self.statusCode = statusCode
+    self.error = error
   }
 
   func perform(_ request: PortalHTTPRequest) async throws -> PortalHTTPResponse {
     guard request.begin() else { throw PortalTransportError.invalidRequest }
     lock.withLock { requests += 1 }
     request.erase()
+    if let error { throw error }
     return PortalHTTPResponse(
       statusCode: statusCode,
       body: try SecureBytes(copying: [])

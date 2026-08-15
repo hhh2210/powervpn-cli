@@ -86,7 +86,7 @@ import Testing
     }
   }
 
-  @Test func responseWithoutAllowlistedSessionCookieFailsClosed() throws {
+  @Test func unsupportedSetCookieUsesFallbackOnly() throws {
     let factory = try PortalRequestFactory(
       profile: syntheticPortalProfile(),
       operatingSystemVersion: "synthetic"
@@ -99,18 +99,22 @@ import Testing
       setCookieProjection: .provenLastFieldWins(fieldCount: 1)
     )
     defer { response.erase() }
-    #expect(throws: LeadSecPortalCookieJarError.unsupportedSetCookie) {
-      try factory.acceptPasswordSession(
-        from: response,
-        passwordURL: URL(
-          string: "https://166.111.143.19:4443/vpn/user/auth/password"
-        )!
-      )
-    }
+
+    try factory.acceptPasswordSession(
+      from: response,
+      passwordURL: URL(
+        string: "https://166.111.143.19:4443/vpn/user/auth/password"
+      )!
+    )
+    let resource = try factory.makeResourceRequest()
+    defer { resource.erase() }
+
     #expect(factory.retainedSessionByteCount == 0)
+    #expect(try decode(resource.cookieHeader) == " VSG_LANGUAGE=zh_CN; ")
+    #expect(resource.hasOperationProof(.resource))
   }
 
-  @Test func foundationSetCookieProjectionFailsClosedAsAmbiguous() throws {
+  @Test func foundationSetCookieProjectionUsesFallbackOnly() throws {
     let factory = try PortalRequestFactory(
       profile: syntheticPortalProfile(),
       operatingSystemVersion: "synthetic"
@@ -124,15 +128,18 @@ import Testing
     )
     defer { response.erase() }
 
-    #expect(throws: LeadSecPortalCookieJarError.ambiguousSetCookieFraming) {
-      try factory.acceptPasswordSession(
-        from: response,
-        passwordURL: URL(
-          string: "https://166.111.143.19:4443/vpn/user/auth/password"
-        )!
-      )
-    }
+    try factory.acceptPasswordSession(
+      from: response,
+      passwordURL: URL(
+        string: "https://166.111.143.19:4443/vpn/user/auth/password"
+      )!
+    )
+    let resource = try factory.makeResourceRequest()
+    defer { resource.erase() }
+
     #expect(factory.retainedSessionByteCount == 0)
+    #expect(try decode(resource.cookieHeader) == " VSG_LANGUAGE=zh_CN; ")
+    #expect(resource.hasOperationProof(.resource))
   }
 
   @Test func nonOriginProfileIsRejectedBeforeAnyRequest() {

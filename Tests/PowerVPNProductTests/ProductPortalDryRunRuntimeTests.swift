@@ -198,7 +198,7 @@ struct ProductPortalDryRunRuntimeTests {
     }
   }
 
-  @Test func logoutTransportFailureClassifiesTransportFailed() async throws {
+  @Test func logoutTransportFailureAcceptsButRetainsTransportClass() async throws {
     let fixture = try portalDryRunLease(
       resourceXML: m2ResourceXML(["login21"]),
       logoutTransportError: .unavailable
@@ -209,13 +209,13 @@ struct ProductPortalDryRunRuntimeTests {
 
     let report = await runtime.run(request())
 
-    #expect(report.outcome == .logoutRejected)
-    #expect(report.logoutOutcome == .rejected)
+    #expect(report.outcome == .accepted)
+    #expect(report.logoutOutcome == .accepted)
     #expect(report.logoutFailureClass == .transportFailed)
     #expect(report.operations.logoutAttempted)
-    #expect(!report.operations.logoutAccepted)
+    #expect(report.operations.logoutAccepted)
     #expect(report.ownedMaterialErased)
-    #expect(!report.dryRunAccepted)
+    #expect(report.dryRunAccepted)
     #expect(fixture.transport.requestCount == 1)
   }
 

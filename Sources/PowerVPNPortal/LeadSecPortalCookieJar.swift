@@ -7,10 +7,23 @@ enum LeadSecPortalCookieJarError: Error, Equatable, Sendable {
   case generationMismatch, sessionAlreadyStored, sizeOverflow, unsupportedSetCookie, writeMismatch
 }
 
+extension LeadSecPortalCookieJarError {
+  var isPasswordCookieStorageRejection: Bool {
+    switch self {
+    case .ambiguousSetCookieFraming, .invalidSetCookieBytes, .missingSetCookie,
+      .unsupportedSetCookie:
+      true
+    case .erased, .generationMismatch, .invalidLanguageState, .invalidPasswordURL,
+      .sessionAlreadyStored, .sizeOverflow, .writeMismatch:
+      false
+    }
+  }
+}
+
 enum LeadSecSetCookieProjection: Equatable, Sendable {
   case provenLastFieldWins(fieldCount: UInt32)
   /// Foundation may fold repeated fields, so its value cannot prove wire
-  /// multiplicity and is never accepted by the compatibility profile.
+  /// multiplicity and is never stored by the compatibility profile.
   case foundationFoldedValue
   case unavailableOrAmbiguous
 }
@@ -70,7 +83,7 @@ final class LeadSecPortalCookieJar: @unchecked Sendable {
   ) throws {
     try lock.withLock {
       guard !isErased else { throw LeadSecPortalCookieJarError.erased }
-      guard sessionEntry == nil else {
+      guard sessionEntry == nil, authenticationGeneration == nil else {
         throw LeadSecPortalCookieJarError.sessionAlreadyStored
       }
       guard let setCookieHeader else { throw LeadSecPortalCookieJarError.missingSetCookie }
@@ -81,6 +94,16 @@ final class LeadSecPortalCookieJar: @unchecked Sendable {
         setCookieHeader: setCookieHeader,
         passwordURL: passwordURL
       )
+      authenticationGeneration = PortalAuthenticationGeneration()
+    }
+  }
+
+  func acceptPasswordWithoutStoredSession() throws {
+    try lock.withLock {
+      guard !isErased else { throw LeadSecPortalCookieJarError.erased }
+      guard sessionEntry == nil, authenticationGeneration == nil else {
+        throw LeadSecPortalCookieJarError.sessionAlreadyStored
+      }
       authenticationGeneration = PortalAuthenticationGeneration()
     }
   }

@@ -137,11 +137,18 @@ struct PortalRequestFactory: Sendable {
     }
     let secureURL = try SecureBytes(copying: transientURL)
     defer { secureURL.erase() }
-    try cookieJar.acceptPasswordResponse(
-      setCookieHeader: setCookie,
-      projection: response.setCookieProjection,
-      passwordURL: secureURL
-    )
+    do {
+      try cookieJar.acceptPasswordResponse(
+        setCookieHeader: setCookie,
+        projection: response.setCookieProjection,
+        passwordURL: secureURL
+      )
+    } catch let error as LeadSecPortalCookieJarError {
+      guard error.isPasswordCookieStorageRejection else { throw error }
+      // Official code-0 handling proceeds unconditionally (`0x1000a72c7`);
+      // cookie storage (`0x100177610`–`0x100177819`) is opportunistic.
+      try cookieJar.acceptPasswordWithoutStoredSession()
+    }
   }
 
   func eraseSession() {

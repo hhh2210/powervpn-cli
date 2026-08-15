@@ -72,28 +72,32 @@ import Testing
     }
   }
 
-  @Test func acceptedPasswordHTTP200WithoutCookieRejectsSessionAfterXMLDecision() async throws {
+  @Test(arguments: [String?.none, "verifycode=synthetic; Secure"])
+  func acceptedPasswordHTTP200ToleratesMissingOrUnsupportedCookie(
+    _ passwordCookie: String?
+  ) async throws {
     let driver = LoginBoundaryCurlPortalDriver(
       passwordXML: acceptedLoginXML,
-      passwordCookie: nil
+      passwordCookie: passwordCookie
     )
     let report = try await loginWorkflow(driver).run(
       credentials: syntheticCredentials(),
       platformSerial: syntheticSerial()
     )
 
-    #expect(report.status == .loginResponseRejected)
-    #expect(report.operations.loginRequested)
-    #expect(report.operations.loginAccepted)
-    #expect(!report.operations.resourceListRequested)
-    #expect(report.operations.logoutRequested)
-    #expect(report.operations.logoutAccepted)
+    #expect(report.transactionAccepted)
+    #expect(report.operations.resourceListRequested)
     #expect(
       driver.paths == [
         PortalWireContract.passwordPath,
+        PortalWireContract.resourcePath,
+        PortalWireContract.sessionCheckPath,
         PortalWireContract.logoutPath,
       ])
-    #expect(driver.requirements == [false, false])
+    #expect(
+      driver.cookies
+        == Array(repeating: " VSG_LANGUAGE=zh_CN; ", count: 4)
+    )
   }
 
   @Test func acceptedPasswordHTTP200WithOneCookieProceedsThroughWorkflow() async throws {
