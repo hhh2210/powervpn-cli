@@ -1,0 +1,181 @@
+import Foundation
+import PowerVPNCore
+import Testing
+
+@testable import PowerVPNPortal
+@testable import PowerVPNProduct
+
+/// Ground-truth catalog shape tests.
+///
+/// The fixture replicates the value-free structural report captured from the
+/// official client's session on 2026-08-15
+/// (`~/scratch-data/powervpn-surge-capture-2026-08-14/intergration-structure-report.txt`):
+/// every element, every attribute, at the exact reported length and format
+/// class, with synthetic values only. `nc`, `login21`, and `login52` are
+/// structural labels named by the report itself; all other values are
+@Suite struct AuthenticatedPortalGroundTruthTests {
+  @Test func groundTruthShapedCatalogMapsCompletely() throws {
+    let fixture = try authenticatedSnapshot(resourceXML: groundTruthCatalogXML)
+    defer { fixture.erase() }
+
+    let (candidates, failure) = AuthenticatedPortalSnapshotMapper.mapClassified(
+      fixture.snapshot
+    )
+    #expect(failure == nil)
+    let candidate = try #require(candidates.first)
+    #expect(candidates.count == 1)
+    #expect(candidate.summary.displayName == "login21")
+    #expect(candidate.snapshotComplete)
+    #expect(candidate.firstMissingField == nil)
+  }
+
+  @Test func wrappedIntegrationInfoStillMaps() throws {
+    // The pre-ground-truth shape (INTERGRATION_INFO wrapped in an outer root)
+    // must keep mapping: the root-name acceptance is additive.
+    let fixture = try authenticatedSnapshot(
+      resourceXML: "<ROOT>\(groundTruthCatalogXML)</ROOT>"
+    )
+    defer { fixture.erase() }
+
+    let (candidates, failure) = AuthenticatedPortalSnapshotMapper.mapClassified(
+      fixture.snapshot
+    )
+    #expect(failure == nil)
+    #expect(candidates.count == 1)
+    #expect(candidates.first?.summary.displayName == "login21")
+  }
+
+  @Test func foreignRootWithoutIntegrationInfoStillFailsClosed() throws {
+    let fixture = try authenticatedSnapshot(
+      resourceXML: """
+        <RESPONSE><RESULT code="0"/><OTHER><VERSION major="1"/></OTHER></RESPONSE>
+        """
+    )
+    defer { fixture.erase() }
+
+    let (candidates, failure) = AuthenticatedPortalSnapshotMapper.mapClassified(
+      fixture.snapshot
+    )
+    #expect(candidates.isEmpty)
+    #expect(failure?.stage == .scope)
+    #expect(failure?.failureClass == .integrationInfoMissing)
+    #expect(failure?.resourceOrdinal == nil)
+    #expect(failure?.fieldPath == nil)
+  }
+
+  @Test func rootNamedWithOneIntegrationInfoChildFailsClosed() throws {
+    // A same-named direct child under a root-named INTERGRATION_INFO is
+    // ambiguous (XMLReader would produce an array; the official path raises
+    // on duplicate structural keys), so even a single child fails closed —
+    // already at snapshot mint, before any mapping.
+    #expect(throws: LeadSecPortalProfileError.duplicateField) {
+      _ = try authenticatedSnapshot(
+        resourceXML: """
+          <INTERGRATION_INFO><VERSION major="1"/>
+            <INTERGRATION_INFO/>
+          </INTERGRATION_INFO>
+          """
+      )
+    }
+  }
+
+  @Test func rootNamedWithTwoIntegrationInfoChildrenFailsClosed() throws {
+    #expect(throws: LeadSecPortalProfileError.duplicateField) {
+      _ = try authenticatedSnapshot(
+        resourceXML: """
+          <INTERGRATION_INFO><INTERGRATION_INFO/><INTERGRATION_INFO/></INTERGRATION_INFO>
+          """
+      )
+    }
+  }
+
+  @Test func nearMissRootNameStillFailsClosed() throws {
+    // A root whose name only resembles INTERGRATION_INFO (case/typo variants)
+    // must not be accepted; XMLReader key lookup is exact.
+    let fixture = try authenticatedSnapshot(
+      resourceXML: """
+        <INTERGRATION-INFO><VERSION major="1"/><RESOURCE_LIST><NC_RESOURCE>
+          <TUNNEL tunnel-name="login21"/>
+        </NC_RESOURCE></RESOURCE_LIST></INTERGRATION-INFO>
+        """
+    )
+    defer { fixture.erase() }
+
+    let (candidates, failure) = AuthenticatedPortalSnapshotMapper.mapClassified(
+      fixture.snapshot
+    )
+    #expect(candidates.isEmpty)
+    #expect(failure?.stage == .scope)
+    #expect(failure?.failureClass == .integrationInfoMissing)
+  }
+}
+
+/// Synthetic replica of the captured structural report (43 elements, every
+/// attribute at the reported length/format class; empty attributes stay
+/// empty: `jump-mapid`, `key_id`, `pfs` (IPSEC), `ipv6`, `notice`, `cmd`,
+/// `SECURED-ROUTES@name`, `dnssrv`, `dnssrv_v6`, `winssrv`).
+private let groundTruthCatalogXML = """
+  <INTERGRATION_INFO>
+    <VERSION major="1" minor="2"/>
+    <USER name="AAAAAAAA" group="AAAAAAAAAAAAAAA" type="1" access_type="1"
+      logout_policy="1" jump-mapid="" internet-access="1" modify_flag="1"
+      pwd_overtime="1" period_time="1" ssl_sm2="1" key_id=""
+      client_jump_pskey="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      prevent_screen_shot="1" multi_network_isolation="1"/>
+    <SESSION sid_name="AAAAAAAAAAAAA" id="AAAAAAAAAAAAAAAAAAAA"
+      login-addr="198.51.100.200" login-time="1755200000"
+      current-time="20260815000000" collect_machineinfo="1"
+      detect_interval="100"/>
+    <GATEWAY version="V3.2.1a"/>
+    <RESOURCE_LIST>
+      <NC_RESOURCE name="nc">
+        <IKE version="V2">
+          <SERVER ip="198.51.100.10" port="4500" id-type="AAAA"
+            id="198.51.100.20"/>
+          <CLIENT port="500" id-type="freefo" id="AAAAAAAAAAAAAAAAAAAA"/>
+          <Exchange mode="auto"/>
+          <PSK key="AAAAAAAAAAAAAAAA"/>
+          <ISAKMP-SA><PROPOSAL><TRANSFORMS>
+            <TRANSFORM life-time="86400" enc="aes128" hash="sha1" dh="02"
+              pfs="2" auth="psk"/>
+          </TRANSFORMS></PROPOSAL></ISAKMP-SA>
+          <IPSEC-SA><PROPOSAL><TRANSFORMS>
+            <TRANSFORM life-time="1800" enc="aes256" hash="sha1" dh="02"
+              pfs="" auth="psk"/>
+          </TRANSFORMS></PROPOSAL></IPSEC-SA>
+          <DPD dpddelay="1" dpdtimeout="1"/>
+          <NAT port="1"/>
+        </IKE>
+        <PRIVATE-IP ip="198.51.2" ipv6="" addr="198.51.2"
+          subnet="255.255.255.255"/>
+        <TUNNEL tunnel-name="login21" mapid="198.51.100.21"
+          negotiate-mode="1" display="1" notice="" family="4" status="1"
+          icon="ic_nc1" cmd="" authority="1">
+          <EXTENSIONS>
+            <SECURED-ROUTE><ROUTE addr="192.0.2.128/25"/></SECURED-ROUTE>
+            <SECURED-ROUTES name=""/>
+            <SECURED-RANGE/>
+            <SM1-MAGIC magic="1"/>
+          </EXTENSIONS>
+        </TUNNEL>
+        <TUNNEL tunnel-name="login52" mapid="198.51.100.52"
+          negotiate-mode="1" display="1" notice="" family="4" status="1"
+          icon="ic_nc1" cmd="" authority="1">
+          <EXTENSIONS>
+            <SECURED-ROUTE><ROUTE addr="192.0.2.128/25"/></SECURED-ROUTE>
+            <SECURED-ROUTES name=""/>
+            <SECURED-RANGE/>
+            <SM1-MAGIC magic="1"/>
+          </EXTENSIONS>
+        </TUNNEL>
+      </NC_RESOURCE>
+    </RESOURCE_LIST>
+    <INTRANET_LIST/>
+    <INTERNET_EXCEPTION_LIST/>
+    <DNS_INFO>
+      <DOMAIN_HOST dnssrv="" dnssrv_v6=""/>
+      <WINS_HOST winssrv=""/>
+      <HOST_LIST/>
+    </DNS_INFO>
+  </INTERGRATION_INFO>
+  """

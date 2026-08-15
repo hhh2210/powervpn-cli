@@ -96,10 +96,30 @@ enum LeadSecPortalProfile {
     }
   }
 
+  /// XMLReader's root dictionary carries `RESPONSE` and `INTERGRATION_INFO`
+  /// as sibling top-level keys, i.e. in the real reply `INTERGRATION_INFO` is
+  /// the XML root element itself (root shape proven by the ground-truth
+  /// structural report, 2026-08-15). The portal callback then walks
+  /// `root[INTERGRATION_INFO][RESOURCE_LIST][<CATEGORY>]` with plain
+  /// `objectForKey:` chains (resource-list-callback dossier §3, `0x1000a8c53`
+  /// and following). A root-named `INTERGRATION_INFO` is accepted only with
+  /// no same-named direct child: XMLReader turns duplicate structural keys
+  /// into arrays (`0x100135459`–`0x1001354c0`) and the official path raises on
+  /// them, so that ambiguous shape fails closed as `.duplicateField` here.
+  /// Any other root still requires a unique `INTERGRATION_INFO` child.
   static func integrationInfo(
     _ document: PortalXMLDocument
   ) throws -> PortalXMLElement? {
-    try uniqueDescendant(path: ["INTERGRATION_INFO"], from: document.root)
+    if document.root.name == "INTERGRATION_INFO" {
+      guard
+        !document.root.childElements.contains(
+          where: { $0.name == "INTERGRATION_INFO" })
+      else {
+        throw LeadSecPortalProfileError.duplicateField
+      }
+      return document.root
+    }
+    return try uniqueDescendant(path: ["INTERGRATION_INFO"], from: document.root)
   }
 
   private static func scalar(
