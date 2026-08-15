@@ -41,15 +41,7 @@ actor ProductPersistentTunnelSession {
     startupBudget: ProductM2AbsoluteBudget
   ) async -> ProductPersistentTunnelOpenResult {
     guard case .idle = storage else {
-      return .failed(
-        ProductPersistentTunnelOpenReport(
-          outcome: .rejected,
-          failure: .preflightBlocked,
-          state: reportedState,
-          authorizationClose: .notRequired,
-          authorizationOwnedMaterialErased: true,
-          cleanupVerified: false
-        ))
+      return .failed(rejectedPreOpenReport())
     }
     storage = .starting
     let result = await coordinator.openSession(request, startupBudget: startupBudget)
@@ -60,6 +52,8 @@ actor ProductPersistentTunnelSession {
         outcome: .opened,
         failure: nil,
         state: .active,
+        helperMutationRequested: true,
+        serverContactRequested: true,
         authorizationClose: assets.execution.authorizationClose,
         authorizationOwnedMaterialErased: assets.execution.authorizationOwnedMaterialErased,
         cleanupVerified: false
@@ -70,6 +64,8 @@ actor ProductPersistentTunnelSession {
         outcome: .rejected,
         failure: failure.outcome,
         state: .stopped,
+        helperMutationRequested: failure.helperMutationRequested,
+        serverContactRequested: failure.serverContactRequested,
         authorizationClose: failure.authorizationClose,
         authorizationOwnedMaterialErased: failure.authorizationOwnedMaterialErased,
         cleanupVerified: failure.cleanupVerified
@@ -86,6 +82,18 @@ actor ProductPersistentTunnelSession {
         ))
       return .failed(report)
     }
+  }
+  private func rejectedPreOpenReport() -> ProductPersistentTunnelOpenReport {
+    ProductPersistentTunnelOpenReport(
+      outcome: .rejected,
+      failure: .preflightBlocked,
+      state: reportedState,
+      helperMutationRequested: false,
+      serverContactRequested: false,
+      authorizationClose: .notRequired,
+      authorizationOwnedMaterialErased: true,
+      cleanupVerified: false
+    )
   }
 
   func permitsIPv4(_ address: UInt32) -> Bool {

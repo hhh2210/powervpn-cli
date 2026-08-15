@@ -1,0 +1,296 @@
+import Foundation
+import Testing
+
+@testable import PowerVPNCLI
+@testable import PowerVPNProduct
+
+@Suite struct ProxyAccessCommandTests {
+  @Test func unavailableProviderStopsBeforeApprovalRuntimeAndChild() async throws {
+    let trace = M2CommandTrace()
+    let child = ProxyTestChildRunner()
+    let result = try await runProxySSHCommand(
+      Array(proxySSHArguments.dropLast()),
+      authorizationAvailabilityFailure: { .providerUnavailable },
+      generateApprovalCode: {
+        trace.record("code")
+        return "A1B2C3D4"
+      },
+      approval: M2TTYApproval(exchange: { _ in
+        trace.record("approval")
+        return .line("A1B2C3D4")
+      }),
+      childRunner: child,
+      runtime: { _, _ in
+        trace.record("runtime")
+        return .failed(
+          ProxyTunnelOpenFailure(
+            failure: nil,
+            helperMutationRequested: false,
+            serverContactRequested: false,
+            cleanupVerified: false
+          ))
+      }
+    )
+
+    #expect(result.exitCode == 69)
+    #expect(result.standardOutput.isEmpty)
+    #expect(result.standardError == "runtime_unavailable\n")
+    #expect(trace.events.isEmpty)
+    #expect(child.invocationCount == 0)
+  }
+
+  @Test func nonInteractiveSkipsApprovalAndRouteDenialNeverSpawnsChild() async throws {
+    let lease = ProxyTestLease(permitted: false)
+    let child = ProxyTestChildRunner()
+    let result = try await runProxySSHCommand(
+      proxySSHArguments,
+      authorizationAvailabilityFailure: { nil },
+      generateApprovalCode: { throw TestFailure() },
+      approval: M2TTYApproval(exchange: { _ in
+        Issue.record("approval must be skipped")
+        return .unavailable
+      }),
+      childRunner: child,
+      runtime: proxyOpen(lease: lease)
+    )
+
+    #expect(result.exitCode == 70)
+    #expect(result.standardOutput.isEmpty)
+    #expect(result.standardError == "target_not_covered\n")
+    #expect(child.invocationCount == 0)
+    #expect(lease.recordedEvents.last == "shutdown")
+    #expect(!result.standardError.contains("Marker Resource"))
+    #expect(!result.standardError.contains("11.11.30.21"))
+  }
+
+  @Test func sshUsesExactNCArgvAndPreservesChildExitAfterCleanup() async throws {
+    let lease = ProxyTestLease()
+    let child = ProxyTestChildRunner(outcome: .exited(23))
+    let result = try await runProxySSHCommand(
+      proxySSHArguments,
+      authorizationAvailabilityFailure: { nil },
+      childRunner: child,
+      runtime: proxyOpen(lease: lease)
+    )
+
+    #expect(result.exitCode == 23)
+    #expect(result.standardOutput.isEmpty)
+    #expect(result.standardError == "child_failed\n")
+    #expect(
+      child.specification
+        == ProxyChildSpecification(
+          executable: "/usr/bin/nc",
+          arguments: ["11.11.30.21", "22"],
+          standardInput: .inherited,
+          standardOutput: .inherited
+        ))
+    #expect(child.readiness == ProxyChildReadiness.none)
+    #expect(lease.recordedEvents.last == "shutdown")
+  }
+
+  @Test func cleanupUnprovenOverridesChildAndCancellationResults() async throws {
+    for outcome in [ProxyChildRunOutcome.exited(19), .cancelled] {
+      let lease = ProxyTestLease(cleanupVerified: false)
+      let result = try await runProxySSHCommand(
+        proxySSHArguments,
+        authorizationAvailabilityFailure: { nil },
+        childRunner: ProxyTestChildRunner(outcome: outcome),
+        runtime: proxyOpen(lease: lease)
+      )
+      #expect(result.exitCode == 74)
+      #expect(result.standardOutput.isEmpty)
+      #expect(result.standardError == "cleanup_unproven\n")
+    }
+  }
+
+  @Test func truthfulOpenFailureClassificationUsesMutationBoolean() async throws {
+    let noMutation = try await runProxySSHCommand(
+      proxySSHArguments,
+      authorizationAvailabilityFailure: { nil },
+      runtime: proxyFailedOpen(mutated: false, cleanupVerified: false)
+    )
+    #expect(noMutation.exitCode == 69)
+
+    let cleanedMutation = try await runProxySSHCommand(
+      proxySSHArguments,
+      authorizationAvailabilityFailure: { nil },
+      runtime: proxyFailedOpen(mutated: true, cleanupVerified: true)
+    )
+    #expect(cleanedMutation.exitCode == 70)
+
+    let uncleanMutation = try await runProxySSHCommand(
+      proxySSHArguments,
+      authorizationAvailabilityFailure: { nil },
+      runtime: proxyFailedOpen(mutated: true, cleanupVerified: false)
+    )
+    #expect(uncleanMutation.exitCode == 74)
+  }
+
+  @Test func earlySignalNeverOpensRuntimeOrSpawnsChild() async throws {
+    let monitor = M2ManualSignalMonitor(emitOnStart: 2)
+    let trace = M2CommandTrace()
+    let child = ProxyTestChildRunner()
+    let result = try await runProxySSHCommand(
+      proxySSHArguments,
+      authorizationAvailabilityFailure: { nil },
+      signalMonitorFactory: { monitor },
+      childRunner: child,
+      runtime: { _, _ in
+        trace.record("runtime")
+        return .failed(
+          ProxyTunnelOpenFailure(
+            failure: nil,
+            helperMutationRequested: false,
+            serverContactRequested: false,
+            cleanupVerified: false
+          ))
+      }
+    )
+
+    #expect(result.exitCode == 130)
+    #expect(trace.events.isEmpty)
+    #expect(child.invocationCount == 0)
+    #expect(monitor.stopCount == 1)
+  }
+  @Test func cancellationDuringOpenUsesTypedFailurePrecedenceAndSpawnsNoNC() async throws {
+    let scenarios: [(ProductM2ConnectOutcome, Bool, Int32, String)] = [
+      (.cancelled, true, 130, "cancelled"),
+      (.cleanupUnproven, false, 74, "cleanup_unproven"),
+    ]
+    for (failure, cleanupVerified, exitCode, token) in scenarios {
+      let monitor = M2ManualSignalMonitor()
+      let child = ProxyTestChildRunner()
+      let runtime = ProxyCancellationOpenRuntime(
+        failure: ProxyTunnelOpenFailure(
+          failure: failure,
+          helperMutationRequested: false,
+          serverContactRequested: false,
+          cleanupVerified: cleanupVerified
+        ))
+      let command = Task {
+        try await runProxySSHCommand(
+          proxySSHArguments,
+          authorizationAvailabilityFailure: { nil },
+          signalMonitorFactory: { monitor },
+          childRunner: child,
+          runtime: runtime.open
+        )
+      }
+      #expect(runtime.waitUntilStarted())
+      monitor.emit()
+      let result = try await command.value
+
+      #expect(result.exitCode == exitCode)
+      #expect(result.standardOutput.isEmpty)
+      #expect(result.standardError == "\(token)\n")
+      #expect(!result.standardError.contains("Marker Resource"))
+      #expect(!result.standardError.contains("11.11.30.21"))
+      #expect(child.invocationCount == 0)
+      #expect(monitor.stopCount == 1)
+    }
+  }
+
+  @Test func activeSignalCancelsChildThenAwaitsVerifiedShutdown() async throws {
+    let monitor = M2ManualSignalMonitor()
+    let lease = ProxyTestLease()
+    let child = ProxyTestChildRunner(waitForCancellation: true)
+    let command = Task {
+      try await runProxySSHCommand(
+        proxySSHArguments,
+        authorizationAvailabilityFailure: { nil },
+        signalMonitorFactory: { monitor },
+        childRunner: child,
+        runtime: proxyOpen(lease: lease)
+      )
+    }
+    #expect(child.waitUntilStarted())
+    monitor.emit(times: 2)
+    let result = try await command.value
+
+    #expect(result.exitCode == 130)
+    #expect(result.standardOutput.isEmpty)
+    #expect(result.standardError == "cancelled\n")
+    #expect(lease.recordedEvents.last == "shutdown")
+    #expect(monitor.stopCount == 1)
+  }
+
+  @Test func signalDuringShutdownOverridesSuccessfulChildAfterVerifiedCleanup() async throws {
+    let monitor = M2ManualSignalMonitor()
+    let lease = ProxyTestLease(blocksShutdown: true)
+    let command = Task {
+      try await runProxySSHCommand(
+        proxySSHArguments,
+        authorizationAvailabilityFailure: { nil },
+        signalMonitorFactory: { monitor },
+        childRunner: ProxyTestChildRunner(outcome: .exited(0)),
+        runtime: proxyOpen(lease: lease)
+      )
+    }
+    #expect(lease.waitUntilShutdownStarted())
+    monitor.emit()
+    await lease.releaseShutdown()
+    let result = try await command.value
+
+    #expect(result.exitCode == 130)
+    #expect(result.standardError == "cancelled\n")
+    #expect(monitor.stopCount == 1)
+  }
+
+  @Test func interactiveApprovalPrecedesRuntimeAndDenialStopsIt() async throws {
+    let acceptedTrace = M2CommandTrace()
+    let interactiveArguments = Array(proxySSHArguments.dropLast())
+    let accepted = try await runProxySSHCommand(
+      interactiveArguments,
+      authorizationAvailabilityFailure: { nil },
+      generateApprovalCode: {
+        acceptedTrace.record("code")
+        return "A1B2C3D4"
+      },
+      approval: M2TTYApproval(exchange: { _ in
+        acceptedTrace.record("approval")
+        return .line("A1B2C3D4")
+      }),
+      runtime: { _, _ in
+        acceptedTrace.record("runtime")
+        return .failed(
+          ProxyTunnelOpenFailure(
+            failure: nil,
+            helperMutationRequested: false,
+            serverContactRequested: false,
+            cleanupVerified: false
+          ))
+      }
+    )
+    #expect(accepted.exitCode == 69)
+    #expect(acceptedTrace.events == ["code", "approval", "runtime"])
+
+    let deniedTrace = M2CommandTrace()
+    let denied = try await runProxySSHCommand(
+      interactiveArguments,
+      authorizationAvailabilityFailure: { nil },
+      generateApprovalCode: {
+        deniedTrace.record("code")
+        return "A1B2C3D4"
+      },
+      approval: M2TTYApproval(exchange: { _ in
+        deniedTrace.record("approval")
+        return .line("wrong")
+      }),
+      runtime: { _, _ in
+        deniedTrace.record("runtime")
+        return .failed(
+          ProxyTunnelOpenFailure(
+            failure: nil,
+            helperMutationRequested: false,
+            serverContactRequested: false,
+            cleanupVerified: false
+          ))
+      }
+    )
+    #expect(denied.exitCode == 77)
+    #expect(denied.standardError == "approval_denied\n")
+    #expect(deniedTrace.events == ["code", "approval"])
+  }
+
+  private struct TestFailure: Error {}
+}

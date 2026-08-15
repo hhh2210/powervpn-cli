@@ -8,6 +8,9 @@ struct PowerVPNCommand {
   static func main() async {
     do {
       try await run(Array(CommandLine.arguments.dropFirst()))
+    } catch let error as ProxyCommandError {
+      FileHandle.standardError.write(Data("error: \(error)\n".utf8))
+      Foundation.exit(64)
     } catch let error as M2ConnectOnceCommandError {
       FileHandle.standardError.write(Data("error: \(error)\n".utf8))
       Foundation.exit(64)
@@ -63,6 +66,8 @@ struct PowerVPNCommand {
       if result.exitCode != 0 {
         Foundation.exit(result.exitCode)
       }
+    case "proxy":
+      writeProxyCommandResult(try await runCurrentMachineProxyCommand(arguments))
     case "m2":
       let runtime = ProductM2CurrentMachineRuntime()
       let result = try await runM2ConnectOnceCommand(
@@ -82,6 +87,17 @@ struct PowerVPNCommand {
       printCLIUsage()
     default:
       throw CLIError.unknownCommand(command)
+    }
+  }
+  private static func writeProxyCommandResult(_ result: ProxyCommandResult) {
+    if !result.standardOutput.isEmpty {
+      FileHandle.standardOutput.write(Data(result.standardOutput.utf8))
+    }
+    if !result.standardError.isEmpty {
+      FileHandle.standardError.write(Data(result.standardError.utf8))
+    }
+    if result.exitCode != 0 {
+      Foundation.exit(result.exitCode)
     }
   }
 

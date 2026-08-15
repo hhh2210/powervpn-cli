@@ -17,6 +17,8 @@ package struct ProductPersistentTunnelOpenReport: Encodable, Equatable, Sendable
   package let outcome: ProductPersistentTunnelOpenOutcome
   package let failure: ProductM2ConnectOutcome?
   package let state: ProductPersistentTunnelState
+  package let helperMutationRequested: Bool
+  package let serverContactRequested: Bool
   package let authorizationClose: ProductM2AuthorizationCloseOutcome
   package let authorizationOwnedMaterialErased: Bool
   package let cleanupVerified: Bool

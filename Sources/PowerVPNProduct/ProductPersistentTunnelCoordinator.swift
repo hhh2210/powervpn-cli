@@ -4,8 +4,10 @@ package struct ProductPersistentTunnelCoordinator: Sendable {
 
 package actor ProductPersistentTunnelRuntime {
   private let session: ProductPersistentTunnelSession
+  package nonisolated let authorizationAvailabilityFailure: ProductM2AuthorizationFailure?
 
   package init(dependencies: ProductM2ConnectOnceDependencies) {
+    authorizationAvailabilityFailure = dependencies.authorizationAvailabilityFailure
     session = ProductPersistentTunnelSession(
       coordinator: ProductPersistentTunnelCoordinator(dependencies: dependencies)
     )

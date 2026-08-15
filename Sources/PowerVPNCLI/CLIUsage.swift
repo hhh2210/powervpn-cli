@@ -34,6 +34,13 @@ func printCLIUsage() {
                              Run one M2 transaction without TTY approval; portal credentials
                              come from ~/.config/powervpn/credentials.env (0600) or
                              POWERVPN_PORTAL_CREDENTIALS
+      proxy ssh --resource-display-name <exact> --ssh-target <thu21|thu52> <numeric-ipv4> <port> [--non-interactive]
+                             Open one foreground nc stream through an approved tunnel
+      proxy serve --resource-display-name <exact> --ssh-target <thu21|thu52>
+                  [--listen-port <1-65535>] [--non-interactive] [--json]
+                             Run foreground OpenSSH dynamic forwarding for other TCP apps;
+                             Remote-SSH continues to use its normal route or ProxyJump
+
 
     Options:
       --json                 Emit JSON
