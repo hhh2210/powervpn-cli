@@ -79,12 +79,106 @@ cleanup cannot substitute a caller-supplied or reconstructed gateway. M2 keeps
 one monotonic 120-second transaction and report budget, generation fencing,
 bounded cleanup, local material erasure, and value-free reporting.
 
-This is **offline GO only**. These deltas ran no live Portal request, helper
-mutation, SSH proof, or M2 transaction, so there is no current live
-connect/disconnect proof and the product is not yet a usable VPN. The Goal
-remains **ACTIVE**. The next action is one freshly approved bounded
-`login21` → `thu21` M2 transaction with start, a fresh SSH banner, stop, and
-cleanup proof. This statement grants no attempt or retry.
+This is **offline GO only** for the composition and stop-authority deltas:
+those commits ran no live Portal request, helper mutation, SSH proof, or M2
+transaction. Catalog classifier `schemaVersion` 9 has since landed
+(`9df94e7`). Attempt-7 is consumed: Portal acquisition completed, then the
+run ended `resource_catalog_rejected` before helper mutation. Commit
+`57293c5` implements `proxy ssh` and `proxy serve` on `rescue-mvp`; they
+are offline-only and not live-tested. There is no current live
+connect/disconnect proof, and the product is not yet a usable VPN. M2 is
+**not PASS**. The Goal remains **ACTIVE**. The next live action requires a
+fresh exact approval. This statement grants no attempt or retry.
+
+## IDE access
+
+These commands are implemented on `rescue-mvp` at `57293c5`. They remain
+offline-only and have not been live-tested. They are not an M2 PASS.
+
+```sh
+powervpn proxy ssh --resource-display-name <exact> --ssh-target <thu21|thu52> <numeric-ipv4> <port> [--non-interactive]
+powervpn proxy serve --resource-display-name <exact> --ssh-target <thu21|thu52> [--listen-port <1-65535>] [--non-interactive] [--json]
+```
+
+Optional flags, when present, appear in that order only. `--json` is valid
+only on `serve`. Closed argv: extra, missing, reordered, or `--flag=value`
+tokens fail with exit `64` before approval. The destination of `proxy ssh`
+must already be numeric IPv4; hostnames are rejected.
+
+In the examples below, replace `/absolute/path/to/powervpn` with the
+absolute path of the arm64 binary from
+`swift build --product powervpn --arch arm64` (or a copy of that binary).
+The examples do not claim that `powervpn` is installed or on `PATH`.
+
+### A. OpenSSH ProxyCommand (recommended for Remote-SSH)
+
+`proxy ssh` is an OpenSSH `ProxyCommand`. After one approved resource
+lease, it runs `/usr/bin/nc` to the numeric IPv4 and port with inherited
+stdin and stdout. VS Code and Cursor Remote-SSH spawn that same `ssh`.
+When `remote.SSH.configFile` is set they pass `-F`; otherwise they use
+`~/.ssh/config`. They do not need an app-specific SOCKS hop.
+`http.proxy` / `remote.SSH.httpProxy` are unrelated to this SSH hop.
+
+Do not quote the entire `ProxyCommand` line: OpenSSH then `exec`s it as
+one path. Quote only an individual argument that contains spaces, such as
+the display name. `ProxyCommand` is one config line; do not insert shell
+backslashes. OpenSSH expands `%h` (Hostname after `HostName` substitution)
+and `%p` (port). Write `%%` only when a literal `%` is required, for
+example in the executable path.
+
+`Host` patterns are globs (`*`, `?`, `!`), not CIDR. `Host 192.0.2.0/24`
+matches only the destination string `192.0.2.0/24`.
+
+Literal host with numeric `HostName`:
+
+```text
+Host campus-host
+  HostName 192.0.2.10
+  User <remote-user>
+  Port 22
+  ProxyCommand /absolute/path/to/powervpn proxy ssh --resource-display-name <exact> --ssh-target thu52 %h %p --non-interactive
+```
+
+Wildcard IP group:
+
+```text
+Host 192.0.2.*
+  User <remote-user>
+  Port 22
+  ProxyCommand /absolute/path/to/powervpn proxy ssh --resource-display-name <exact> --ssh-target thu52 %h %p --non-interactive
+```
+
+`%h` must expand to numeric IPv4. Remote-SSH usually has no controlling
+TTY, so the documented form uses `--non-interactive`, which must remain
+the last argument.
+
+### B. Foreground loopback SOCKS (browsers and other TCP apps)
+
+`proxy serve` is a foreground SOCKS4/5 listener on `127.0.0.1`, backed by
+system `/usr/bin/ssh -D`. The default listen port is 1080. It is not a
+custom SOCKS implementation, LaunchAgent, or daemon. It is not the
+recommended Remote-SSH path; use A.
+
+```sh
+powervpn proxy serve --resource-display-name <exact> --ssh-target thu52
+powervpn proxy serve --resource-display-name <exact> --ssh-target thu52 --listen-port 1080 --non-interactive --json
+```
+
+The listener binds `127.0.0.1` only. Point the browser or other TCP client
+at `127.0.0.1` and that port.
+
+### Lifecycle, credentials, and exits
+
+One TTY approval is required unless `--non-interactive` is set. With
+`--non-interactive`, Portal credentials are read from
+`~/.config/powervpn/credentials.env` (mode 0600 regular file) or from the
+absolute path in `POWERVPN_PORTAL_CREDENTIALS`. The file keys are
+`PORTAL_USERNAME` and `PORTAL_PASSWORD`. Values must not appear in argv,
+logs, or documentation.
+
+Both commands stay in the foreground. Stop them with SIGHUP, SIGINT, or
+SIGTERM. The process then stops the helper lease and verifies cleanup.
+Exit `74` means cleanup is unproven; do not retry.
 
 ## Development
 
@@ -106,7 +200,12 @@ Product JSON commands use exit `0` when ready, `2` for a completed degraded
 observation, `64` for invalid product-command grammar, and `69` when a required
 local provider is unavailable. The M2 command additionally uses `74` when
 cleanup is unproven and `124` when its absolute report deadline is exceeded
-without a higher-priority cleanup failure.
+without a higher-priority cleanup failure. `proxy ssh` and `proxy serve`
+exit `0` only when the child exits `0` and cleanup is verified. They use
+`64` for usage, `69` when unavailable before helper mutation, `70` for an
+operational failure after verified cleanup, `74` when cleanup is unproven
+(no retry), `77` when approval is denied or unavailable, and `130` when
+cancelled with no mutation or after verified cleanup.
 
 ## Archived evidence history
 

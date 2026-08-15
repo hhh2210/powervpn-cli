@@ -1826,3 +1826,64 @@ Next end-to-end action: obtain fresh explicit approval for one bounded M2
 connect-once transaction with resource `login21` and target `thu21`, then prove
 start, a fresh SSH banner, stop, and cleanup. This entry grants no attempt or
 retry.
+
+## 2026-08-15 — Offline IDE-access proxy CLI; attempt-7 consumed
+
+User-visible capability:
+Commit `57293c5c4e04e8f9ca140bed949afb9c4e04f95d` adds `powervpn proxy ssh`
+and `powervpn proxy serve` on `rescue-mvp`. `proxy ssh` is the OpenSSH
+`ProxyCommand` path. `proxy serve` is a foreground `127.0.0.1` SOCKS4/5
+listener (default 1080) backed by system `/usr/bin/ssh -D`. README records
+exact usage, config, credentials, signals, and exits. Neither command has a
+live proof. Catalog classifier `schemaVersion` 9 landed in `9df94e7` and has
+no live report. M2 is not PASS.
+
+Production code changed:
+Yes. `57293c5` opens one `ProductPersistentTunnelRuntime` lease, then
+spawns shell-free `/usr/bin/nc <numeric-ipv4> <port>` (`proxy ssh`) or
+`/usr/bin/ssh -D 127.0.0.1:<port>` (`proxy serve`). There is no custom
+SOCKS implementation. One integrated review P1 on cancellation
+classification was fixed before that commit; no second review ran.
+Catalog classifier `9df94e7` is already on the branch.
+
+Live result:
+Attempt-7 is consumed. After full Portal acquisition
+(`authorizationAcquisition=acquired`) the run ended
+`resource_catalog_rejected` before helper mutation
+(`helperMutationRequested=false`). Start, SSH proof, and stop were not
+attempted. Schema 9 has no live report.
+
+Offline evidence for `57293c5`: focused 27/5 PASS; full `swift test`
+PASS; arm64 product build, strict format lint, `git diff --check`, and
+gitleaks PASS. Built-binary smoke: 26/26 invalid argv cases exited `64`
+with empty stdout; ProxyCommand-shaped invalid argv also had empty
+stdout. A valid no-credential host path exited `69` with
+`helperMutationRequested=false`, `serverContactRequested=false`, and
+`cleanupVerified=true`, so it made no Portal contact, helper mutation, or
+SSH child. Availability was lazily nil, then a safe preflight failure;
+this is not `runtime_unavailable`. `ssh -G` config expansion exited `0`
+with no TCP.
+
+Current blocker:
+No live catalog-classification proof on the consumed attempt-7 schema-8
+report; schema 9 is offline only. Proxy and M2 remain unproven live.
+Wrong-resource safety still prohibits treating that rejection as an empty
+catalog or as a mapper defect.
+
+Cleanup status:
+Attempt-7: `cleanupPath=not_required`, `cleanupVerified=true`,
+`authorizationClose=accepted`, `authorizationOwnedMaterialErased=true`.
+Code is pushed at `57293c5`. These product docs are pending this commit.
+Foreign untracked paths were not touched. No helper mutation in this
+docs update.
+
+Deferred debt:
+Live IDE-access proof. Custom SOCKS, LaunchAgent, and daemon remain
+non-goals.
+
+Next end-to-end action:
+Obtain a fresh exact approval for one bounded live transaction. This
+entry grants no attempt or retry.
+
+Approval required:
+yes.
