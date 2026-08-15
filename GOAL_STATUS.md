@@ -67,3 +67,53 @@ root-named documents) — applied and pinned by tests; citation nit
 
 **Next:** no live native action yet; attempt-2 dry-run approval pending
 (Larry's per-attempt verbatim approval phrase required).
+
+## 2026-08-15 — tunnel parity and charon downstream contract
+
+**Captured ground truth and cardinality.** The catalog root is
+`INTERGRATION_INFO`: exactly 1 `NC_RESOURCE` contains 2 sibling `TUNNEL`
+elements. Native mapping produces 1 candidate and 1 encoded start envelope
+containing both tunnels, matching the official wire shape for this capture.
+The earlier multi-NC hypothesis is explicitly refuted for the current ground
+truth and deferred until a real multi-NC catalog exists.
+
+**Accepted deltas and integrated review.** A (`01aad98d`) mirrors the daemon's
+length guards by allowing empty `vip`/`vipv6`; B (`54830492`) accepts the
+official logout HTTP 200–204 status family; C (`cab60035`) maps resource-child
+`PRIVATE-IP@addr` into `common.vip` with exact official precedence
+`extensionAddr ?? resourceAddr`. A/B/C are GO. D's hidden
+`tunnelDisplayNames` alias is NO-GO and fully reverted: it exposed raw,
+status-ineligible tunnel names and violated cross-surface truthfulness (two
+P1-product findings).
+
+**Frozen charon downstream contract.** The helper drives a custom in-process
+libcharon API directly, with no generated config or VICI path.
+`common.ike`/`common.esp` pass raw to `proposal_create_from_string`; the PSK
+callback copies the raw `strlen` bytes; local identity is `ID_KEY_ID` with
+payload `common.sessionid`, preserved from `IKE/CLIENT@id`. The helper contains
+no portal-session machinery.
+
+**Exact structural `HASH_V1` ranking.** (1) PSK-byte divergence, stale
+authenticated generation, or wrong PSK leaf; (2) wrong IKE-SA/transcript/key
+state; (3) block-aligned ciphertext corruption or peer defect; (4) local-ID
+content/type mismatch, low for this structural log because that should reach a
+semantic HASH mismatch after valid decryption. The stale multi-NC theory is
+not a cause for this 1-NC capture and remains deferred.
+
+**Continuity, cardinality, and gates.** Tests pin resource fallback, extension
+precedence, missing-extension-addr fallback, ground-truth VIP length 8,
+1 candidate/2 tunnels/1 envelope, raw PSK-byte continuity, and
+`CLIENT@id` → `common.sessionid` continuity. Final offline gates pass:
+668 tests / 107 suites (TLSEvidence 37/9, Product 180/31, Portal 177/30,
+Core 274/37), arm64 `powervpn` build, strict lint on all 10 Swift files
+changed from origin, diff-check, and no-secrets over approximately 2.88 MB.
+
+**Evidence.**
+- `/Users/larry_1/scratch-data/powervpn-suite-parity-2026-08-15/REPORT.md`
+- `/Users/larry_1/scratch-data/powervpn-official-reverse-2026-08-11/charon-helper-downstream-dossier.md`
+- `/Users/larry_1/scratch-data/powervpn-official-reverse-2026-08-11/charon-helper-downstream-findings.json`
+- `/Users/larry_1/scratch-data/powervpn-surge-capture-2026-08-14/intergration-structure-report.txt`
+- `/Users/larry_1/scratch-data/powervpn-surge-capture-2026-08-14/evidence-log.md`
+
+**Live boundary.** No live action was taken. Attempt-2 Portal-only dry-run
+requires fresh, per-attempt Larry approval.
