@@ -1,4 +1,5 @@
 import PowerVPNCore
+import PowerVPNPortal
 
 /// Explicit composition root for the current-machine M2 path. Construction is
 /// inert; only `run` may mutate the helper, run SSH, or contact a remote service.
@@ -12,6 +13,9 @@ package struct ProductM2CurrentMachineRuntime: Sendable {
       generationObserver: InstalledBoundedVendorHelperGenerationObserver(),
       preflightChecker: InstalledBoundedVendorXPCPreflightChecker(),
       networkObserver: InstalledNetworkCleanupObserver(),
+      authorizationProvider: ProductM2PortalAdapter { _ in
+        await PortalLoginRuntime.acquireCurrentMachine()
+      },
       control: ProductM2ControlAdapter(),
       freshSSHProver: ProductM2FreshSSHProver()
     )

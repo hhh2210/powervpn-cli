@@ -6,6 +6,12 @@ import Testing
 @testable import PowerVPNProduct
 
 @Suite struct ProductM2CurrentMachineRuntimeTests {
+  @Test func productionCompositionIsInertAndAdvertisesNativePortalAvailability() {
+    let runtime = ProductM2CurrentMachineRuntime()
+
+    #expect(runtime.authorizationAvailabilityFailure == nil)
+  }
+
   @Test func compositionIsInertAndRejectedPreflightStopsBeforeSideEffects() async {
     let trace = CurrentMachineRuntimeTrace()
     let coordinatorTrace = ProductM2TestTrace()
