@@ -282,7 +282,7 @@ import Testing
     #expect(stop.unexpectedEventSignature == nil)
   }
 
-  @Test func startWireDiagnosticsFlowToSchemaEightReportWithoutValues() async throws {
+  @Test func startWireDiagnosticsFlowToSchemaNineReportWithoutValues() async throws {
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
     defer { fixture.erase() }
     let trace = ProductM2TestTrace()
@@ -302,7 +302,7 @@ import Testing
       ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
     )
 
-    #expect(report.schemaVersion == 8)
+    #expect(report.schemaVersion == 9)
     #expect(
       report.startEventSignatures == [
         "1:connection:get_tun_name_success:bool,namev4:string",

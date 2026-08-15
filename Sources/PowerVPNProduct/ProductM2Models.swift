@@ -39,6 +39,15 @@ public enum ProductM2ConnectOutcome: String, Encodable, Equatable, Sendable {
   case cleanupUnproven = "cleanup_unproven"
 }
 
+public enum ProductM2SelectionFailureClass: String, Encodable, Equatable, Sendable {
+  case catalogMapping = "catalog_mapping"
+  case catalogEmpty = "catalog_empty"
+  case catalogInvariantInvalid = "catalog_invariant_invalid"
+  case prepareRemap = "prepare_remap"
+  case selectionReplay = "selection_replay"
+  case preparedSelectionMismatch = "prepared_selection_mismatch"
+}
+
 public enum ProductM2BadEvent: String, Encodable, Equatable, Sendable {
   case preflightRejected = "preflight_rejected"
   case networkBaselineUnavailable = "network_baseline_unavailable"
@@ -240,7 +249,7 @@ public struct ProductM2ConnectRequest: Equatable, Sendable {
 }
 
 public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
-  public let schemaVersion = 8
+  public let schemaVersion = 9
   public let outcome: ProductM2ConnectOutcome
   public let finalState: ProductM2ConnectionState
   public let lastGoodState: ProductM2ConnectionState
@@ -250,6 +259,8 @@ public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
   public let authorizationSource: ProductM2AuthorizationSource
   public let authorizationAcquisition: ProductM2AuthorizationAcquisitionOutcome
   public let authorizationFailure: ProductM2AuthorizationFailure?
+  public let resourceCatalogFailure: ProductResourceCatalogFailure?
+  public let selectionFailureClass: ProductM2SelectionFailureClass?
   public let startOutcome: ProductM2ControlOutcome
   /// Bounded value-free signatures with global arrival ordinal and channel.
   public var startEventSignatures: [String]? = nil

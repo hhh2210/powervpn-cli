@@ -86,7 +86,7 @@ import Testing
       )
     }
 
-    #expect(error == .catalogRejected)
+    #expect(error == .catalogInvariantInvalid)
     #expect(trace.count("prepare") == 0)
     #expect(
       (await lease.closeAndErase(deadline: m2TestBudget().authorizationCleanup)).outcome

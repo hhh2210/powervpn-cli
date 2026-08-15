@@ -10,6 +10,8 @@ package struct ProductM2Execution {
   var authorizationSource: ProductM2AuthorizationSource
   var authorizationAcquisition: ProductM2AuthorizationAcquisitionOutcome = .notRequested
   var authorizationFailure: ProductM2AuthorizationFailure?
+  var resourceCatalogFailure: ProductResourceCatalogFailure?
+  var selectionFailureClass: ProductM2SelectionFailureClass?
   var startOutcome: ProductM2ControlOutcome = .notAttempted
   var startEventSignatures: [String]?
   var startReplySignatures: [String]?
@@ -36,6 +38,48 @@ package struct ProductM2Execution {
     self.outcome = outcome
     firstBadEvent = firstBadEvent ?? event
     finalState = state
+  }
+
+  mutating func applySelectionFailure(_ error: Error) {
+    let outcome: ProductM2ConnectOutcome
+    let event: ProductM2BadEvent
+    switch error {
+    case ProductM2AuthorizedResourceSelectionError.resourceNotFound:
+      (outcome, event) = (.resourceNotFound, .resourceNotFound)
+    case ProductM2AuthorizedResourceSelectionError.resourceAmbiguous:
+      (outcome, event) = (.resourceAmbiguous, .resourceAmbiguous)
+    case ProductM2AuthorizedResourceSelectionError.selectedRouteCoverageRejected:
+      (outcome, event) = (.selectedRouteCoverageRejected, .selectedRouteCoverageRejected)
+    case ProductM2AuthorizedResourceSelectionError.startSnapshotRejected:
+      (outcome, event) = (.startSnapshotRejected, .startSnapshotRejected)
+    case ProductM2AuthorizedResourceSelectionError.catalogMapping(let failure):
+      resourceCatalogFailure = failure
+      selectionFailureClass = .catalogMapping
+      (outcome, event) = (.resourceCatalogRejected, .resourceCatalogRejected)
+    case ProductM2AuthorizedResourceSelectionError.catalogEmpty:
+      selectionFailureClass = .catalogEmpty
+      (outcome, event) = (.resourceCatalogRejected, .resourceCatalogRejected)
+    case ProductM2AuthorizedResourceSelectionError.catalogInvariantInvalid:
+      selectionFailureClass = .catalogInvariantInvalid
+      (outcome, event) = (.resourceCatalogRejected, .resourceCatalogRejected)
+    case ProductM2AuthorizedResourceSelectionError.prepareRemap(let failure):
+      resourceCatalogFailure = failure
+      selectionFailureClass = .prepareRemap
+      (outcome, event) = (.resourceCatalogRejected, .resourceCatalogRejected)
+    case ProductM2AuthorizedResourceSelectionError.leaseClosed,
+      ProductM2AuthorizedResourceSelectionError.selectionAlreadyIssued,
+      ProductM2AuthorizedResourceSelectionError.startAlreadyIssued,
+      ProductM2AuthorizedResourceSelectionError.invalidSelection:
+      selectionFailureClass = .selectionReplay
+      (outcome, event) = (.resourceCatalogRejected, .resourceCatalogRejected)
+    case ProductM2AuthorizedResourceSelectionError.preparedSelectionMismatch:
+      selectionFailureClass = .preparedSelectionMismatch
+      (outcome, event) = (.resourceCatalogRejected, .resourceCatalogRejected)
+    default:
+      selectionFailureClass = .catalogInvariantInvalid
+      (outcome, event) = (.resourceCatalogRejected, .resourceCatalogRejected)
+    }
+    fail(outcome, event: event, state: .blocked)
   }
 
   mutating func apply(_ cleanup: ProductM2CleanupResult) {
@@ -112,6 +156,8 @@ package struct ProductM2Execution {
       authorizationSource: authorizationSource,
       authorizationAcquisition: authorizationAcquisition,
       authorizationFailure: authorizationFailure,
+      resourceCatalogFailure: resourceCatalogFailure,
+      selectionFailureClass: selectionFailureClass,
       startOutcome: startOutcome,
       startEventSignatures: startEventSignatures,
       startReplySignatures: startReplySignatures,

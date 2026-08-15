@@ -104,6 +104,8 @@ func report(
     authorizationSource: mutated ? .nativePortal : .nativePortal,
     authorizationAcquisition: mutated ? .acquired : .notRequested,
     authorizationFailure: nil,
+    resourceCatalogFailure: nil,
+    selectionFailureClass: nil,
     startOutcome: mutated ? .transportAcknowledged : .notAttempted,
     vendorStatusEvidence: mutated ? m2ConnectedStatus : .notAttempted,
     activeNetworkEvidence: mutated ? m2ProvenActiveNetwork : .unavailable,

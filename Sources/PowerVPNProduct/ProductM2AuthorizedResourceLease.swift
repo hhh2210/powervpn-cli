@@ -9,7 +9,10 @@ package enum ProductM2AuthorizedResourceSelectionError: Error, Equatable, Sendab
   case preparedSelectionMismatch
   case resourceNotFound
   case resourceAmbiguous
-  case catalogRejected
+  case catalogMapping(ProductResourceCatalogFailure)
+  case catalogEmpty
+  case catalogInvariantInvalid
+  case prepareRemap(ProductResourceCatalogFailure)
   case startSnapshotRejected
   case selectedRouteCoverageRejected
   case workAborted
@@ -115,12 +118,15 @@ package actor ProductM2AuthorizedResourceLease {
     }
     if let cachedCatalog { return cachedCatalog }
     guard let readCatalog else {
-      throw ProductM2AuthorizedResourceSelectionError.catalogRejected
+      throw ProductM2AuthorizedResourceSelectionError.selectionAlreadyIssued
     }
     self.readCatalog = nil
     let catalog = try readCatalog()
+    guard !catalog.isEmpty else {
+      throw ProductM2AuthorizedResourceSelectionError.catalogEmpty
+    }
     guard ProductResourceCatalog.isValid(catalog) else {
-      throw ProductM2AuthorizedResourceSelectionError.catalogRejected
+      throw ProductM2AuthorizedResourceSelectionError.catalogInvariantInvalid
     }
     cachedCatalog = catalog
     return catalog

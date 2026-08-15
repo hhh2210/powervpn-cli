@@ -154,13 +154,11 @@ package struct ProductM2PortalAdapter: ProductM2AuthorizedResourceProviding {
     handle: String,
     requiredTargetIPv4: UInt32
   ) throws -> ProductM2PreparedAuthorizedResource {
-    let candidates: [ProductResourceCandidate]
-    do {
-      candidates = try AuthenticatedPortalSnapshotMapper.map(snapshot)
-        .filter { $0.summary.handle == handle }
-    } catch {
-      throw ProductM2AuthorizedResourceSelectionError.catalogRejected
+    let mapping = AuthenticatedPortalSnapshotMapper.mapClassified(snapshot)
+    if let failure = mapping.failure {
+      throw ProductM2AuthorizedResourceSelectionError.prepareRemap(failure)
     }
+    let candidates = mapping.candidates.filter { $0.summary.handle == handle }
     guard candidates.count == 1 else {
       throw ProductM2AuthorizedResourceSelectionError.startSnapshotRejected
     }
@@ -206,11 +204,11 @@ package struct ProductM2PortalAdapter: ProductM2AuthorizedResourceProviding {
   package static func catalog(
     snapshot: AuthenticatedPortalSnapshot
   ) throws -> [ProductResourceCandidate] {
-    do {
-      return try AuthenticatedPortalSnapshotMapper.map(snapshot)
-    } catch {
-      throw ProductM2AuthorizedResourceSelectionError.catalogRejected
+    let mapping = AuthenticatedPortalSnapshotMapper.mapClassified(snapshot)
+    if let failure = mapping.failure {
+      throw ProductM2AuthorizedResourceSelectionError.catalogMapping(failure)
     }
+    return mapping.candidates
   }
 }
 

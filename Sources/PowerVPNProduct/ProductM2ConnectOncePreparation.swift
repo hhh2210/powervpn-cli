@@ -141,20 +141,6 @@ extension ProductPersistentTunnelCoordinator {
     _ error: Error,
     to execution: inout ProductM2Execution
   ) {
-    let outcome: ProductM2ConnectOutcome
-    let event: ProductM2BadEvent
-    switch error {
-    case ProductM2AuthorizedResourceSelectionError.resourceNotFound:
-      (outcome, event) = (.resourceNotFound, .resourceNotFound)
-    case ProductM2AuthorizedResourceSelectionError.resourceAmbiguous:
-      (outcome, event) = (.resourceAmbiguous, .resourceAmbiguous)
-    case ProductM2AuthorizedResourceSelectionError.selectedRouteCoverageRejected:
-      (outcome, event) = (.selectedRouteCoverageRejected, .selectedRouteCoverageRejected)
-    case ProductM2AuthorizedResourceSelectionError.startSnapshotRejected:
-      (outcome, event) = (.startSnapshotRejected, .startSnapshotRejected)
-    default:
-      (outcome, event) = (.resourceCatalogRejected, .resourceCatalogRejected)
-    }
-    execution.fail(outcome, event: event, state: .blocked)
+    execution.applySelectionFailure(error)
   }
 }
