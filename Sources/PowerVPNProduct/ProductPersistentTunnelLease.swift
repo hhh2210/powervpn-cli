@@ -1,0 +1,153 @@
+import PowerVPNCore
+
+package final class ProductPersistentTunnelLease: @unchecked Sendable {
+  private let session: ProductPersistentTunnelSession
+
+  init(session: ProductPersistentTunnelSession) {
+    self.session = session
+  }
+
+  package func permitsIPv4(_ address: UInt32) async -> Bool {
+    await session.permitsIPv4(address)
+  }
+
+  package func shutdown(
+    budget: ProductM2CleanupBudget
+  ) async -> ProductPersistentTunnelShutdownReport {
+    await session.shutdown(budget: budget)
+  }
+
+  // Intentionally no deinit cleanup. Callers must await the truthful shutdown report.
+}
+
+actor ProductPersistentTunnelSession {
+  private enum Storage {
+    case idle
+    case starting
+    case active(ProductPersistentTunnelSessionAssets)
+    case stopping(Task<ProductPersistentTunnelShutdownReport, Never>)
+    case stopped(ProductPersistentTunnelShutdownReport)
+  }
+
+  private let coordinator: ProductPersistentTunnelCoordinator
+  private var storage = Storage.idle
+
+  init(coordinator: ProductPersistentTunnelCoordinator) {
+    self.coordinator = coordinator
+  }
+
+  func open(
+    _ request: ProductM2ConnectRequest,
+    startupBudget: ProductM2AbsoluteBudget
+  ) async -> ProductPersistentTunnelOpenResult {
+    guard case .idle = storage else {
+      return .failed(
+        ProductPersistentTunnelOpenReport(
+          outcome: .rejected,
+          failure: .preflightBlocked,
+          state: reportedState,
+          authorizationClose: .notRequired,
+          authorizationOwnedMaterialErased: true,
+          cleanupVerified: false
+        ))
+    }
+    storage = .starting
+    let result = await coordinator.openSession(request, startupBudget: startupBudget)
+    switch result {
+    case .active(let assets):
+      storage = .active(assets)
+      let report = ProductPersistentTunnelOpenReport(
+        outcome: .opened,
+        failure: nil,
+        state: .active,
+        authorizationClose: assets.execution.authorizationClose,
+        authorizationOwnedMaterialErased: assets.execution.authorizationOwnedMaterialErased,
+        cleanupVerified: false
+      )
+      return .opened(ProductPersistentTunnelLease(session: self), report)
+    case .failed(let failure):
+      let report = ProductPersistentTunnelOpenReport(
+        outcome: .rejected,
+        failure: failure.outcome,
+        state: .stopped,
+        authorizationClose: failure.authorizationClose,
+        authorizationOwnedMaterialErased: failure.authorizationOwnedMaterialErased,
+        cleanupVerified: failure.cleanupVerified
+      )
+      storage = .stopped(
+        ProductPersistentTunnelShutdownReport(
+          state: .stopped,
+          cleanupPath: failure.cleanupPath,
+          stopOutcome: failure.stopOutcome,
+          emergencyStopOutcome: failure.emergencyStopOutcome,
+          authorizationClose: failure.authorizationClose,
+          authorizationOwnedMaterialErased: failure.authorizationOwnedMaterialErased,
+          cleanupVerified: failure.cleanupVerified
+        ))
+      return .failed(report)
+    }
+  }
+
+  func permitsIPv4(_ address: UInt32) -> Bool {
+    guard case .active(let assets) = storage else { return false }
+    return assets.selectedRoutes.permitsIPv4(address)
+  }
+
+  func shutdown(
+    budget: ProductM2CleanupBudget
+  ) async -> ProductPersistentTunnelShutdownReport {
+    switch storage {
+    case .active(let assets):
+      let coordinator = coordinator
+      let task = Task.detached {
+        let cleanup = await coordinator.shutdown(
+          assets,
+          deadlines: ProductM2CleanupDeadlines(budget)
+        )
+        return ProductPersistentTunnelShutdownReport(
+          state: .stopped,
+          cleanupPath: cleanup.verified ? cleanup.path : .cleanupUnproven,
+          stopOutcome: cleanup.stop.outcome,
+          emergencyStopOutcome: cleanup.emergencyStop.outcome,
+          authorizationClose: cleanup.authorizationClose.outcome,
+          authorizationOwnedMaterialErased: cleanup.authorizationClose.ownedMaterialErased,
+          cleanupVerified: cleanup.verified
+        )
+      }
+      storage = .stopping(task)
+      return await completeShutdown(task)
+    case .stopping(let task):
+      return await completeShutdown(task)
+    case .stopped(let report):
+      return report
+    case .idle, .starting:
+      return ProductPersistentTunnelShutdownReport(
+        state: reportedState,
+        cleanupPath: .notRequired,
+        stopOutcome: .notAttempted,
+        emergencyStopOutcome: .notAttempted,
+        authorizationClose: .notRequired,
+        authorizationOwnedMaterialErased: false,
+        cleanupVerified: false
+      )
+    }
+  }
+
+  private func completeShutdown(
+    _ task: Task<ProductPersistentTunnelShutdownReport, Never>
+  ) async -> ProductPersistentTunnelShutdownReport {
+    let report = await task.value
+    storage = .stopped(report)
+    return report
+  }
+
+  private var reportedState: ProductPersistentTunnelState {
+    switch storage {
+    case .idle: .idle
+    case .starting: .starting
+    case .active: .active
+    case .stopping: .stopping
+    case .stopped: .stopped
+    }
+  }
+}

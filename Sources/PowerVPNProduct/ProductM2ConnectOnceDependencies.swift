@@ -1,6 +1,7 @@
 import PowerVPNCore
 
 package struct ProductM2ConnectOnceDependencies: Sendable {
+  package let acquireMutationLease: @Sendable () throws -> any ProductMutationLeaseHolding
   package let controlRuntimePreflightAccepted: @Sendable () -> Bool
   package let observeGeneration:
     @Sendable (ProductM2StageDeadline) async -> VendorHelperGenerationSnapshot
@@ -38,6 +39,8 @@ package struct ProductM2ConnectOnceDependencies: Sendable {
     ) async -> ProductM2CleanupEvidence
 
   package init(
+    acquireMutationLease:
+      @escaping @Sendable () throws -> any ProductMutationLeaseHolding,
     controlRuntimePreflightAccepted: @escaping @Sendable () -> Bool,
     observeGeneration:
       @escaping @Sendable (
@@ -85,6 +88,7 @@ package struct ProductM2ConnectOnceDependencies: Sendable {
         ProductM2StageDeadline
       ) async -> ProductM2CleanupEvidence
   ) {
+    self.acquireMutationLease = acquireMutationLease
     self.controlRuntimePreflightAccepted = controlRuntimePreflightAccepted
     self.observeGeneration = observeGeneration
     self.preflightAccepted = preflightAccepted
@@ -112,6 +116,7 @@ package struct ProductM2ConnectOnceDependencies: Sendable {
     freshSSHProver: ProductM2FreshSSHProver
   ) {
     self.init(
+      acquireMutationLease: ProductMutationLease.acquireCurrentMachine,
       controlRuntimePreflightAccepted: controlRuntimePreflightAccepted,
       observeGeneration: { deadline in
         guard let timeout = deadline.remainingMilliseconds(cappedAt: 2_000) else {

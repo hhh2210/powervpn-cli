@@ -107,6 +107,35 @@ import Testing
     _ = await lease.closeAndErase(deadline: m2TestBudget().authorizationCleanup)
   }
 
+  @Test func eraseStartMaterialRetainsOnlyDeferredCloseAndNeverErasesTwice() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let state = AuthorizationLeaseTestState()
+    let trace = ProductM2TestTrace()
+    let lease = testAuthorizationLease(snapshot: fixture.snapshot, state: state)
+    let selection = try await lease.selectUnique(
+      displayName: "Campus NC",
+      requiredTargetIPv4: ProductM2SSHTarget.thu21.requiredTargetIPv4
+    )
+    let pending = try await selection.beginStart(
+      control: productM2TestControl(trace: trace, plan: .acknowledged),
+      deadline: m2TestBudget().work,
+      peerGenerationValidator: { true }
+    )
+    _ = await pending.result()
+
+    #expect(await lease.eraseStartMaterial())
+    #expect(state.eraseCount == 1)
+    #expect(state.closeCount == 0)
+    #expect(fixture.snapshot.isErased)
+
+    let receipt = await lease.closeAndErase(deadline: m2TestBudget().authorizationCleanup)
+    #expect(receipt.outcome == .accepted)
+    #expect(receipt.ownedMaterialErased)
+    #expect(state.eraseCount == 1)
+    #expect(state.closeCount == 1)
+  }
+
   @Test func closeMarksClosingAndErasesBeforeAwaitingSource() async throws {
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
     defer { fixture.erase() }

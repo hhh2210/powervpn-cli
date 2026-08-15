@@ -12,6 +12,31 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
     _ request: ProductM2ConnectRequest,
     budget: ProductM2AbsoluteBudget
   ) async -> ProductM2ConnectReport {
+    let coordinator = ProductPersistentTunnelCoordinator(dependencies: dependencies)
+    switch await coordinator.openSession(request, startupBudget: budget) {
+    case .failed(let report):
+      return report
+    case .active(var assets):
+      await coordinator.proveFreshSSH(&assets.execution, budget: budget)
+      let cleanup = await coordinator.shutdown(
+        assets,
+        deadlines: ProductM2CleanupDeadlines(budget)
+      )
+      return coordinator.connectOnceReport(
+        &assets.execution,
+        cleanup: cleanup,
+        reportDeadline: budget.report
+      )
+    }
+  }
+}
+
+extension ProductPersistentTunnelCoordinator {
+
+  func openSession(
+    _ request: ProductM2ConnectRequest,
+    startupBudget budget: ProductM2AbsoluteBudget
+  ) async -> ProductPersistentTunnelSessionOpenResult {
     var execution = ProductM2Execution(
       request: request,
       networkWindow: NetworkCleanupCaptureWindow(),
@@ -25,30 +50,37 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
         event: .authorizationAcquisitionRejected,
         state: .blocked
       )
-      return execution.report()
+      return .failed(execution.report())
     }
     if applyWorkAbortIfNeeded(&execution, budget: budget) {
-      return execution.report()
+      return .failed(execution.report())
     }
     guard dependencies.controlRuntimePreflightAccepted() else {
       execution.fail(.preflightBlocked, event: .preflightRejected, state: .blocked)
-      return execution.report()
+      return .failed(execution.report())
+    }
+    let mutationLease: any ProductMutationLeaseHolding
+    do {
+      mutationLease = try dependencies.acquireMutationLease()
+    } catch {
+      execution.fail(.preflightBlocked, event: .preflightRejected, state: .blocked)
+      return .failed(execution.report())
     }
     let coldGeneration = await dependencies.observeGeneration(budget.work)
     if applyWorkAbortIfNeeded(&execution, budget: budget) {
-      return execution.report()
+      return .failed(execution.report())
     }
     guard coldGeneration.exactInactive else {
       execution.fail(.preflightBlocked, event: .preflightRejected, state: .blocked)
-      return execution.report()
+      return .failed(execution.report())
     }
     let preflightAccepted = await dependencies.preflightAccepted(coldGeneration, budget.work)
     if applyWorkAbortIfNeeded(&execution, budget: budget) {
-      return execution.report()
+      return .failed(execution.report())
     }
     guard preflightAccepted else {
       execution.fail(.preflightBlocked, event: .preflightRejected, state: .blocked)
-      return execution.report()
+      return .failed(execution.report())
     }
     guard
       let baseline = await dependencies.captureNetworkBaseline(
@@ -58,33 +90,31 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
       )
     else {
       if applyWorkAbortIfNeeded(&execution, budget: budget) {
-        return execution.report()
+        return .failed(execution.report())
       }
       execution.fail(
         .networkBaselineUnavailable,
         event: .networkBaselineUnavailable,
         state: .blocked
       )
-      return execution.report()
+      return .failed(execution.report())
     }
     if let capturedGeneration = baseline.helperGeneration,
-      !ProductM2GenerationFence.sameColdGeneration(
-        coldGeneration,
-        capturedGeneration
-      )
+      !ProductM2GenerationFence.sameColdGeneration(coldGeneration, capturedGeneration)
     {
       execution.fail(
         .generationFenceRejected,
         event: .generationFenceRejected,
         state: .blocked
       )
-      return execution.report()
+      return .failed(execution.report())
     }
     if applyWorkAbortIfNeeded(&execution, budget: budget) {
-      return await finish(
+      return await finishOpenFailure(
         &execution,
         baseline: baseline,
         coldGeneration: coldGeneration,
+        mutationLease: mutationLease,
         budget: budget
       )
     }
@@ -102,9 +132,7 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
       authorizationLease = lease
       execution.serverContactRequested = contacted
       execution.authorizationOwnedMaterialErased = false
-      guard source == dependencies.authorizationSource,
-        lease.source == source
-      else {
+      guard source == dependencies.authorizationSource, lease.source == source else {
         execution.authorizationAcquisition = .rejected
         execution.authorizationFailure = .sourceMismatch
         execution.fail(
@@ -112,11 +140,12 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
           event: .authorizationAcquisitionRejected,
           state: .blocked
         )
-        return await finish(
+        return await finishOpenFailure(
           &execution,
           baseline: baseline,
           coldGeneration: coldGeneration,
           authorizationLease: lease,
+          mutationLease: mutationLease,
           budget: budget
         )
       }
@@ -141,10 +170,11 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
           : (normalizedFailure == .cancelled ? .cancelled : .authorizationAcquisitionRejected),
         state: deadlineExceeded || normalizedFailure == .cancelled ? .failed : .blocked
       )
-      return await finish(
+      return await finishOpenFailure(
         &execution,
         baseline: baseline,
         coldGeneration: coldGeneration,
+        mutationLease: mutationLease,
         budget: budget
       )
     }
@@ -155,30 +185,32 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
         event: .authorizationAcquisitionRejected,
         state: .blocked
       )
-      return await finish(
+      return await finishOpenFailure(
         &execution,
         baseline: baseline,
         coldGeneration: coldGeneration,
+        mutationLease: mutationLease,
         budget: budget
       )
     }
     if applyWorkAbortIfNeeded(&execution, budget: budget) {
-      return await finish(
+      return await finishOpenFailure(
         &execution,
         baseline: baseline,
         coldGeneration: coldGeneration,
         authorizationLease: authorizationLease,
+        mutationLease: mutationLease,
         budget: budget
       )
     }
 
-    return await selectPrepareAndRun(
+    return await selectPrepareAndOpen(
       &execution,
       baseline: baseline,
       coldGeneration: coldGeneration,
       authorizationLease: authorizationLease,
+      mutationLease: mutationLease,
       budget: budget
     )
   }
-
 }

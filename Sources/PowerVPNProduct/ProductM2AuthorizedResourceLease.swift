@@ -83,6 +83,7 @@ package actor ProductM2AuthorizedResourceLease {
   private var prepare: Prepare?
   private var eraseOwnedMaterial: EraseOwnedMaterial?
   private var close: Close?
+  private var ownedMaterialErased = false
   private var selectionID: UUID?
   private var selectionIssued = false
   private var withStartSnapshot: ProductM2PreparedAuthorizedResource.WithStartSnapshot?
@@ -227,11 +228,10 @@ package actor ProductM2AuthorizedResourceLease {
     return pending
   }
 
-  package func closeAndErase(
-    deadline: ProductM2StageDeadline
-  ) async -> ProductM2AuthorizationCloseReceipt {
-    guard state == .open else { return .alreadyClosed }
-    state = .closing
+  /// Drops all start/catalog material synchronously on this actor while retaining
+  /// only the source-close operation needed by final shutdown.
+  package func eraseStartMaterial() -> Bool {
+    guard state == .open else { return ownedMaterialErased }
     readCatalog = nil
     cachedCatalog = nil
     prepare = nil
@@ -240,10 +240,19 @@ package actor ProductM2AuthorizedResourceLease {
     selectedRoutes = nil
     requiredTargetIPv4 = nil
     commitStartAuthorization = nil
-
+    guard !ownedMaterialErased else { return true }
     let erase = eraseOwnedMaterial
     eraseOwnedMaterial = nil
-    let erasedBeforeAwait = erase?() ?? false
+    ownedMaterialErased = erase?() ?? false
+    return ownedMaterialErased
+  }
+
+  package func closeAndErase(
+    deadline: ProductM2StageDeadline
+  ) async -> ProductM2AuthorizationCloseReceipt {
+    guard state == .open else { return .alreadyClosed }
+    let erasedBeforeAwait = eraseStartMaterial()
+    state = .closing
     let close = close
     self.close = nil
 

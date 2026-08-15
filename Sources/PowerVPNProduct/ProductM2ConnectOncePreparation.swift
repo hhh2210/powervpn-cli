@@ -1,187 +1,160 @@
 import PowerVPNCore
 
-extension ProductM2ConnectOnceCoordinator {
-  func selectPrepareAndRun(
+extension ProductPersistentTunnelCoordinator {
+  func selectPrepareAndOpen(
     _ execution: inout ProductM2Execution,
     baseline: ProductM2NetworkBaseline,
     coldGeneration: VendorHelperGenerationSnapshot,
     authorizationLease: ProductM2AuthorizedResourceLease,
+    mutationLease: any ProductMutationLeaseHolding,
     budget: ProductM2AbsoluteBudget
-  ) async -> ProductM2ConnectReport {
+  ) async -> ProductPersistentTunnelSessionOpenResult {
     let selection: ProductM2AuthorizedResourceSelection
     do {
       selection = try await authorizationLease.selectUnique(
         displayName: execution.request.resourceDisplayName,
         requiredTargetIPv4: execution.request.sshTarget.requiredTargetIPv4
       )
-    } catch ProductM2AuthorizedResourceSelectionError.resourceNotFound {
-      execution.fail(.resourceNotFound, event: .resourceNotFound, state: .blocked)
-      return await finishPreparation(
-        &execution, baseline, coldGeneration, authorizationLease, budget)
-    } catch ProductM2AuthorizedResourceSelectionError.resourceAmbiguous {
-      execution.fail(.resourceAmbiguous, event: .resourceAmbiguous, state: .blocked)
-      return await finishPreparation(
-        &execution, baseline, coldGeneration, authorizationLease, budget)
-    } catch ProductM2AuthorizedResourceSelectionError.selectedRouteCoverageRejected {
-      execution.fail(
-        .selectedRouteCoverageRejected,
-        event: .selectedRouteCoverageRejected,
-        state: .blocked
-      )
-      return await finishPreparation(
-        &execution, baseline, coldGeneration, authorizationLease, budget)
-    } catch ProductM2AuthorizedResourceSelectionError.startSnapshotRejected {
-      execution.fail(
-        .startSnapshotRejected,
-        event: .startSnapshotRejected,
-        state: .blocked
-      )
-      return await finishPreparation(
-        &execution, baseline, coldGeneration, authorizationLease, budget)
     } catch {
-      execution.fail(
-        .resourceCatalogRejected,
-        event: .resourceCatalogRejected,
-        state: .blocked
+      applySelectionFailure(error, to: &execution)
+      return await finishOpenFailure(
+        &execution,
+        baseline: baseline,
+        coldGeneration: coldGeneration,
+        authorizationLease: authorizationLease,
+        mutationLease: mutationLease,
+        budget: budget
       )
-      return await finishPreparation(
-        &execution, baseline, coldGeneration, authorizationLease, budget)
     }
 
     execution.lastGoodState = .ready
     if applyWorkAbortIfNeeded(&execution, budget: budget) {
-      return await finishPreparation(
-        &execution, baseline, coldGeneration, authorizationLease, budget)
+      return await finishOpenFailure(
+        &execution,
+        baseline: baseline,
+        coldGeneration: coldGeneration,
+        authorizationLease: authorizationLease,
+        mutationLease: mutationLease,
+        budget: budget
+      )
     }
 
-    let selectedRoutes = selection.selectedRoutes
     guard
       let preStartBaseline = await dependencies.captureNetworkBaseline(
         execution.networkWindow,
-        selectedRoutes,
+        selection.selectedRoutes,
         budget.work
       )
     else {
-      if applyWorkAbortIfNeeded(&execution, budget: budget) {
-        return await finishPreparation(
-          &execution, baseline, coldGeneration, authorizationLease, budget)
+      if !applyWorkAbortIfNeeded(&execution, budget: budget) {
+        execution.fail(
+          .networkBaselineUnavailable,
+          event: .networkBaselineUnavailable,
+          state: .blocked
+        )
       }
-      execution.fail(
-        .networkBaselineUnavailable,
-        event: .networkBaselineUnavailable,
-        state: .blocked
-      )
-      return await finishPreparation(
-        &execution, baseline, coldGeneration, authorizationLease, budget)
-    }
-    if applyWorkAbortIfNeeded(&execution, budget: budget) {
-      return await finishPreparation(
+      return await finishOpenFailure(
         &execution,
-        preStartBaseline,
-        coldGeneration,
-        authorizationLease,
-        budget,
-        selectedRoutes
-      )
-    }
-    guard dependencies.baselineStable(baseline, preStartBaseline) else {
-      execution.fail(
-        .networkBaselineChanged,
-        event: .networkBaselineChanged,
-        state: .blocked
-      )
-      return await finishPreparation(
-        &execution,
-        preStartBaseline,
-        coldGeneration,
-        authorizationLease,
-        budget,
-        selectedRoutes
+        baseline: baseline,
+        coldGeneration: coldGeneration,
+        authorizationLease: authorizationLease,
+        selectedRoutes: selection.selectedRoutes,
+        mutationLease: mutationLease,
+        budget: budget
       )
     }
 
-    let recheckedGeneration = await dependencies.observeGeneration(budget.work)
-    if applyWorkAbortIfNeeded(&execution, budget: budget) {
-      return await finishPreparation(
+    guard
+      await validatePreStart(
         &execution,
-        preStartBaseline,
-        coldGeneration,
-        authorizationLease,
-        budget,
-        selectedRoutes
+        originalBaseline: baseline,
+        preStartBaseline: preStartBaseline,
+        coldGeneration: coldGeneration,
+        budget: budget
       )
-    }
-    guard ProductM2GenerationFence.sameColdGeneration(coldGeneration, recheckedGeneration) else {
-      execution.fail(
-        .generationFenceRejected,
-        event: .generationFenceRejected,
-        state: .blocked
-      )
-      return await finishPreparation(
+    else {
+      return await finishOpenFailure(
         &execution,
-        preStartBaseline,
-        coldGeneration,
-        authorizationLease,
-        budget,
-        selectedRoutes
+        baseline: preStartBaseline,
+        coldGeneration: coldGeneration,
+        authorizationLease: authorizationLease,
+        selectedRoutes: selection.selectedRoutes,
+        mutationLease: mutationLease,
+        budget: budget
       )
     }
 
-    let recheckedPreflight = await dependencies.preflightAccepted(
-      recheckedGeneration,
-      budget.work
-    )
-    if applyWorkAbortIfNeeded(&execution, budget: budget) {
-      return await finishPreparation(
-        &execution,
-        preStartBaseline,
-        coldGeneration,
-        authorizationLease,
-        budget,
-        selectedRoutes
-      )
-    }
-    guard recheckedPreflight else {
-      execution.fail(
-        .generationFenceRejected,
-        event: .generationFenceRejected,
-        state: .blocked
-      )
-      return await finishPreparation(
-        &execution,
-        preStartBaseline,
-        coldGeneration,
-        authorizationLease,
-        budget,
-        selectedRoutes
-      )
-    }
-
-    return await startProveAndFinish(
+    return await startAndOpen(
       &execution,
       baseline: preStartBaseline,
       coldGeneration: coldGeneration,
       authorizationLease: authorizationLease,
       selection: selection,
+      mutationLease: mutationLease,
       budget: budget
     )
   }
 
-  private func finishPreparation(
+  private func validatePreStart(
     _ execution: inout ProductM2Execution,
-    _ baseline: ProductM2NetworkBaseline,
-    _ coldGeneration: VendorHelperGenerationSnapshot,
-    _ authorizationLease: ProductM2AuthorizedResourceLease,
-    _ budget: ProductM2AbsoluteBudget,
-    _ selectedRoutes: VendorCharonSelectedRouteMatcher? = nil
-  ) async -> ProductM2ConnectReport {
-    await finish(
-      &execution,
-      baseline: baseline,
-      coldGeneration: coldGeneration,
-      authorizationLease: authorizationLease,
-      selectedRoutes: selectedRoutes,
-      budget: budget
-    )
+    originalBaseline: ProductM2NetworkBaseline,
+    preStartBaseline: ProductM2NetworkBaseline,
+    coldGeneration: VendorHelperGenerationSnapshot,
+    budget: ProductM2AbsoluteBudget
+  ) async -> Bool {
+    if applyWorkAbortIfNeeded(&execution, budget: budget) { return false }
+    guard dependencies.baselineStable(originalBaseline, preStartBaseline) else {
+      execution.fail(
+        .networkBaselineChanged,
+        event: .networkBaselineChanged,
+        state: .blocked
+      )
+      return false
+    }
+
+    let recheckedGeneration = await dependencies.observeGeneration(budget.work)
+    if applyWorkAbortIfNeeded(&execution, budget: budget) { return false }
+    guard ProductM2GenerationFence.sameColdGeneration(coldGeneration, recheckedGeneration)
+    else {
+      execution.fail(
+        .generationFenceRejected,
+        event: .generationFenceRejected,
+        state: .blocked
+      )
+      return false
+    }
+
+    let accepted = await dependencies.preflightAccepted(recheckedGeneration, budget.work)
+    if applyWorkAbortIfNeeded(&execution, budget: budget) { return false }
+    guard accepted else {
+      execution.fail(
+        .generationFenceRejected,
+        event: .generationFenceRejected,
+        state: .blocked
+      )
+      return false
+    }
+    return true
+  }
+
+  private func applySelectionFailure(
+    _ error: Error,
+    to execution: inout ProductM2Execution
+  ) {
+    let outcome: ProductM2ConnectOutcome
+    let event: ProductM2BadEvent
+    switch error {
+    case ProductM2AuthorizedResourceSelectionError.resourceNotFound:
+      (outcome, event) = (.resourceNotFound, .resourceNotFound)
+    case ProductM2AuthorizedResourceSelectionError.resourceAmbiguous:
+      (outcome, event) = (.resourceAmbiguous, .resourceAmbiguous)
+    case ProductM2AuthorizedResourceSelectionError.selectedRouteCoverageRejected:
+      (outcome, event) = (.selectedRouteCoverageRejected, .selectedRouteCoverageRejected)
+    case ProductM2AuthorizedResourceSelectionError.startSnapshotRejected:
+      (outcome, event) = (.startSnapshotRejected, .startSnapshotRejected)
+    default:
+      (outcome, event) = (.resourceCatalogRejected, .resourceCatalogRejected)
+    }
+    execution.fail(outcome, event: event, state: .blocked)
   }
 }

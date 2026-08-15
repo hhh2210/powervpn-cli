@@ -1,6 +1,6 @@
 import PowerVPNCore
 
-extension ProductM2ConnectOnceCoordinator {
+extension ProductPersistentTunnelCoordinator {
   func replyValidator(
     before: VendorHelperGenerationSnapshot,
     deadline: ProductM2StageDeadline
@@ -33,18 +33,52 @@ extension ProductM2ConnectOnceCoordinator {
     return false
   }
 
-  func finish(
+  func shutdown(
+    _ assets: ProductPersistentTunnelSessionAssets,
+    deadlines: ProductM2CleanupDeadlines
+  ) async -> ProductM2CleanupResult {
+    let cleanup = await ProductM2CleanupRunner(dependencies: dependencies).run(
+      baseline: assets.baseline,
+      networkWindow: assets.execution.networkWindow,
+      coldGeneration: assets.coldGeneration,
+      authorizationLease: assets.authorizationLease,
+      selectedRoutes: assets.selectedRoutes,
+      controlAuthority: assets.controlAuthority,
+      deadlines: deadlines
+    )
+    withExtendedLifetime(assets.mutationLease) {}
+    return cleanup
+  }
+
+  func connectOnceReport(
+    _ execution: inout ProductM2Execution,
+    cleanup: ProductM2CleanupResult,
+    reportDeadline: ProductM2StageDeadline
+  ) -> ProductM2ConnectReport {
+    execution.apply(cleanup)
+    if execution.outcome != .cleanupUnproven, !reportDeadline.hasRemaining {
+      execution.fail(
+        .deadlineExceeded,
+        event: .deadlineExceeded,
+        state: execution.helperMutationRequested ? .disconnected : .blocked
+      )
+    }
+    return execution.report()
+  }
+
+  func finishOpenFailure(
     _ execution: inout ProductM2Execution,
     baseline: ProductM2NetworkBaseline,
     coldGeneration: VendorHelperGenerationSnapshot,
     authorizationLease: ProductM2AuthorizedResourceLease? = nil,
     selectedRoutes: VendorCharonSelectedRouteMatcher? = nil,
     start: ProductM2StartResult? = nil,
+    mutationLease: any ProductMutationLeaseHolding,
     budget: ProductM2AbsoluteBudget
-  ) async -> ProductM2ConnectReport {
-    let cleanup = await ProductM2CleanupRunner(dependencies: dependencies).run(
+  ) async -> ProductPersistentTunnelSessionOpenResult {
+    let report = await finish(
+      &execution,
       baseline: baseline,
-      networkWindow: execution.networkWindow,
       coldGeneration: coldGeneration,
       authorizationLease: authorizationLease,
       selectedRoutes: selectedRoutes,
@@ -54,10 +88,39 @@ extension ProductM2ConnectOnceCoordinator {
         emergencyStop: start?.emergencyStopCapability,
         startReceipt: start?.receipt ?? .unsent(.notAttempted)
       ),
-      budget: budget
+      mutationLease: mutationLease,
+      deadlines: ProductM2CleanupDeadlines(budget),
+      reportDeadline: budget.report
     )
+    return .failed(report)
+  }
+
+  func finish(
+    _ execution: inout ProductM2Execution,
+    baseline: ProductM2NetworkBaseline,
+    coldGeneration: VendorHelperGenerationSnapshot,
+    authorizationLease: ProductM2AuthorizedResourceLease? = nil,
+    selectedRoutes: VendorCharonSelectedRouteMatcher? = nil,
+    controlAuthority: ProductM2ControlCleanupAuthority,
+    mutationLease: any ProductMutationLeaseHolding,
+    deadlines: ProductM2CleanupDeadlines,
+    reportDeadline: ProductM2StageDeadline?
+  ) async -> ProductM2ConnectReport {
+    let cleanup = await ProductM2CleanupRunner(dependencies: dependencies).run(
+      baseline: baseline,
+      networkWindow: execution.networkWindow,
+      coldGeneration: coldGeneration,
+      authorizationLease: authorizationLease,
+      selectedRoutes: selectedRoutes,
+      controlAuthority: controlAuthority,
+      deadlines: deadlines
+    )
+    withExtendedLifetime(mutationLease) {}
     execution.apply(cleanup)
-    if execution.outcome != .cleanupUnproven, !budget.report.hasRemaining {
+    if execution.outcome != .cleanupUnproven,
+      let reportDeadline,
+      !reportDeadline.hasRemaining
+    {
       execution.fail(
         .deadlineExceeded,
         event: .deadlineExceeded,
@@ -65,5 +128,27 @@ extension ProductM2ConnectOnceCoordinator {
       )
     }
     return execution.report()
+  }
+
+  func finishStartFailure(
+    _ execution: inout ProductM2Execution,
+    _ baseline: ProductM2NetworkBaseline,
+    _ coldGeneration: VendorHelperGenerationSnapshot,
+    _ authorizationLease: ProductM2AuthorizedResourceLease?,
+    _ selection: ProductM2AuthorizedResourceSelection,
+    _ mutationLease: any ProductMutationLeaseHolding,
+    _ start: ProductM2StartResult?,
+    _ budget: ProductM2AbsoluteBudget
+  ) async -> ProductPersistentTunnelSessionOpenResult {
+    await finishOpenFailure(
+      &execution,
+      baseline: baseline,
+      coldGeneration: coldGeneration,
+      authorizationLease: authorizationLease,
+      selectedRoutes: selection.selectedRoutes,
+      start: start,
+      mutationLease: mutationLease,
+      budget: budget
+    )
   }
 }

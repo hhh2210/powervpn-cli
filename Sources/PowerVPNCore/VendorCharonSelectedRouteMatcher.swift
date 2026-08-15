@@ -13,6 +13,7 @@ package enum VendorCharonSelectedRouteMatcherError: Error, Equatable, Sendable {
 package final class VendorCharonSelectedRouteMatcher: @unchecked Sendable {
   private let key: SymmetricKey
   private let selectedDestinationTokens: Set<Data>
+  private let selectedPrefixes: Set<UInt8>
   fileprivate let lineage: VendorCharonStartLineage
   package let requiredTargetIPv4: UInt32
   package let selectedRouteCount: Int
@@ -27,6 +28,7 @@ package final class VendorCharonSelectedRouteMatcher: @unchecked Sendable {
     let localTokens = Set(routes.map { Self.destinationToken($0, key: localKey) })
     key = localKey
     selectedDestinationTokens = localTokens
+    selectedPrefixes = Set(routes.map(\.prefix))
     self.requiredTargetIPv4 = requiredTargetIPv4
     self.lineage = lineage
     selectedRouteCount = localTokens.count
@@ -50,6 +52,14 @@ package final class VendorCharonSelectedRouteMatcher: @unchecked Sendable {
           key: key
         )
       })
+  }
+
+  /// Answers route coverage without exposing the selected route policy.
+  package func permitsIPv4(_ address: UInt32) -> Bool {
+    selectedPrefixes.contains { prefix in
+      let destination = (Self.masked(address, prefix: prefix), prefix)
+      return selectedDestinationTokens.contains(Self.destinationToken(destination, key: key))
+    }
   }
 
   func effectiveRouteToken(

@@ -8,16 +8,14 @@ package struct ProductM2CurrentMachineRuntime: Sendable {
   package let authorizationAvailabilityFailure: ProductM2AuthorizationFailure?
 
   package init() {
+    let authorizationProvider = ProductM2PortalAdapter { _ in
+      await PortalLoginRuntime.acquireCurrentMachine()
+    }
     self.init(
-      controlRuntimePreflightAccepted: ProductM2ControlAdapter.runtimePreflightAccepted,
-      generationObserver: InstalledBoundedVendorHelperGenerationObserver(),
-      preflightChecker: InstalledBoundedVendorXPCPreflightChecker(),
-      networkObserver: InstalledNetworkCleanupObserver(),
-      authorizationProvider: ProductM2PortalAdapter { _ in
-        await PortalLoginRuntime.acquireCurrentMachine()
-      },
-      control: ProductM2ControlAdapter(),
-      freshSSHProver: ProductM2FreshSSHProver()
+      authorizationProvider: authorizationProvider,
+      dependencies: ProductM2CurrentMachineComposition.dependencies(
+        authorizationProvider: authorizationProvider
+      )
     )
   }
 
@@ -31,9 +29,9 @@ package struct ProductM2CurrentMachineRuntime: Sendable {
     control: ProductM2ControlAdapter,
     freshSSHProver: ProductM2FreshSSHProver
   ) {
-    authorizationAvailabilityFailure = authorizationProvider.availabilityFailure
-    coordinator = ProductM2ConnectOnceCoordinator(
-      dependencies: ProductM2ConnectOnceDependencies(
+    self.init(
+      authorizationProvider: authorizationProvider,
+      dependencies: ProductM2CurrentMachineComposition.dependencies(
         controlRuntimePreflightAccepted: controlRuntimePreflightAccepted,
         generationObserver: generationObserver,
         preflightChecker: preflightChecker,
@@ -41,7 +39,16 @@ package struct ProductM2CurrentMachineRuntime: Sendable {
         authorizationProvider: authorizationProvider,
         control: control,
         freshSSHProver: freshSSHProver
-      ))
+      )
+    )
+  }
+
+  private init(
+    authorizationProvider: any ProductM2AuthorizedResourceProviding,
+    dependencies: ProductM2ConnectOnceDependencies
+  ) {
+    authorizationAvailabilityFailure = authorizationProvider.availabilityFailure
+    coordinator = ProductM2ConnectOnceCoordinator(dependencies: dependencies)
   }
 
   package func run(
@@ -49,5 +56,43 @@ package struct ProductM2CurrentMachineRuntime: Sendable {
     budget: ProductM2AbsoluteBudget
   ) async -> ProductM2ConnectReport {
     await coordinator.run(request, budget: budget)
+  }
+}
+
+extension ProductPersistentTunnelRuntime {
+  package init() {
+    let authorizationProvider = ProductM2PortalAdapter { _ in
+      await PortalLoginRuntime.acquireCurrentMachine()
+    }
+    self.init(
+      dependencies: ProductM2CurrentMachineComposition.dependencies(
+        authorizationProvider: authorizationProvider
+      )
+    )
+  }
+}
+
+private enum ProductM2CurrentMachineComposition {
+  static func dependencies(
+    controlRuntimePreflightAccepted: @escaping @Sendable () -> Bool =
+      ProductM2ControlAdapter.runtimePreflightAccepted,
+    generationObserver: any BoundedVendorHelperGenerationObserving =
+      InstalledBoundedVendorHelperGenerationObserver(),
+    preflightChecker: any BoundedVendorXPCPreflightChecking =
+      InstalledBoundedVendorXPCPreflightChecker(),
+    networkObserver: any NetworkCleanupObserving = InstalledNetworkCleanupObserver(),
+    authorizationProvider: any ProductM2AuthorizedResourceProviding,
+    control: ProductM2ControlAdapter = ProductM2ControlAdapter(),
+    freshSSHProver: ProductM2FreshSSHProver = ProductM2FreshSSHProver()
+  ) -> ProductM2ConnectOnceDependencies {
+    ProductM2ConnectOnceDependencies(
+      controlRuntimePreflightAccepted: controlRuntimePreflightAccepted,
+      generationObserver: generationObserver,
+      preflightChecker: preflightChecker,
+      networkObserver: networkObserver,
+      authorizationProvider: authorizationProvider,
+      control: control,
+      freshSSHProver: freshSSHProver
+    )
   }
 }

@@ -88,6 +88,8 @@ final class ProductM2TestTrace: @unchecked Sendable {
   }
 }
 
+final class ProductM2TestMutationLease: ProductMutationLeaseHolding, @unchecked Sendable {}
+
 func productM2TestDependencies(
   snapshot: AuthenticatedPortalSnapshot,
   trace: ProductM2TestTrace,
@@ -157,6 +159,10 @@ func productM2TestDependencies(
     }
   )
   return ProductM2ConnectOnceDependencies(
+    acquireMutationLease: {
+      trace.record("mutation_lease")
+      return ProductM2TestMutationLease()
+    },
     controlRuntimePreflightAccepted: {
       trace.record("session_preflight")
       return controlRuntimePreflightAccepted

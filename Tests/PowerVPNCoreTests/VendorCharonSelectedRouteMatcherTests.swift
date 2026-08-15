@@ -20,6 +20,18 @@ import Testing
     #expect(try matchedCount(matcher, destination: "10.1.3/24") == 0)
   }
 
+  @Test func numericCoverageQueryReturnsOnlyABoolean() throws {
+    let matcher = try selectedSnapshot(
+      family: 4,
+      routes: [("10.1.2.3", 24), ("203.0.113.9", 32)]
+    ).makeSelectedRouteMatcher(requiredTargetIPv4: ipv4(203, 0, 113, 9))
+
+    #expect(matcher.permitsIPv4(ipv4(10, 1, 2, 200)))
+    #expect(matcher.permitsIPv4(ipv4(203, 0, 113, 9)))
+    #expect(!matcher.permitsIPv4(ipv4(10, 1, 3, 1)))
+    #expect(!matcher.permitsIPv4(ipv4(203, 0, 113, 10)))
+  }
+
   @Test func routeCanonicalizerReportsOnlyMatchedCount() throws {
     let matcher = try selectedSnapshot(
       family: 4,

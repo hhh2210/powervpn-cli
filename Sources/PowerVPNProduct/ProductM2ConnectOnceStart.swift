@@ -1,132 +1,133 @@
 import PowerVPNCore
 
-extension ProductM2ConnectOnceCoordinator {
-  func startProveAndFinish(
+extension ProductPersistentTunnelCoordinator {
+  func startAndOpen(
     _ execution: inout ProductM2Execution,
     baseline: ProductM2NetworkBaseline,
     coldGeneration: VendorHelperGenerationSnapshot,
     authorizationLease: ProductM2AuthorizedResourceLease,
     selection: ProductM2AuthorizedResourceSelection,
+    mutationLease: any ProductMutationLeaseHolding,
     budget: ProductM2AbsoluteBudget
-  ) async -> ProductM2ConnectReport {
+  ) async -> ProductPersistentTunnelSessionOpenResult {
     guard budget.work.hasRemaining else {
       _ = applyWorkAbortIfNeeded(&execution, budget: budget)
-      return await finish(
+      return await finishOpenFailure(
         &execution,
         baseline: baseline,
         coldGeneration: coldGeneration,
         authorizationLease: authorizationLease,
         selectedRoutes: selection.selectedRoutes,
+        mutationLease: mutationLease,
         budget: budget
       )
     }
-    let validator = replyValidator(before: coldGeneration, deadline: budget.work)
+
     let pending: ProductM2PendingStart
     do {
       pending = try await selection.beginStart(
         control: dependencies.control,
         deadline: budget.work,
-        peerGenerationValidator: validator
+        peerGenerationValidator: replyValidator(before: coldGeneration, deadline: budget.work)
       )
     } catch ProductM2AuthorizedResourceSelectionError.workAborted {
       if !applyWorkAbortIfNeeded(&execution, budget: budget) {
-        execution.fail(
-          .startSnapshotRejected,
-          event: .startSnapshotRejected,
-          state: .blocked
-        )
+        execution.fail(.startSnapshotRejected, event: .startSnapshotRejected, state: .blocked)
       }
-      return await finish(
-        &execution,
-        baseline: baseline,
-        coldGeneration: coldGeneration,
-        authorizationLease: authorizationLease,
-        selectedRoutes: selection.selectedRoutes,
-        budget: budget
-      )
+      return await finishStartFailure(
+        &execution, baseline, coldGeneration, authorizationLease, selection,
+        mutationLease, nil, budget)
     } catch {
-      execution.fail(
-        .startSnapshotRejected,
-        event: .startSnapshotRejected,
-        state: .blocked
-      )
-      return await finish(
-        &execution,
-        baseline: baseline,
-        coldGeneration: coldGeneration,
-        authorizationLease: authorizationLease,
-        selectedRoutes: selection.selectedRoutes,
-        budget: budget
-      )
+      execution.fail(.startSnapshotRejected, event: .startSnapshotRejected, state: .blocked)
+      return await finishStartFailure(
+        &execution, baseline, coldGeneration, authorizationLease, selection,
+        mutationLease, nil, budget)
     }
 
     execution.lastGoodState = .connecting
-    let start =
-      await pending.result()
+    let start = await pending.result()
     execution.startOutcome = start.receipt.outcome
     execution.startEventSignatures = start.receipt.startEventSignatures
     execution.startReplySignatures = start.receipt.startReplySignatures
     execution.unexpectedEventSignature = start.receipt.unexpectedEventSignature
     execution.helperMutationRequested = start.receipt.requestSent
     if applyWorkAbortIfNeeded(&execution, budget: budget) {
-      return await finish(
-        &execution,
-        baseline: baseline,
-        coldGeneration: coldGeneration,
-        authorizationLease: authorizationLease,
-        selectedRoutes: selection.selectedRoutes,
-        start: start,
-        budget: budget
-      )
-    }
-    if start.receipt.transportAcknowledged, start.lease != nil {
-      let postStart = await dependencies.observeGeneration(budget.work)
-      if applyWorkAbortIfNeeded(&execution, budget: budget) {
-        return await finish(
-          &execution,
-          baseline: baseline,
-          coldGeneration: coldGeneration,
-          authorizationLease: authorizationLease,
-          selectedRoutes: selection.selectedRoutes,
-          start: start,
-          budget: budget
-        )
-      }
-      if !ProductM2GenerationFence.singleRunningGeneration(
-        coldGeneration,
-        postStart
-      ) {
-        execution.fail(
-          .generationFenceRejected,
-          event: .postStartGenerationRejected,
-          state: .failed
-        )
-      }
-    } else {
-      execution.fail(.startRejected, event: .startControlRejected, state: .failed)
+      return await finishStartFailure(
+        &execution, baseline, coldGeneration, authorizationLease, selection,
+        mutationLease, start, budget)
     }
 
-    if execution.firstBadEvent == nil {
-      await proveVendorStatusAndActiveNetwork(
-        &execution,
-        baseline: baseline,
-        selectedRoutes: selection.selectedRoutes,
-        controlLease: start.lease,
-        budget: budget
+    guard start.receipt.transportAcknowledged, start.lease != nil else {
+      execution.fail(.startRejected, event: .startControlRejected, state: .failed)
+      return await finishStartFailure(
+        &execution, baseline, coldGeneration, authorizationLease, selection,
+        mutationLease, start, budget)
+    }
+
+    let postStart = await dependencies.observeGeneration(budget.work)
+    if applyWorkAbortIfNeeded(&execution, budget: budget) {
+      return await finishStartFailure(
+        &execution, baseline, coldGeneration, authorizationLease, selection,
+        mutationLease, start, budget)
+    }
+    guard ProductM2GenerationFence.singleRunningGeneration(coldGeneration, postStart) else {
+      execution.fail(
+        .generationFenceRejected,
+        event: .postStartGenerationRejected,
+        state: .failed
       )
+      return await finishStartFailure(
+        &execution, baseline, coldGeneration, authorizationLease, selection,
+        mutationLease, start, budget)
     }
-    if execution.firstBadEvent == nil {
-      await proveFreshSSH(&execution, budget: budget)
-    }
-    return await finish(
+
+    await proveVendorStatusAndActiveNetwork(
       &execution,
       baseline: baseline,
-      coldGeneration: coldGeneration,
-      authorizationLease: authorizationLease,
       selectedRoutes: selection.selectedRoutes,
-      start: start,
+      controlLease: start.lease,
       budget: budget
     )
+    guard execution.firstBadEvent == nil else {
+      return await finishStartFailure(
+        &execution, baseline, coldGeneration, authorizationLease, selection,
+        mutationLease, start, budget)
+    }
+
+    let authorizationMaterialErased = await authorizationLease.eraseStartMaterial()
+    execution.authorizationOwnedMaterialErased = authorizationMaterialErased
+    guard authorizationMaterialErased else {
+      execution.fail(
+        .cleanupUnproven,
+        event: .authorizationCloseRejected,
+        state: .failed
+      )
+      return await finishStartFailure(
+        &execution, baseline, coldGeneration, authorizationLease, selection,
+        mutationLease, start, budget)
+    }
+    if applyWorkAbortIfNeeded(&execution, budget: budget) {
+      return await finishStartFailure(
+        &execution, baseline, coldGeneration, authorizationLease, selection,
+        mutationLease, start, budget)
+    }
+
+    execution.finalState = .connected
+    return .active(
+      ProductPersistentTunnelSessionAssets(
+        execution: execution,
+        baseline: baseline,
+        coldGeneration: coldGeneration,
+        selectedRoutes: selection.selectedRoutes,
+        controlAuthority: ProductM2ControlCleanupAuthority(
+          lease: start.lease,
+          provisionalStop: start.provisionalStopCapability,
+          emergencyStop: start.emergencyStopCapability,
+          startReceipt: start.receipt
+        ),
+        authorizationLease: authorizationLease,
+        mutationLease: mutationLease
+      ))
   }
 
   private func proveVendorStatusAndActiveNetwork(
@@ -144,23 +145,15 @@ extension ProductM2ConnectOnceCoordinator {
       _ = applyWorkAbortIfNeeded(&execution, budget: budget)
       return
     }
-    let status = await controlLease.waitForConnectedStatus(
-      timeoutMilliseconds: statusTimeout
-    )
+    let status = await controlLease.waitForConnectedStatus(timeoutMilliseconds: statusTimeout)
     execution.vendorStatusEvidence = status
-    if applyWorkAbortIfNeeded(&execution, budget: budget) {
-      return
-    }
+    if applyWorkAbortIfNeeded(&execution, budget: budget) { return }
     if status.outcome == .cancelled {
       execution.fail(.cancelled, event: .cancelled, state: .failed)
       return
     }
     guard status.connectedProven else {
-      execution.fail(
-        .vendorStatusUnproven,
-        event: .vendorStatusUnproven,
-        state: .failed
-      )
+      execution.fail(.vendorStatusUnproven, event: .vendorStatusUnproven, state: .failed)
       return
     }
 
@@ -171,31 +164,20 @@ extension ProductM2ConnectOnceCoordinator {
         budget.work
       )
     else {
-      if applyWorkAbortIfNeeded(&execution, budget: budget) {
-        return
+      if !applyWorkAbortIfNeeded(&execution, budget: budget) {
+        execution.fail(.activeNetworkUnproven, event: .activeNetworkUnproven, state: .failed)
       }
-      execution.fail(
-        .activeNetworkUnproven,
-        event: .activeNetworkUnproven,
-        state: .failed
-      )
       return
     }
-    if applyWorkAbortIfNeeded(&execution, budget: budget) {
-      return
-    }
+    if applyWorkAbortIfNeeded(&execution, budget: budget) { return }
     let evidence = dependencies.assessActiveConnection(baseline, active)
     execution.activeNetworkEvidence = evidence
     if !evidence.connectionProven {
-      execution.fail(
-        .activeNetworkUnproven,
-        event: .activeNetworkUnproven,
-        state: .failed
-      )
+      execution.fail(.activeNetworkUnproven, event: .activeNetworkUnproven, state: .failed)
     }
   }
 
-  private func proveFreshSSH(
+  func proveFreshSSH(
     _ execution: inout ProductM2Execution,
     budget: ProductM2AbsoluteBudget
   ) async {
@@ -203,19 +185,11 @@ extension ProductM2ConnectOnceCoordinator {
       execution.sshProof = budget.work.hasRemaining ? .cancelled : .timedOut
       return
     }
-    let rawEvidence = await dependencies.proveFreshSSH(
-      execution.request.sshTarget,
-      budget.work
-    )
-    let evidence = normalizedEvidence(
-      rawEvidence,
-      requestedTarget: execution.request.sshTarget
-    )
+    let rawEvidence = await dependencies.proveFreshSSH(execution.request.sshTarget, budget.work)
+    let evidence = normalizedEvidence(rawEvidence, requestedTarget: execution.request.sshTarget)
     execution.sshProofEvidence = evidence
     execution.sshProof = evidence.outcome
-    if applyWorkAbortIfNeeded(&execution, budget: budget) {
-      return
-    }
+    if applyWorkAbortIfNeeded(&execution, budget: budget) { return }
     if execution.sshProof == .proven {
       execution.outcome = .connectedAndCleanedUp
     } else {

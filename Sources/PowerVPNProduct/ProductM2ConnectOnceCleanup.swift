@@ -27,25 +27,25 @@ package struct ProductM2CleanupRunner: Sendable {
     authorizationLease: ProductM2AuthorizedResourceLease?,
     selectedRoutes: VendorCharonSelectedRouteMatcher?,
     controlAuthority: ProductM2ControlCleanupAuthority,
-    budget: ProductM2AbsoluteBudget
+    deadlines: ProductM2CleanupDeadlines
   ) async -> ProductM2CleanupResult {
     let completedControl = await closeControl(
       coldGeneration: coldGeneration,
       authority: controlAuthority,
-      deadline: budget.controlCleanup,
-      reportDeadline: budget.report
+      deadline: deadlines.controlCleanup,
+      reportDeadline: deadlines.report
     )
     let controlCompletedWithinDeadline =
-      completedControl.path == .notRequired || budget.controlCleanup.hasRemaining
+      completedControl.path == .notRequired || deadlines.controlCleanup.hasRemaining
     let control =
       controlCompletedWithinDeadline
       ? completedControl : completedControl.invalidatedByDeadline
     let authorizationClose = await closeAuthorization(
       authorizationLease,
-      deadline: budget.authorizationCleanup
+      deadline: deadlines.authorizationCleanup
     )
     let authorizationCompletedWithinDeadline =
-      authorizationLease == nil || budget.authorizationCleanup.hasRemaining
+      authorizationLease == nil || deadlines.authorizationCleanup.hasRemaining
     let verifier = dependencies.verifyCleanup
     let evidence = await Task.detached {
       await verifier(
@@ -53,10 +53,10 @@ package struct ProductM2CleanupRunner: Sendable {
         networkWindow,
         selectedRoutes,
         controlAuthority.startReceipt.requestSent,
-        budget.verification
+        deadlines.verification
       )
     }.value
-    let verificationCompletedWithinDeadline = budget.verification.hasRemaining
+    let verificationCompletedWithinDeadline = deadlines.verification.hasRemaining
     let authorizationClosed =
       authorizationLease == nil
       || (authorizationClose.outcome == .accepted

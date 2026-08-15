@@ -44,6 +44,7 @@ import Testing
   @Test func coordinatorReportPreservesExplicitNativeTLSRejection() async {
     let trace = ProductM2TestTrace()
     let dependencies = ProductM2ConnectOnceDependencies(
+      acquireMutationLease: { ProductM2TestMutationLease() },
       controlRuntimePreflightAccepted: { true },
       observeGeneration: { _ in m2ColdGeneration },
       preflightAccepted: { _, _ in true },
@@ -130,6 +131,7 @@ import Testing
   @Test func rejectedAcquisitionWithoutErasureCannotPassCleanup() async {
     let trace = ProductM2TestTrace()
     let dependencies = ProductM2ConnectOnceDependencies(
+      acquireMutationLease: { ProductM2TestMutationLease() },
       controlRuntimePreflightAccepted: { true },
       observeGeneration: { _ in m2ColdGeneration },
       preflightAccepted: { _, _ in true },
@@ -194,6 +196,7 @@ import Testing
     let provider = ProductM2PortalAdapter { _ in .rejected(report) }
     let trace = ProductM2TestTrace()
     let dependencies = ProductM2ConnectOnceDependencies(
+      acquireMutationLease: { ProductM2TestMutationLease() },
       controlRuntimePreflightAccepted: { true },
       observeGeneration: { _ in m2ColdGeneration },
       preflightAccepted: { _, _ in true },
