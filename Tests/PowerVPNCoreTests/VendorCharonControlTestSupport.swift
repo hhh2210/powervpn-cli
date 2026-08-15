@@ -169,6 +169,13 @@ final class ScriptedCharonControlDriver: @unchecked Sendable,
     }
     handler?(event)
   }
+  func emitReplyDictionary(_ object: xpc_object_t, at index: Int) {
+    guard let signature = VendorCharonControlWireCodec.dictionarySignature(object) else {
+      preconditionFailure("expected XPC dictionary")
+    }
+    let event = VendorCharonControlWireCodec.replyEvent(object)
+    emitReply(.decodedDictionary(signature: signature, event: event), at: index)
+  }
 
   func invalidateSession() {
     let handler = lock.withLock {
@@ -186,6 +193,14 @@ final class ScriptedCharonControlDriver: @unchecked Sendable,
     let handler = lock.withLock { connectionHandler }
     handler?(event)
   }
+  func emitConnectionDictionary(_ object: xpc_object_t) {
+    guard let signature = VendorCharonControlWireCodec.dictionarySignature(object) else {
+      preconditionFailure("expected XPC dictionary")
+    }
+    let event = VendorCharonControlWireCodec.connectionEvent(object)
+    emitConnection(.decodedDictionary(signature: signature, event: event))
+  }
+
 }
 
 final class CharonControlDriverFactory: @unchecked Sendable {
@@ -287,4 +302,9 @@ func waitForControl(
     await Task.yield()
   }
   return condition()
+}
+
+func retainedStrings(in value: Any) -> [String] {
+  if let string = value as? String { return [string] }
+  return Mirror(reflecting: value).children.flatMap { retainedStrings(in: $0.value) }
 }

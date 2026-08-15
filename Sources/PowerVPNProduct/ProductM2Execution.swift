@@ -11,6 +11,9 @@ package struct ProductM2Execution {
   var authorizationAcquisition: ProductM2AuthorizationAcquisitionOutcome = .notRequested
   var authorizationFailure: ProductM2AuthorizationFailure?
   var startOutcome: ProductM2ControlOutcome = .notAttempted
+  var startEventSignatures: [String]?
+  var startReplySignatures: [String]?
+  var unexpectedEventSignature: [String]?
   var vendorStatusEvidence = ProductM2VendorStatusEvidence.notAttempted
   var activeNetworkEvidence = ProductM2ActiveNetworkEvidence.unavailable
   var sshProof: ProductM2SSHProofOutcome = .notAttempted
@@ -110,6 +113,9 @@ package struct ProductM2Execution {
       authorizationAcquisition: authorizationAcquisition,
       authorizationFailure: authorizationFailure,
       startOutcome: startOutcome,
+      startEventSignatures: startEventSignatures,
+      startReplySignatures: startReplySignatures,
+      unexpectedEventSignature: unexpectedEventSignature,
       vendorStatusEvidence: vendorStatusEvidence,
       activeNetworkEvidence: activeNetworkEvidence,
       sshProof: sshProof,

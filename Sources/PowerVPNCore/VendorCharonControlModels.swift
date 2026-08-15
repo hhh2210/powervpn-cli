@@ -38,7 +38,43 @@ package struct VendorCharonControlReceipt: Equatable, Sendable {
   package let encodingError: VendorCharonStartEncodingError?
   package let statusEventCount: Int
   package let dispatcherTailEventCount: Int
+  /// Entries are `<ordinal>:<channel>:<sorted key:type...>`; values are absent.
+  package let incomingEventSignatures: [String]
+  package let replySignatures: [String]
+  /// Exact key/type-only signature of the event that rejected start.
+  package let unexpectedEventSignature: [String]?
   package var statusAtSubmission: VendorCharonStatusClassification? = nil
+  package init(
+    operation: VendorCharonControlOperation,
+    outcome: VendorCharonControlOutcome,
+    requestSent: Bool,
+    emptyReplyObserved: Bool,
+    peerGenerationValidated: Bool,
+    connectionRetained: Bool,
+    connectionCancelRequested: Bool,
+    encodingError: VendorCharonStartEncodingError?,
+    statusEventCount: Int,
+    dispatcherTailEventCount: Int,
+    incomingEventSignatures: [String] = [],
+    replySignatures: [String] = [],
+    unexpectedEventSignature: [String]? = nil,
+    statusAtSubmission: VendorCharonStatusClassification? = nil
+  ) {
+    self.operation = operation
+    self.outcome = outcome
+    self.requestSent = requestSent
+    self.emptyReplyObserved = emptyReplyObserved
+    self.peerGenerationValidated = peerGenerationValidated
+    self.connectionRetained = connectionRetained
+    self.connectionCancelRequested = connectionCancelRequested
+    self.encodingError = encodingError
+    self.statusEventCount = statusEventCount
+    self.dispatcherTailEventCount = dispatcherTailEventCount
+    self.incomingEventSignatures = incomingEventSignatures
+    self.replySignatures = replySignatures
+    self.unexpectedEventSignature = unexpectedEventSignature
+    self.statusAtSubmission = statusAtSubmission
+  }
 
   package var transportAcknowledged: Bool {
     outcome == .transportAcknowledged
@@ -59,6 +95,8 @@ package struct VendorCharonControlObservation: Equatable, Sendable {
   package let latestStatus: VendorCharonStatusSignal?
   package let dispatcherTailEventCount: Int
   package let unexpectedDictionaryEventCount: Int
+  package let incomingEventSignatures: [String]
+  package let replySignatures: [String]
   package let terminalConnectionOutcome: VendorCharonControlOutcome?
 }
 package struct VendorCharonStopContext: Equatable, Sendable {

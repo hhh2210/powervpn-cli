@@ -3,6 +3,10 @@ import Dispatch
 @preconcurrency import XPC
 
 enum VendorCharonControlConnectionEvent: Equatable, Sendable {
+  indirect case decodedDictionary(
+    signature: [String],
+    event: VendorCharonControlConnectionEvent
+  )
   case status(VendorCharonStatusSignal)
   case tunnelNameReported(success: Bool)
   case emptyDispatcherTail
@@ -15,6 +19,10 @@ enum VendorCharonControlConnectionEvent: Equatable, Sendable {
 }
 
 enum VendorCharonControlReplyEvent: Equatable, Sendable {
+  indirect case decodedDictionary(
+    signature: [String],
+    event: VendorCharonControlReplyEvent
+  )
   case emptyAcknowledgement
   case connectionInterrupted
   case connectionInvalid
@@ -46,7 +54,13 @@ final class SystemVendorCharonControlConnectionDriver: @unchecked Sendable,
     session = VendorXPCSession(
       queue: queue,
       incomingDecoder: { object in
-        connectionEventHandler(VendorCharonControlWireCodec.connectionEvent(object))
+        let signature = VendorCharonControlWireCodec.dictionarySignature(object)
+        let event = VendorCharonControlWireCodec.connectionEvent(object)
+        connectionEventHandler(
+          signature.map {
+            .decodedDictionary(signature: $0, event: event)
+          } ?? event
+        )
       },
       cancellationHandler: { outcome in
         connectionEventHandler(Self.connectionEvent(outcome))
@@ -61,7 +75,13 @@ final class SystemVendorCharonControlConnectionDriver: @unchecked Sendable,
     session.send(
       request,
       replyDecoder: { object in
-        replyHandler(VendorCharonControlWireCodec.replyEvent(object))
+        let signature = VendorCharonControlWireCodec.dictionarySignature(object)
+        let event = VendorCharonControlWireCodec.replyEvent(object)
+        replyHandler(
+          signature.map {
+            .decodedDictionary(signature: $0, event: event)
+          } ?? event
+        )
       },
       failureHandler: { outcome in
         replyHandler(Self.replyEvent(outcome))
@@ -128,6 +148,25 @@ enum VendorCharonControlWireCodec {
     return request
   }
 
+  /// Returns sorted top-level key/type tokens only; no XPC value is read.
+  static func dictionarySignature(_ object: xpc_object_t) -> [String]? {
+    guard xpc_get_type(object) == XPC_TYPE_DICTIONARY else { return nil }
+    var fields: [(key: String, type: String)] = []
+    xpc_dictionary_apply(object) { key, value in
+      fields.append(
+        (
+          key: String(cString: key),
+          type: String(cString: xpc_type_get_name(xpc_get_type(value)))
+        ))
+      return true
+    }
+    return fields.sorted { $0.key < $1.key }.map { "\($0.key):\($0.type)" }
+  }
+
+  static func signatureDescription(_ signature: [String]) -> String {
+    signature.isEmpty ? "{}" : signature.joined(separator: ",")
+  }
+
   static func connectionEvent(_ object: xpc_object_t) -> VendorCharonControlConnectionEvent {
     if object === XPC_ERROR_CONNECTION_INTERRUPTED { return .connectionInterrupted }
     if object === XPC_ERROR_CONNECTION_INVALID { return .connectionInvalid }
@@ -165,7 +204,11 @@ enum VendorCharonControlWireCodec {
   }
 
   private static func tunnelNameReport(_ object: xpc_object_t) -> Bool? {
-    guard hasType(object, key: "success", type: XPC_TYPE_BOOL) else { return nil }
+    // Helper setter 0x1001a9924-0x1001a9930 and GUI reader 0x1001cc26d
+    // both use this exact key.
+    guard hasType(object, key: "get_tun_name_success", type: XPC_TYPE_BOOL) else {
+      return nil
+    }
     var exactCount = 1
     for key in ["namev4", "namev6"] {
       guard let value = xpc_dictionary_get_value(object, key) else { continue }
@@ -173,7 +216,7 @@ enum VendorCharonControlWireCodec {
       exactCount += 1
     }
     guard xpc_dictionary_get_count(object) == exactCount else { return nil }
-    return xpc_dictionary_get_bool(object, "success")
+    return xpc_dictionary_get_bool(object, "get_tun_name_success")
   }
 
   private static func hasExactStatusShape(_ object: xpc_object_t) -> Bool {

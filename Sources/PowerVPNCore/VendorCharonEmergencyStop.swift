@@ -241,6 +241,8 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
   private func handleStopReply(_ event: VendorCharonControlReplyEvent) {
     guard phase == .stopping else { return }
     switch event {
+    case .decodedDictionary(_, let decoded):
+      handleStopReply(decoded)
     case .emptyAcknowledgement:
       emptyStopReplyObserved = true
       finish(.transportAcknowledged)
@@ -255,6 +257,8 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
   private func handleStopEvent(_ event: VendorCharonControlConnectionEvent) {
     guard phase == .stopping else { return }
     switch event {
+    case .decodedDictionary(_, let decoded):
+      handleStopEvent(decoded)
     case .status:
       if statusEventCount < Int.max { statusEventCount += 1 }
     case .tunnelNameReported:

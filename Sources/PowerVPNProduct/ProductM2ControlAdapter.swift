@@ -8,6 +8,9 @@ package struct ProductM2ControlReceipt: Equatable, Sendable {
   package let peerGenerationValidated: Bool
   package let statusEventCount: Int
   package let statusAtSubmission: ProductM2VendorStatusClassification?
+  package let startEventSignatures: [String]?
+  package let startReplySignatures: [String]?
+  package let unexpectedEventSignature: [String]?
 
   init(_ receipt: VendorCharonControlReceipt) {
     outcome = ProductM2ControlOutcome(receipt.outcome)
@@ -17,6 +20,17 @@ package struct ProductM2ControlReceipt: Equatable, Sendable {
     statusEventCount = receipt.statusEventCount
     statusAtSubmission = receipt.statusAtSubmission.map(
       ProductM2VendorStatusClassification.init)
+    if receipt.operation == .startConnection {
+      startEventSignatures =
+        receipt.incomingEventSignatures.isEmpty ? nil : receipt.incomingEventSignatures
+      startReplySignatures =
+        receipt.replySignatures.isEmpty ? nil : receipt.replySignatures
+      unexpectedEventSignature = receipt.unexpectedEventSignature
+    } else {
+      startEventSignatures = nil
+      startReplySignatures = nil
+      unexpectedEventSignature = nil
+    }
   }
 
   init(
@@ -25,7 +39,10 @@ package struct ProductM2ControlReceipt: Equatable, Sendable {
     transportAcknowledged: Bool,
     peerGenerationValidated: Bool,
     statusEventCount: Int = 0,
-    statusAtSubmission: ProductM2VendorStatusClassification? = nil
+    statusAtSubmission: ProductM2VendorStatusClassification? = nil,
+    startEventSignatures: [String]? = nil,
+    startReplySignatures: [String]? = nil,
+    unexpectedEventSignature: [String]? = nil
   ) {
     self.outcome = outcome
     self.requestSent = requestSent
@@ -33,6 +50,9 @@ package struct ProductM2ControlReceipt: Equatable, Sendable {
     self.peerGenerationValidated = peerGenerationValidated
     self.statusEventCount = statusEventCount
     self.statusAtSubmission = statusAtSubmission
+    self.startEventSignatures = startEventSignatures
+    self.startReplySignatures = startReplySignatures
+    self.unexpectedEventSignature = unexpectedEventSignature
   }
 
   package static func unsent(

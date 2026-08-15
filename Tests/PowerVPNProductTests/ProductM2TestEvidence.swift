@@ -104,7 +104,10 @@ func m2Receipt(
   _ outcome: ProductM2ControlOutcome,
   requestSent: Bool,
   statusEventCount: Int = 0,
-  statusAtSubmission: ProductM2VendorStatusClassification? = nil
+  statusAtSubmission: ProductM2VendorStatusClassification? = nil,
+  startEventSignatures: [String]? = nil,
+  startReplySignatures: [String]? = nil,
+  unexpectedEventSignature: [String]? = nil
 ) -> ProductM2ControlReceipt {
   ProductM2ControlReceipt(
     outcome: outcome,
@@ -112,6 +115,9 @@ func m2Receipt(
     transportAcknowledged: outcome == .transportAcknowledged,
     peerGenerationValidated: outcome == .transportAcknowledged,
     statusEventCount: statusEventCount,
-    statusAtSubmission: statusAtSubmission
+    statusAtSubmission: statusAtSubmission,
+    startEventSignatures: startEventSignatures,
+    startReplySignatures: startReplySignatures,
+    unexpectedEventSignature: unexpectedEventSignature
   )
 }

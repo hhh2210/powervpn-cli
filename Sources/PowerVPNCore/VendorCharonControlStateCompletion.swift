@@ -161,7 +161,8 @@ extension VendorCharonControlState {
     requestWasSent: Bool? = nil,
     encodingError: VendorCharonStartEncodingError? = nil
   ) -> VendorCharonControlReceipt {
-    VendorCharonControlReceipt(
+    let observation = observation
+    return VendorCharonControlReceipt(
       operation: operation,
       outcome: outcome,
       requestSent: requestWasSent ?? requestSent,
@@ -171,7 +172,11 @@ extension VendorCharonControlState {
       connectionCancelRequested: cancelRequested,
       encodingError: encodingError,
       statusEventCount: observation.statusEventCount,
-      dispatcherTailEventCount: observation.dispatcherTailEventCount
+      dispatcherTailEventCount: observation.dispatcherTailEventCount,
+      incomingEventSignatures: observation.incomingEventSignatures,
+      replySignatures: observation.replySignatures,
+      unexpectedEventSignature:
+        operation == .startConnection ? startUnexpectedEventSignature : nil
     )
   }
 

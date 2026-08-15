@@ -251,6 +251,11 @@ public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
   public let authorizationAcquisition: ProductM2AuthorizationAcquisitionOutcome
   public let authorizationFailure: ProductM2AuthorizationFailure?
   public let startOutcome: ProductM2ControlOutcome
+  /// Bounded value-free signatures with global arrival ordinal and channel.
+  public var startEventSignatures: [String]? = nil
+  public var startReplySignatures: [String]? = nil
+  /// Exact key/type signature of the event that terminally rejected start.
+  public var unexpectedEventSignature: [String]? = nil
   public let vendorStatusEvidence: ProductM2VendorStatusEvidence
   public let activeNetworkEvidence: ProductM2ActiveNetworkEvidence
   public let sshProof: ProductM2SSHProofOutcome

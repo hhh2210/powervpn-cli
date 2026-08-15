@@ -117,6 +117,9 @@ struct ProductM2TestControlPlan: Sendable {
 func productM2TestControl(
   trace: ProductM2TestTrace,
   plan: ProductM2TestControlPlan,
+  startEventSignatures: [String]? = nil,
+  startReplySignatures: [String]? = nil,
+  unexpectedEventSignature: [String]? = nil,
   onBeginStart: @escaping @Sendable (Int) -> Void = { _ in },
   onAwaitStart: @escaping @Sendable () -> Void = {},
   onStop: @escaping @Sendable (Int) -> Void = { _ in },
@@ -142,7 +145,10 @@ func productM2TestControl(
             ? .transportAcknowledged
             : plan.startOutcome == .transportAcknowledged
               ? .peerGenerationMismatch : plan.startOutcome,
-          requestSent: plan.startRequestSent
+          requestSent: plan.startRequestSent,
+          startEventSignatures: startEventSignatures,
+          startReplySignatures: startReplySignatures,
+          unexpectedEventSignature: unexpectedEventSignature
         )
         let stopOperation: @Sendable (Int) async -> ProductM2ControlReceipt = { timeout in
           trace.record("stop")

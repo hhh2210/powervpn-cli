@@ -64,6 +64,9 @@ extension ProductM2ConnectOnceCoordinator {
     let start =
       await pending.result()
     execution.startOutcome = start.receipt.outcome
+    execution.startEventSignatures = start.receipt.startEventSignatures
+    execution.startReplySignatures = start.receipt.startReplySignatures
+    execution.unexpectedEventSignature = start.receipt.unexpectedEventSignature
     execution.helperMutationRequested = start.receipt.requestSent
     if applyWorkAbortIfNeeded(&execution, budget: budget) {
       return await finish(

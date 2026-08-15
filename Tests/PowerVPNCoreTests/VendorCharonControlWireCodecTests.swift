@@ -35,6 +35,29 @@ import Testing
     #expect(hasExactKeys(common, ["gateway"]))
     #expect(try string(common, "gateway") == startGateway)
   }
+  @Test func dictionarySignatureSortsKeysAndDropsValues() {
+    let secretValue = "utun-value-must-not-escape"
+    let object = xpc_dictionary_create(nil, nil, 0)
+    xpc_dictionary_set_int64(object, "state", 5)
+    xpc_dictionary_set_string(object, "name", secretValue)
+    xpc_dictionary_set_bool(object, "get_tun_name_success", true)
+
+    let signature = VendorCharonControlWireCodec.dictionarySignature(object)
+
+    #expect(
+      signature == [
+        "get_tun_name_success:bool",
+        "name:string",
+        "state:int64",
+      ])
+    #expect(!retainedStrings(in: signature as Any).contains(secretValue))
+    #expect(
+      VendorCharonControlWireCodec.dictionarySignature(
+        xpc_dictionary_create(nil, nil, 0)
+      ) == [])
+    #expect(
+      VendorCharonControlWireCodec.dictionarySignature(xpc_array_create(nil, 0)) == nil)
+  }
 
   @Test func exactStatusShapeDecodesRawIntegersWithoutRetainingName() throws {
     let empty = xpc_dictionary_create(nil, nil, 0)
@@ -110,9 +133,14 @@ import Testing
         == .unexpectedDictionary)
 
     let wrongSuccess = xpc_dictionary_create(nil, nil, 0)
-    xpc_dictionary_set_string(wrongSuccess, "success", "true")
+    xpc_dictionary_set_string(wrongSuccess, "get_tun_name_success", "true")
     #expect(
       VendorCharonControlWireCodec.connectionEvent(wrongSuccess)
+        == .unexpectedDictionary)
+    let staleSuccessKey = xpc_dictionary_create(nil, nil, 0)
+    xpc_dictionary_set_bool(staleSuccessKey, "success", true)
+    #expect(
+      VendorCharonControlWireCodec.connectionEvent(staleSuccessKey)
         == .unexpectedDictionary)
 
     let wrongNamev4 = tunnelNameObject(success: false, namev4: nil, namev6: nil)
@@ -181,7 +209,7 @@ private func tunnelNameObject(
   namev6: String?
 ) -> xpc_object_t {
   let result = xpc_dictionary_create(nil, nil, 0)
-  xpc_dictionary_set_bool(result, "success", success)
+  xpc_dictionary_set_bool(result, "get_tun_name_success", success)
   if let namev4 { xpc_dictionary_set_string(result, "namev4", namev4) }
   if let namev6 { xpc_dictionary_set_string(result, "namev6", namev6) }
   return result
@@ -192,9 +220,4 @@ private func statusSignal(
 ) -> VendorCharonStatusSignal? {
   guard case .status(let signal) = event else { return nil }
   return signal
-}
-
-private func retainedStrings(in value: Any) -> [String] {
-  if let string = value as? String { return [string] }
-  return Mirror(reflecting: value).children.flatMap { retainedStrings(in: $0.value) }
 }

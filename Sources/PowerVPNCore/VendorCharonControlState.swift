@@ -4,6 +4,10 @@ import Foundation
 private struct VendorCharonStartAuthorizationCommitFailure: Error {
   let underlying: any Error
 }
+private enum VendorCharonWireSignatureChannel: String {
+  case connection
+  case reply
+}
 
 final class VendorCharonControlState: @unchecked Sendable {
   enum Phase { case idle, starting, provisional, active, stopping, closed }
@@ -48,6 +52,11 @@ final class VendorCharonControlState: @unchecked Sendable {
   var dispatcherTailEvents = 0
   var unexpectedDictionaryEvents = 0
   var terminalConnectionOutcome: VendorCharonControlOutcome?
+  var incomingEventSignatures: [String] = []
+  var replySignatures: [String] = []
+  var startUnexpectedEventSignature: [String]?
+  var wireSignatureSequence = 0
+  var lastWireSignatureFingerprint: String?
   var cancelIssued = false
 
   init(
@@ -68,6 +77,8 @@ final class VendorCharonControlState: @unchecked Sendable {
         latestStatus: latestStatus,
         dispatcherTailEventCount: dispatcherTailEvents,
         unexpectedDictionaryEventCount: unexpectedDictionaryEvents,
+        incomingEventSignatures: incomingEventSignatures,
+        replySignatures: replySignatures,
         terminalConnectionOutcome: terminalConnectionOutcome
       )
     }
@@ -236,11 +247,18 @@ final class VendorCharonControlState: @unchecked Sendable {
     _ event: VendorCharonControlReplyEvent,
     operation: VendorCharonControlOperation
   ) {
+    if case .decodedDictionary(let signature, let decoded) = event {
+      recordWireSignature(signature, channel: .reply)
+      handle(decoded, operation: operation)
+      return
+    }
     guard
       (operation == .startConnection && phase == .starting)
         || (operation == .stopConnection && phase == .stopping)
     else { return }
     switch event {
+    case .decodedDictionary:
+      return
     case .emptyAcknowledgement:
       emptyReplyObserved = true
       if operation == .startConnection {
@@ -273,6 +291,17 @@ final class VendorCharonControlState: @unchecked Sendable {
 
   private func handle(_ event: VendorCharonControlConnectionEvent) {
     switch event {
+    case .decodedDictionary(let signature, let decoded):
+      recordWireSignature(signature, channel: .connection)
+      if phase == .starting {
+        switch decoded {
+        case .unexpectedDictionary, .unexpectedConnectionEvent:
+          startUnexpectedEventSignature = signature
+        default:
+          break
+        }
+      }
+      handle(decoded)
     case .status(let signal):
       updateObservation {
         if statusEvents < Int.max { statusEvents += 1 }
@@ -295,6 +324,28 @@ final class VendorCharonControlState: @unchecked Sendable {
     case .peerCodeSigningRequirement: finishPending(.peerCodeSigningRequirement)
     case .unexpectedXPCError: finishPending(.unexpectedXPCError)
     case .unexpectedConnectionEvent: finishPending(.unexpectedConnectionEvent)
+    }
+  }
+
+  private func recordWireSignature(
+    _ signature: [String],
+    channel: VendorCharonWireSignatureChannel
+  ) {
+    let description = VendorCharonControlWireCodec.signatureDescription(signature)
+    let fingerprint = "\(channel.rawValue):\(description)"
+    updateObservation {
+      guard lastWireSignatureFingerprint != fingerprint else { return }
+      lastWireSignatureFingerprint = fingerprint
+      if wireSignatureSequence < Int.max { wireSignatureSequence += 1 }
+      let entry = "\(wireSignatureSequence):\(fingerprint)"
+      switch channel {
+      case .connection where incomingEventSignatures.count < 12:
+        incomingEventSignatures.append(entry)
+      case .reply where replySignatures.count < 4:
+        replySignatures.append(entry)
+      default:
+        break
+      }
     }
   }
 

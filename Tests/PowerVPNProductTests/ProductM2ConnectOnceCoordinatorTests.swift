@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 
+@testable import PowerVPNCore
 @testable import PowerVPNProduct
 
 @Suite struct ProductM2ConnectOnceCoordinatorTests {
@@ -263,6 +264,60 @@ import Testing
     #expect(trace.count("ssh") == 0)
   }
 
+  @Test func controlReceiptMapsWireDiagnosticsOnlyForStartOperation() {
+    let start = ProductM2ControlReceipt(
+      vendorDiagnosticReceipt(operation: .startConnection)
+    )
+    #expect(
+      start.startEventSignatures
+        == ["1:connection:get_tun_name_success:bool,namev4:string"])
+    #expect(start.startReplySignatures == ["2:reply:{}"])
+    #expect(start.unexpectedEventSignature == ["mystery:string"])
+
+    let stop = ProductM2ControlReceipt(
+      vendorDiagnosticReceipt(operation: .stopConnection)
+    )
+    #expect(stop.startEventSignatures == nil)
+    #expect(stop.startReplySignatures == nil)
+    #expect(stop.unexpectedEventSignature == nil)
+  }
+
+  @Test func startWireDiagnosticsFlowToSchemaEightReportWithoutValues() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        plan: .submittedFailure(.unexpectedConnectionEvent),
+        startEventSignatures: [
+          "1:connection:get_tun_name_success:bool,namev4:string",
+          "2:connection:mystery:string",
+        ],
+        startReplySignatures: ["3:reply:{}"],
+        unexpectedEventSignature: ["mystery:string"]
+      )
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(report.schemaVersion == 8)
+    #expect(
+      report.startEventSignatures == [
+        "1:connection:get_tun_name_success:bool,namev4:string",
+        "2:connection:mystery:string",
+      ])
+    #expect(report.startReplySignatures == ["3:reply:{}"])
+    #expect(report.unexpectedEventSignature == ["mystery:string"])
+    let json = String(decoding: try JSONEncoder().encode(report), as: UTF8.self)
+    #expect(json.contains("\"startEventSignatures\""))
+    #expect(json.contains("\"startReplySignatures\""))
+    #expect(json.contains("\"unexpectedEventSignature\""))
+    #expect(!json.contains("utun-value-must-not-escape"))
+    #expect(!json.contains("rejected-value-must-not-escape"))
+  }
+
   @Test func encodedReportContainsNoHandleOrProtocolMaterial() async throws {
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
     defer { fixture.erase() }
@@ -290,5 +345,33 @@ import Testing
     #expect(json.contains("\"persistentRoutesRestored\":true"))
     #expect(json.contains("\"selectedRouteResidueCount\":0"))
     #expect(json.contains("\"containsRawRoutes\":false"))
+    #expect(report.startEventSignatures == nil)
+    #expect(report.startReplySignatures == nil)
+    #expect(report.unexpectedEventSignature == nil)
+    #expect(!json.contains("\"startEventSignatures\""))
+    #expect(!json.contains("\"startReplySignatures\""))
+    #expect(!json.contains("\"unexpectedEventSignature\""))
   }
+}
+
+private func vendorDiagnosticReceipt(
+  operation: VendorCharonControlOperation
+) -> VendorCharonControlReceipt {
+  VendorCharonControlReceipt(
+    operation: operation,
+    outcome: .unexpectedConnectionEvent,
+    requestSent: true,
+    emptyReplyObserved: false,
+    peerGenerationValidated: false,
+    connectionRetained: false,
+    connectionCancelRequested: true,
+    encodingError: nil,
+    statusEventCount: 0,
+    dispatcherTailEventCount: 0,
+    incomingEventSignatures: [
+      "1:connection:get_tun_name_success:bool,namev4:string"
+    ],
+    replySignatures: ["2:reply:{}"],
+    unexpectedEventSignature: ["mystery:string"]
+  )
 }
