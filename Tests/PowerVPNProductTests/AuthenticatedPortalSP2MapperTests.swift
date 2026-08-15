@@ -1,5 +1,6 @@
 import PowerVPNCore
 import Testing
+@preconcurrency import XPC
 
 @testable import PowerVPNPortal
 @testable import PowerVPNProduct
@@ -147,6 +148,7 @@ import Testing
           """,
         ikeBody: completeSP2IKEBody
       ))
+    defer { fixture.erase() }
 
     let candidate = try #require(
       AuthenticatedPortalSnapshotMapper.map(fixture.snapshot).first
@@ -174,6 +176,66 @@ import Testing
       #expect(availability(of: .vip, in: candidate) == .absentOptional)
     }
   }
+
+  /// Ground-truth shape: PRIVATE-IP is a DIRECT child of NC_RESOURCE
+  /// (intergration-structure-report.txt:77-81), not under IKE→EXTENSIONS.
+  /// The official client resolves vip from this resource-child shape via its
+  /// portal `property["vip"]` fallback (`0x1000aa70c`–`0x1000aa894`,
+  /// `0x1000687f3`–`0x1000688f8`); the mapper mirrors the effective chain.
+  @Test func resourceChildPrivateIPProvidesVipWhenIKEChaseMisses() throws {
+    let fixture = try authenticatedSnapshot(
+      resourceXML: tunnelXML(
+        extensions:
+          "<SECURED-ROUTES name=\"direct\"><ROUTE addr=\"10.1.2.3/24\"/></SECURED-ROUTES>",
+        ikeBody: completeSP2IKEBody,
+        resourceChildren: "<PRIVATE-IP addr=\"10.10.10.4\"/>"
+      ))
+    defer { fixture.erase() }
+
+    let candidate = try #require(
+      AuthenticatedPortalSnapshotMapper.map(fixture.snapshot).first
+    )
+    #expect(availability(of: .vip, in: candidate) == .available)
+    #expect(sources(of: .vip, in: candidate) == [.authenticatedPortalResource])
+    #expect(try encodedVIP(in: fixture.snapshot, handle: candidate.summary.handle) == "10.10.10.4")
+    #expect(candidate.snapshotComplete)
+  }
+
+  /// When both official sources carry an address, the direct
+  /// IKE→EXTENSIONS chase wins over the portal-property fallback.
+  @Test func extensionPrivateIPWinsWhenBothPathsHaveAddresses() throws {
+    let fixture = try authenticatedSnapshot(
+      resourceXML: tunnelXML(
+        extensions: "<PRIVATE-IP addr=\"10.10.10.4\"/>",
+        ikeBody: completeSP2IKEBody,
+        resourceChildren: "<PRIVATE-IP addr=\"10.10.10.5\"/>"
+      ))
+    defer { fixture.erase() }
+
+    let candidate = try #require(
+      AuthenticatedPortalSnapshotMapper.map(fixture.snapshot).first
+    )
+    #expect(try encodedVIP(in: fixture.snapshot, handle: candidate.summary.handle) == "10.10.10.4")
+    #expect(candidate.snapshotComplete)
+  }
+
+  /// A present extension PRIVATE-IP without `addr` leaves the chase nil, so
+  /// the official portal-property value remains the fallback.
+  @Test func extensionPrivateIPWithoutAddrFallsBackToResourceChild() throws {
+    let fixture = try authenticatedSnapshot(
+      resourceXML: tunnelXML(
+        extensions: "<PRIVATE-IP/>",
+        ikeBody: completeSP2IKEBody,
+        resourceChildren: "<PRIVATE-IP addr=\"10.10.10.5\"/>"
+      ))
+    defer { fixture.erase() }
+
+    let candidate = try #require(
+      AuthenticatedPortalSnapshotMapper.map(fixture.snapshot).first
+    )
+    #expect(try encodedVIP(in: fixture.snapshot, handle: candidate.summary.handle) == "10.10.10.5")
+    #expect(candidate.snapshotComplete)
+  }
 }
 
 private let completeSP2XML = tunnelXML(
@@ -200,19 +262,40 @@ private func proposalXML(transform: String) -> String {
     ikeBody: """
       <CLIENT id="helper-session"/><ISAKMP-SA><PROPOSAL><TRANSFORMS>
         \(transform)
-      </TRANSFORMS></PROPOSAL></ISAKMP-SA>
+      </TRANSFORMS></PROPOSAL></ISAKMP-SA><PSK key="psk-material"/>
       """)
 }
 
-private func tunnelXML(extensions: String, ikeBody: String = "<CLIENT id=\"session\"/>")
-  -> String
-{
+private func tunnelXML(
+  extensions: String,
+  ikeBody: String = "<CLIENT id=\"session\"/>",
+  resourceChildren: String = ""
+) -> String {
   """
   <ROOT><INTERGRATION_INFO><VERSION major="2"/><RESOURCE_LIST>
-    <NC_RESOURCE status="1" mapid="resource-map"><TUNNEL tunnel-name="Campus NC"
-      authority="7" status="9" mapid="tunnel-map" negotiate-mode="3">
+    <NC_RESOURCE status="1" mapid="resource-map">\(resourceChildren)<TUNNEL
+      tunnel-name="Campus NC" authority="7" status="9" mapid="tunnel-map"
+      negotiate-mode="3">
       <IKE family="4">\(ikeBody)<EXTENSIONS>\(extensions)</EXTENSIONS></IKE>
     </TUNNEL></NC_RESOURCE>
   </RESOURCE_LIST></INTERGRATION_INFO></ROOT>
   """
+}
+
+private func encodedVIP(
+  in snapshot: AuthenticatedPortalSnapshot,
+  handle: String
+) throws -> String {
+  var encodedVIP: String?
+  try AuthenticatedPortalSnapshotMapper.withValidatedStartSnapshot(
+    snapshot,
+    handle: handle
+  ) { startSnapshot in
+    try startSnapshot.withEncodedStartMessage { root in
+      let common = try #require(xpc_dictionary_get_value(root, "common"))
+      let vip = try #require(xpc_dictionary_get_string(common, "vip"))
+      encodedVIP = String(cString: vip)
+    }
+  }
+  return try #require(encodedVIP)
 }

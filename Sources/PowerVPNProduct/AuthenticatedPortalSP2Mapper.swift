@@ -34,6 +34,7 @@ enum AuthenticatedPortalSP2Mapper {
       lineage: lineage,
       common: try common(
         from: commonIKE,
+        resource: resource,
         majorVersion: majorVersion,
         gateway: gateway,
         lineage: lineage
@@ -61,9 +62,9 @@ enum AuthenticatedPortalSP2Mapper {
     }
     return try PortalSP2Tree.child(named: "IKE", of: resource)
   }
-
   private static func common(
     from ike: AuthenticatedPortalResourceElement?,
+    resource: AuthenticatedPortalResourceElement,
     majorVersion: Int32,
     gateway: any VendorCharonStartTextMaterial,
     lineage: VendorCharonStartLineage
@@ -73,17 +74,33 @@ enum AuthenticatedPortalSP2Mapper {
       source: .authenticatedPortalOrigin,
       lineage: lineage
     )
+    // Official `common.vip` resolution first chases
+    // IKE→EXTENSIONS→PRIVATE-IP@addr, then falls back only when that scalar
+    // is nil to portal property `vip` (0x1000687f3–0x1000688f8). The
+    // property is populated by the portal callback's major=="1" branch from
+    // RESOURCE_LIST→NC_RESOURCE→PRIVATE-IP@addr
+    // (0x1000aa70c–0x1000aa894). Resolve both sources independently and
+    // preserve that extension-first, property-second precedence.
+    let extensions = try ike.flatMap { try PortalSP2Tree.child(named: "EXTENSIONS", of: $0) }
+    let extensionPrivateIP = try extensions.flatMap {
+      try PortalSP2Tree.child(named: "PRIVATE-IP", of: $0)
+    }
+    let extensionAddr = try extensionPrivateIP.flatMap {
+      try PortalSP2Tree.attribute(named: "addr", of: $0)
+    }
+    let resourcePrivateIP = try PortalSP2Tree.child(named: "PRIVATE-IP", of: resource)
+    let resourceAddr = try resourcePrivateIP.flatMap {
+      try PortalSP2Tree.attribute(named: "addr", of: $0)
+    }
+    let vipAddress = extensionAddr ?? resourceAddr
     guard let ike else {
       return VendorCharonStartCommonCandidate(
+        vip: try PortalSP2Value.text(vipAddress, lineage: lineage),
         gateway: gateway,
         majorVersion: PortalSP2Value.metadataInteger(majorVersion, lineage: lineage)
       )
     }
     let client = try PortalSP2Tree.child(named: "CLIENT", of: ike)
-    let extensions = try PortalSP2Tree.child(named: "EXTENSIONS", of: ike)
-    let privateIP = try extensions.flatMap {
-      try PortalSP2Tree.child(named: "PRIVATE-IP", of: $0)
-    }
     let server = try PortalSP2Tree.child(named: "SERVER", of: ike)
     let psk = try PortalSP2Tree.child(named: "PSK", of: ike)
     let ikeProposal = try proposal(
@@ -105,10 +122,7 @@ enum AuthenticatedPortalSP2Mapper {
         try client.flatMap { try PortalSP2Tree.attribute(named: "id", of: $0) },
         lineage: lineage
       ),
-      vip: try PortalSP2Value.text(
-        try privateIP.flatMap { try PortalSP2Tree.attribute(named: "addr", of: $0) },
-        lineage: lineage
-      ),
+      vip: try PortalSP2Value.text(vipAddress, lineage: lineage),
       gateway: gateway,
       ikePort: try PortalSP2Value.integer(
         try server.flatMap { try PortalSP2Tree.attribute(named: "port", of: $0) },

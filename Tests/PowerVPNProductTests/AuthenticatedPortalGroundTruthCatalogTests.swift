@@ -1,6 +1,7 @@
 import Foundation
 import PowerVPNCore
 import Testing
+@preconcurrency import XPC
 
 @testable import PowerVPNPortal
 @testable import PowerVPNProduct
@@ -24,7 +25,43 @@ import Testing
     #expect(failure == nil)
     let candidate = try #require(candidates.first)
     #expect(candidates.count == 1)
+    #expect(groundTruthPSKSource.utf8.count == 16)
+    #expect(groundTruthClientIDSource.utf8.count == 20)
     #expect(candidate.summary.displayName == "login21")
+    // The ground-truth shape carries PRIVATE-IP as a direct NC_RESOURCE
+    // child; the official property-vip fallback (0x1000aa70c-0x1000aa894)
+    // makes it common.vip, so the candidate must resolve vip.
+    #expect(availability(of: .vip, in: candidate) == .available)
+    var encodedVIPByteCount: Int?
+    var encodedTunnelCount: Int?
+    var encodedPSKMatchesSource = false
+    var encodedSessionIDMatchesClientID = false
+    try AuthenticatedPortalSnapshotMapper.withValidatedStartSnapshot(
+      fixture.snapshot,
+      handle: candidate.summary.handle
+    ) { snapshot in
+      try snapshot.withEncodedStartMessage { root in
+        let common = try #require(xpc_dictionary_get_value(root, "common"))
+        let vip = try #require(xpc_dictionary_get_string(common, "vip"))
+        let psk = try #require(xpc_dictionary_get_string(common, "psk"))
+        let sessionID = try #require(xpc_dictionary_get_string(common, "sessionid"))
+        let tunnels = try #require(xpc_dictionary_get_value(root, "tunnels"))
+        encodedVIPByteCount = String(cString: vip).utf8.count
+        encodedTunnelCount = xpc_array_get_count(tunnels)
+        encodedPSKMatchesSource = String(cString: psk).utf8.elementsEqual(
+          groundTruthPSKSource.utf8
+        )
+        // keyid/KEY_ID transformation belongs to the helper; the mapper must
+        // preserve raw IKE/CLIENT@id bytes as common.sessionid.
+        encodedSessionIDMatchesClientID = String(cString: sessionID).utf8.elementsEqual(
+          groundTruthClientIDSource.utf8
+        )
+      }
+    }
+    #expect(encodedVIPByteCount == 8)
+    #expect(encodedTunnelCount == 2)
+    #expect(encodedPSKMatchesSource)
+    #expect(encodedSessionIDMatchesClientID)
     #expect(candidate.snapshotComplete)
     #expect(candidate.firstMissingField == nil)
   }
@@ -110,6 +147,9 @@ import Testing
   }
 }
 
+private let groundTruthPSKSource = "P5K0ALPHA9BETA42"
+private let groundTruthClientIDSource = "CLIENT9ALPHA7BETA246"
+
 /// Synthetic replica of the captured structural report (43 elements, every
 /// attribute at the reported length/format class; empty attributes stay
 /// empty: `jump-mapid`, `key_id`, `pfs` (IPSEC), `ipv6`, `notice`, `cmd`,
@@ -132,9 +172,9 @@ private let groundTruthCatalogXML = """
         <IKE version="V2">
           <SERVER ip="198.51.100.10" port="4500" id-type="AAAA"
             id="198.51.100.20"/>
-          <CLIENT port="500" id-type="freefo" id="AAAAAAAAAAAAAAAAAAAA"/>
+          <CLIENT port="500" id-type="freefo" id="\(groundTruthClientIDSource)"/>
           <Exchange mode="auto"/>
-          <PSK key="AAAAAAAAAAAAAAAA"/>
+          <PSK key="\(groundTruthPSKSource)"/>
           <ISAKMP-SA><PROPOSAL><TRANSFORMS>
             <TRANSFORM life-time="86400" enc="aes128" hash="sha1" dh="02"
               pfs="2" auth="psk"/>
