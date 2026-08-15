@@ -5,7 +5,15 @@ GUI-free use of the installed LeadSec PowerVPN tunnel helpers. Authentication
 is never bypassed, and the current product still requires the official PowerVPN
 installation.
 
-## Current product status — 2026-08-11
+The installed official PowerVPN 3.2.1 client is discontinued and frozen: no
+future vendor updates or current-generation official handoff route are
+available. Server compatibility with its legacy protocol remains unknown and
+may still work. Treat the installed client only as a read-only static protocol
+oracle, never as an authorization source. Its successful login and resource
+start observed on 2026-08-11 mean backend death is not proven, but do not
+establish current success.
+
+## Current product status — 2026-08-15
 
 The active branch is `rescue-mvp`. M1 exposes four passive, value-free
 product-readiness commands:
@@ -23,48 +31,60 @@ One separate explicit command performs the bounded local helper probe:
 powervpn helper status --probe --json
 ```
 
-On this Mac the helper remains observable, while the latest smoke reports the
-sealed installed profile and authorized resource as unavailable. Readiness
-reports `onboardingMode=native_portal`, `resourceSource=unavailable`, an empty
-resource catalog and `authorized_resource_provider_unavailable`. The readiness
-path may inspect only the sealed installed profile; it does not read session
-material from the vendor helper log.
+That probe was not run for this update. On 2026-08-15, safe passive executions
+of `.build/debug/powervpn` reported:
 
-The bounded M2 transaction remains exposed behind one strict, single-process
-command:
+- `doctor --json`: exit 2, `productState=blocked`,
+  `profileSource=operator_approved_fixed_origin`,
+  `resourceSource=unavailable`,
+  `blocker=authorized_resource_provider_unavailable`, and
+  `firstMissingField=common.sessionid`;
+- `helper status --json`: exit 2, `productState=degraded`,
+  `blocker=direct_xpc_not_probed`, `liveProbePerformed=false`, helper available,
+  and launchd inactive at run 7;
+- `resources --json`: exit 69, `productState=blocked`, the fixed profile
+  available, `resourceSource=unavailable`, and zero selectable resources;
+- `snapshot --dry-run --json`: exit 69, `productState=blocked`,
+  `snapshotComplete=false`, and `firstMissingField=common.sessionid`.
+
+These passive paths neither authenticate nor contact the Portal, and they
+request no helper mutation. They can therefore report the fixed profile as
+available while `resourceSource` remains unavailable; an empty passive catalog
+is not evidence that the authenticated Portal catalog is empty.
+
+After fresh explicit approval, the bounded M2 transaction has one exact command:
 
 ```sh
 powervpn m2 connect-once \
-  --resource-display-name "<exact>" \
-  --ssh-target <thu21|thu52> \
+  --resource-display-name login21 \
+  --ssh-target thu21 \
   --json
 ```
 
-The current-machine runtime uses an inert native-Portal-unavailable provider.
-It stops locally with `authorizationSource=native_portal` and
-`provider_unavailable` before generating an approval code, opening `/dev/tty`,
-installing signal handlers, capturing network state, contacting a server or
-issuing helper/XPC control. There is no alternate authorization source or
-fallback. The existing native Portal adapter is available only through explicit
-dependency injection while its TLS trust decision remains unresolved.
+Commit `b706b7c` makes the production `ProductM2CurrentMachineRuntime` compose
+`ProductM2PortalAdapter` with `PortalLoginRuntime.acquireCurrentMachine()`.
+Construction remains inert. Production Portal acquisition uses the immutable
+operator-approved fixed-origin/SPKI TOFU development authority, which is
+`releaseReady=false`; there is no alternate authorization source or weaker
+fallback.
 
-The standalone `powervpn login` command remains a sealed Portal diagnostic. It
-does not supply resources to readiness or M2, and the product does not weaken
-Portal peer or hostname verification.
+The standalone `powervpn portal dry-run` path remains a separately approved
+diagnostic. It may validate and erase one Portal lease, but it does not supply
+that lease or catalog to M2 and is not an authorization source for an M2 run.
 
-M2 authorization remains source-checked and generation-owned: one authorization
-lease provides a value-free validated catalog, one exact selection, one
-target-bound route matcher and one start capability. Close revokes the
-capability and erases owned material before its first suspension. The monotonic
-120-second M2 budget, same-session cleanup capability, helper-generation gates
-and value-free report contracts remain intact.
+Commit `305a05a` derives stop authority from the exact `common.gateway` copied
+from the encoded submitted start request. The active lease, provisional-stop
+capability, and emergency-stop capability preserve that authority; production
+cleanup cannot substitute a caller-supplied or reconstructed gateway. M2 keeps
+one monotonic 120-second transaction and report budget, generation fencing,
+bounded cleanup, local material erasure, and value-free reporting.
 
-`/var/log/vsgvpn.log` remains relevant only to vendor-helper diagnostics and
-startup rotation safety. Its contents are never an authorization input.
-
-The product is therefore still not a usable VPN. Native Portal authorization
-must be implemented under an explicit trust policy before M2 can acquire a
-resource, and the Goal remains **ACTIVE**.
+This is **offline GO only**. These deltas ran no live Portal request, helper
+mutation, SSH proof, or M2 transaction, so there is no current live
+connect/disconnect proof and the product is not yet a usable VPN. The Goal
+remains **ACTIVE**. The next action is one freshly approved bounded
+`login21` → `thu21` M2 transaction with start, a fresh SSH banner, stop, and
+cleanup proof. This statement grants no attempt or retry.
 
 ## Development
 

@@ -1791,3 +1791,38 @@ strict format lint, `git diff --check`, and the no-secrets scan with 0 leaks.
 The sole integrated review verdict is **GO** with zero P0/P1 findings. This
 work ran no live Portal request, read no credential, launched no app, and
 invoked no helper, SSH, or M2 action; no new retry authorization is granted.
+
+## 2026-08-15 — Production M2 native-Portal composition
+
+Commit `b706b7c28e9aaf80b9cef02dc0e10d668d278658` makes
+`ProductM2CurrentMachineRuntime` compose `ProductM2PortalAdapter` with
+`PortalLoginRuntime.acquireCurrentMachine()`. Construction remains inert, the
+operator-approved fixed-TOFU authority remains the only production Portal trust
+path, and no alternate authorization source or fallback was added. The
+historical production `native_portal/provider_unavailable` composition is
+therefore superseded.
+
+## 2026-08-15 — Exact Charon stop authority
+
+Commit `305a05ac91dc1fd75268faaf43f37ad39476a463` derives
+`VendorCharonStopContext` by copying `common.gateway` from the exact encoded
+`start_connection` request. A submitted start may yield only its same-session
+lease or provisional-stop authority and that retained emergency-stop context;
+ordinary and emergency cleanup construct `stop_connection` only through those
+capabilities under the existing bounded control and report deadlines. No
+caller-supplied or reconstructed gateway can authorize production cleanup.
+
+Across the two deltas, full `swift test` passed 674 tests across 107 suites, the
+arm64 `powervpn` product build passed, strict format lint passed for all 20
+changed Swift files, `git diff --check` and the no-secrets gate passed, and the
+integrated review verdicts were **GO/GO** with zero P0/P1 findings.
+
+State: **GOAL ACTIVE; production M2 composition and stop authority OFFLINE GO;
+live VPN/M2 NOT PASS.** This delta ran no live Portal request, read no
+credential, launched no app, invoked no helper, SSH, or M2 action, and consumed
+or granted no live-attempt authorization.
+
+Next end-to-end action: obtain fresh explicit approval for one bounded M2
+connect-once transaction with resource `login21` and target `thu21`, then prove
+start, a fresh SSH banner, stop, and cleanup. This entry grants no attempt or
+retry.
