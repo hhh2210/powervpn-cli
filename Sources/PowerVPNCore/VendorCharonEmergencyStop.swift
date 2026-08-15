@@ -244,8 +244,7 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
     case .decodedDictionary(_, let decoded):
       handleStopReply(decoded)
     case .emptyAcknowledgement:
-      emptyStopReplyObserved = true
-      finish(.transportAcknowledged)
+      acknowledgeStopTransport()
     case .connectionInterrupted: finish(.connectionInterrupted)
     case .connectionInvalid: finish(.connectionInvalid)
     case .peerCodeSigningRequirement: finish(.peerCodeSigningRequirement)
@@ -265,6 +264,8 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
       break
     case .emptyDispatcherTail:
       if dispatcherTailEventCount < Int.max { dispatcherTailEventCount += 1 }
+      guard stopRequestSent else { return }
+      acknowledgeStopTransport()
     case .unexpectedDictionary: finish(.unexpectedConnectionEvent)
     case .connectionInterrupted: finish(.connectionInterrupted)
     case .connectionInvalid: finish(.connectionInvalid)
@@ -272,6 +273,11 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
     case .unexpectedXPCError: finish(.unexpectedXPCError)
     case .unexpectedConnectionEvent: finish(.unexpectedConnectionEvent)
     }
+  }
+
+  private func acknowledgeStopTransport() {
+    emptyStopReplyObserved = true
+    finish(.transportAcknowledged)
   }
 
   private func finish(_ outcome: VendorCharonControlOutcome) {

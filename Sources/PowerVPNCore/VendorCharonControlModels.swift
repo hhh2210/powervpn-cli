@@ -24,13 +24,15 @@ package enum VendorCharonControlOutcome: String, Equatable, Sendable {
 
 /// Value-free evidence for one bounded helper-control request.
 ///
-/// `requestSent` means the request was handed to libxpc. Even an exact empty
-/// reply proves only that the vendor dispatcher handled the request; tunnel
-/// success must be established by later network/status evidence.
+/// `requestSent` means the request was handed to libxpc. An exact empty
+/// acknowledgement, whether delivered by the reply callback or the ordinary-
+/// send dispatcher tail, proves only that the vendor dispatcher handled the
+/// request; tunnel success must be established by later network/status evidence.
 package struct VendorCharonControlReceipt: Equatable, Sendable {
   package let operation: VendorCharonControlOperation
   package let outcome: VendorCharonControlOutcome
   package let requestSent: Bool
+  /// Legacy receipt slot populated by either empty acknowledgement channel.
   package let emptyReplyObserved: Bool
   package let peerGenerationValidated: Bool
   package let connectionRetained: Bool

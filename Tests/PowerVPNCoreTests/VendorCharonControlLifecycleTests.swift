@@ -42,7 +42,6 @@ import Testing
       )
     }
     #expect(await waitForControl { factory.driver.submitCount == 1 })
-    factory.driver.emitConnection(.emptyDispatcherTail)
     factory.driver.emitReply(.emptyAcknowledgement, at: 0)
     let start = await startTask.value
 
@@ -50,7 +49,7 @@ import Testing
     #expect(start.receipt.requestSent)
     #expect(start.receipt.transportAcknowledged)
     #expect(start.receipt.emptyReplyObserved)
-    #expect(start.receipt.dispatcherTailEventCount == 1)
+    #expect(start.receipt.dispatcherTailEventCount == 0)
     #expect(start.receipt.peerGenerationValidated)
     #expect(start.receipt.connectionRetained)
     #expect(!start.receipt.connectionCancelRequested)
@@ -112,6 +111,108 @@ import Testing
     #expect(factory.driver.cancelCount == 1)
   }
 
+  @Test func connectionTailAcknowledgesStartWithoutReplyAndKeepsLeaseUsable()
+    async throws
+  {
+    let factory = CharonControlDriverFactory()
+    let state = VendorCharonControlState(
+      snapshot: try ControlSnapshotFixture().snapshot(),
+      driverFactory: factory.make
+    )
+    try state.beginStartSynchronously(
+      timeoutMilliseconds: 500,
+      peerGenerationValidator: { true },
+      commitStartAuthorization: {}
+    )
+    #expect(factory.driver.submitCount == 1)
+
+    factory.driver.emitConnectionDictionary(xpc_dictionary_create(nil, nil, 0))
+    let start = await state.awaitStartResult()
+    let lease = try #require(start.lease)
+
+    #expect(start.receipt.outcome == .transportAcknowledged)
+    #expect(start.receipt.transportAcknowledged)
+    #expect(start.receipt.requestSent)
+    #expect(start.receipt.emptyReplyObserved)
+    #expect(start.receipt.dispatcherTailEventCount == 1)
+    #expect(start.receipt.incomingEventSignatures == ["1:connection:{}"])
+    #expect(start.receipt.replySignatures.isEmpty)
+    #expect(start.receipt.connectionRetained)
+    #expect(factory.driver.cancelCount == 0)
+
+    factory.driver.emitConnectionDictionary(xpc_dictionary_create(nil, nil, 0))
+    #expect(
+      await waitForControl {
+        lease.observation.dispatcherTailEventCount == 2
+      })
+    #expect(factory.driver.cancelCount == 0)
+
+    let statusTask = Task {
+      await lease.waitForConnectedStatus(timeoutMilliseconds: 500)
+    }
+    #expect(await waitForControl { lease.statusWaitPending })
+    factory.driver.emitConnection(
+      .status(VendorCharonStatusSignal(type: 1, phase: 2, state: 5))
+    )
+    #expect((await statusTask.value).outcome == .connected)
+    withExtendedLifetime(lease) {}
+  }
+
+  @Test func tailBeforeSubmissionAndInInactivePhasesCannotAcknowledge() throws {
+    let state = VendorCharonControlState(
+      snapshot: try ControlSnapshotFixture().snapshot(),
+      driverFactory: CharonControlDriverFactory().make
+    )
+
+    let ignored = state.queue.sync { () -> (Bool, Bool, Bool, Bool) in
+      state.handle(.emptyDispatcherTail)
+      let idleIgnored: Bool
+      if case .idle = state.phase {
+        idleIgnored = !state.emptyReplyObserved
+      } else {
+        idleIgnored = false
+      }
+
+      state.phase = .starting
+      state.requestSent = false
+      state.handle(.emptyDispatcherTail)
+      let stayedStarting: Bool
+      if case .starting = state.phase {
+        stayedStarting = !state.emptyReplyObserved && state.validation == nil
+      } else {
+        stayedStarting = false
+      }
+
+      state.phase = .provisional
+      state.requestSent = true
+      state.handle(.emptyDispatcherTail)
+      let provisionalIgnored: Bool
+      if case .provisional = state.phase {
+        provisionalIgnored = !state.emptyReplyObserved
+      } else {
+        provisionalIgnored = false
+      }
+
+      state.phase = .active
+      state.handle(.emptyDispatcherTail)
+      let activeIgnored: Bool
+      if case .active = state.phase {
+        activeIgnored = !state.emptyReplyObserved
+      } else {
+        activeIgnored = false
+      }
+      state.phase = .idle
+      state.requestSent = false
+      return (idleIgnored, stayedStarting, provisionalIgnored, activeIgnored)
+    }
+
+    #expect(ignored.0)
+    #expect(ignored.1)
+    #expect(ignored.2)
+    #expect(ignored.3)
+    #expect(state.observation.dispatcherTailEventCount == 4)
+  }
+
   @Test func leaseDeinitPerformsEmergencyCancelWithoutStopAcknowledgement() async throws {
     let factory = CharonControlDriverFactory()
     let transport = controlTransport(factory)
@@ -153,6 +254,34 @@ import Testing
     scheduler.expire()
     #expect(await waitForControl { factory.driver.cancelCount == 1 })
     #expect(scheduler.cancellationCount == 1)
+  }
+
+  @Test func connectionTailAcknowledgesStopAndTransfersBoundedDrain() async throws {
+    let factory = CharonControlDriverFactory()
+    let scheduler = ManualConnectionDrainScheduler()
+    let lease = try await activeLease(factory, drainScheduler: scheduler.schedule)
+    let task = Task { await lease.stop(timeoutMilliseconds: 500) }
+    #expect(await waitForControl { factory.driver.submitCount == 2 })
+
+    factory.driver.emitConnectionDictionary(xpc_dictionary_create(nil, nil, 0))
+    let receipt = await task.value
+
+    #expect(receipt.outcome == .transportAcknowledged)
+    #expect(receipt.transportAcknowledged)
+    #expect(receipt.requestSent)
+    #expect(receipt.emptyReplyObserved)
+    #expect(receipt.dispatcherTailEventCount == 1)
+    #expect(receipt.incomingEventSignatures == ["1:connection:{}"])
+    #expect(receipt.replySignatures.isEmpty)
+    #expect(!receipt.connectionRetained)
+    #expect(!receipt.connectionCancelRequested)
+    #expect(scheduler.isArmed)
+    #expect(factory.driver.cancelCount == 0)
+
+    scheduler.expire()
+    #expect(await waitForControl { factory.driver.cancelCount == 1 })
+    #expect(scheduler.cancellationCount == 1)
+    withExtendedLifetime(lease) {}
   }
 
   @Test func leaseDeinitCancelsAcknowledgedStopDrainImmediately() async throws {

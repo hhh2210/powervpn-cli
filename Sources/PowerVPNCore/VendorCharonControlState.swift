@@ -260,18 +260,23 @@ final class VendorCharonControlState: @unchecked Sendable {
     case .decodedDictionary:
       return
     case .emptyAcknowledgement:
-      emptyReplyObserved = true
-      if operation == .startConnection {
-        beginPeerGenerationValidation()
-        return
-      } else {
-        finishStop(.transportAcknowledged, retainConnection: false)
-      }
+      acceptEmptyAcknowledgement(for: operation)
     case .connectionInterrupted: finishReply(.connectionInterrupted, operation)
     case .connectionInvalid: finishReply(.connectionInvalid, operation)
     case .peerCodeSigningRequirement: finishReply(.peerCodeSigningRequirement, operation)
     case .unexpectedXPCError: finishReply(.unexpectedXPCError, operation)
     case .unexpectedPayload: finishReply(.unexpectedReplyPayload, operation)
+    }
+  }
+
+  private func acceptEmptyAcknowledgement(
+    for operation: VendorCharonControlOperation
+  ) {
+    emptyReplyObserved = true
+    if operation == .startConnection {
+      beginPeerGenerationValidation()
+    } else {
+      finishStop(.transportAcknowledged, retainConnection: false)
     }
   }
 
@@ -289,7 +294,7 @@ final class VendorCharonControlState: @unchecked Sendable {
     }
   }
 
-  private func handle(_ event: VendorCharonControlConnectionEvent) {
+  func handle(_ event: VendorCharonControlConnectionEvent) {
     switch event {
     case .decodedDictionary(let signature, let decoded):
       recordWireSignature(signature, channel: .connection)
@@ -313,6 +318,14 @@ final class VendorCharonControlState: @unchecked Sendable {
     case .emptyDispatcherTail:
       updateObservation {
         if dispatcherTailEvents < Int.max { dispatcherTailEvents += 1 }
+      }
+      // The helper uses an ordinary send at 0x1001ac379-0x1001ac38e.
+      // Attempt 6 observed `1:connection:{}` and no reply-channel message.
+      guard requestSent else { return }
+      if phase == .starting {
+        acceptEmptyAcknowledgement(for: .startConnection)
+      } else if phase == .stopping {
+        acceptEmptyAcknowledgement(for: .stopConnection)
       }
     case .unexpectedDictionary:
       updateObservation {
