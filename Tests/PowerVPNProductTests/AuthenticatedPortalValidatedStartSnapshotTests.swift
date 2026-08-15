@@ -35,6 +35,26 @@ import Testing
     }
   }
 
+  @Test func mappedSnapshotWithoutVIPv6EncodesPresentEmptyWireValue() throws {
+    let fixture = try authenticatedSnapshot(resourceXML: completeValidatedSP2XML)
+    defer { fixture.erase() }
+    let handle = try resourceHandle(in: fixture.snapshot)
+    var encodedVIPv6: String?
+
+    try AuthenticatedPortalSnapshotMapper.withValidatedStartSnapshot(
+      fixture.snapshot,
+      handle: handle
+    ) { snapshot in
+      try snapshot.withEncodedStartMessage { root in
+        let common = try #require(xpc_dictionary_get_value(root, "common"))
+        let vipv6 = try #require(xpc_dictionary_get_string(common, "vipv6"))
+        encodedVIPv6 = String(cString: vipv6)
+      }
+    }
+
+    #expect(encodedVIPv6 == "")
+  }
+
   @Test func malformedAndUnknownHandlesFailBeforeBody() throws {
     let fixture = try authenticatedSnapshot(resourceXML: completeValidatedSP2XML)
     defer { fixture.erase() }

@@ -87,21 +87,36 @@ import Testing
       ])
   }
 
-  @Test func omitsOnlyProvenOptionalFieldsAndForbiddenKeys() throws {
+  @Test func missingVIPv6EncodesPresentEmptyInExactCommonOrder() throws {
     let snapshot = try EncoderFixture().snapshot(includeOptional: false)
+    let insertions = InsertionRecorder()
 
-    try snapshot.withEncodedStartMessage { root in
-      let common = try dictionary(root, "common")
-      let tunnel = try arrayDictionary(try array(root, "tunnels"), 0)
-      #expect(xpc_dictionary_get_value(common, "vip") == nil)
-      #expect(xpc_dictionary_get_value(common, "vipv6") == nil)
-      #expect(xpc_dictionary_get_value(tunnel, "negotiate-mode") == nil)
-      for forbidden in ["hostItem", "natt_port", "dns", "dnssrv", "DNS_INFO"] {
-        #expect(xpc_dictionary_get_value(root, forbidden) == nil)
-        #expect(xpc_dictionary_get_value(common, forbidden) == nil)
-        #expect(xpc_dictionary_get_value(tunnel, forbidden) == nil)
+    try VendorCharonStartXPCEncoder(insertionObserver: insertions.observe)
+      .withEncodedMessage(snapshot: snapshot) { root in
+        let common = try dictionary(root, "common")
+        let tunnel = try arrayDictionary(try array(root, "tunnels"), 0)
+        #expect(
+          hasExactKeys(
+            common,
+            [
+              "sessionid", "vipv6", "gateway", "ike_port", "majorVersion",
+              "ike", "esp", "psk", "ike_life_time", "ipsec_life_time",
+            ]))
+        #expect(xpc_dictionary_get_value(common, "vip") == nil)
+        #expect(try string(common, "vipv6").isEmpty)
+        #expect(xpc_dictionary_get_value(tunnel, "negotiate-mode") == nil)
+        for forbidden in ["hostItem", "natt_port", "dns", "dnssrv", "DNS_INFO"] {
+          #expect(xpc_dictionary_get_value(root, forbidden) == nil)
+          #expect(xpc_dictionary_get_value(common, forbidden) == nil)
+          #expect(xpc_dictionary_get_value(tunnel, forbidden) == nil)
+        }
       }
-    }
+
+    #expect(
+      insertions.fields(in: .common) == [
+        .sessionID, .vipv6, .gateway, .ikePort, .majorVersion, .ike, .esp,
+        .psk, .ikeLifetime, .ipsecLifetime,
+      ])
   }
 
   @Test func clearsEveryTemporaryCStringBuffer() throws {

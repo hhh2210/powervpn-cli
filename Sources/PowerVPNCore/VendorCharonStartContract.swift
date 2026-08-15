@@ -91,9 +91,15 @@ public enum VendorCharonStartContract {
     // `_start_connection` reader guards both with `[NSString length] != 0`
     // before `strcpy` (vip `0x1001aa676`–`0x1001aa6f7`, vipv6
     // `0x1001aa703`–`0x1001aa77f`; sp2-startsnapshot dossier §4, 2026-08-11),
-    // so an empty value is simply skipped, and the retained official record
-    // logs `vip` as allow-empty quoted text (charon XPC audit E5, 2026-08-14).
-    // The crash-on-missing keys the daemon guards unconditionally —
+    // so an empty value is skipped. The retained official record also logs
+    // `vip` as allow-empty quoted text (charon XPC audit E5, 2026-08-14).
+    // Missing `vipv6` is not wire-safe, however: `setup_tundevice`
+    // unconditionally calls `strlen` on its UTF8String
+    // (`0x1001a9ebf`–`0x1001a9ec6`; attempt-3 diagnosis, 2026-08-15), so the
+    // encoder projects absent optional `vipv6` material to a present empty
+    // string. No identical omission-crash evidence exists for `vip`, which
+    // therefore retains its existing optional-omission behavior.
+    // Other crash-on-missing keys the daemon reads unconditionally —
     // `sessionid` (`0x1001aa671`), `gateway` (`0x1001aa80a`–`0x1001aa844`),
     // `ike`/`esp`/`psk` (`0x1001aab4c`–`0x1001aac26`) — stay non-empty-required.
     rule(.vip, .optional, .string, allowsEmptyText: true),

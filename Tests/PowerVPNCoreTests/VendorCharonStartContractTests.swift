@@ -28,11 +28,11 @@ import Testing
     #expect(!rule(.psk).allowsEmptyText)
   }
 
-  /// Mirrors the daemon reader exactly (sp2-startsnapshot dossier §4,
-  /// 2026-08-11): `vip`/`vipv6` are length-guarded (empty skipped,
-  /// `0x1001aa676`–`0x1001aa77f`) while `sessionid`/`gateway`/`psk` are
-  /// crash-on-missing (`0x1001aa671`, `0x1001aa80a`–`0x1001aa844`,
-  /// `0x1001aab4c`–`0x1001aac26`) and must stay non-empty.
+  /// Mirrors the validated-input boundary: `_start_connection` length-guards
+  /// empty `vip`/`vipv6` (`0x1001aa676`–`0x1001aa77f`), while
+  /// `sessionid`/`gateway`/`psk` must stay non-empty. The encoder separately
+  /// projects absent `vipv6` to `""` because `setup_tundevice` later calls
+  /// `strlen` unconditionally (`0x1001a9ebf`–`0x1001a9ec6`).
   @Test func emptyVipAndVipv6AreLegalWhileRequiredCommonTextStaysNonEmpty() throws {
     let values = CoreStartTestValues()
     let accepted = VendorCharonStartValidator.validate(

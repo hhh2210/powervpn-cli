@@ -79,8 +79,13 @@ struct VendorCharonStartXPCEncoder: Sendable {
     }
     if let vipv6 = common.vipv6 {
       try setText(result, "vipv6", vipv6, .vipv6)
-      record(.vipv6, in: .common)
+    } else {
+      // The official client always supplies this key. `setup_tundevice`
+      // unconditionally calls `strlen` on its UTF8String
+      // (`0x1001a9ebf`–`0x1001a9ec6`), so absence must project to `""`.
+      setConstantString(result, key: "vipv6", value: "")
     }
+    record(.vipv6, in: .common)
     try setText(result, "gateway", required(common.gateway, .gateway), .gateway)
     record(.gateway, in: .common)
     setInteger(result, "ike_port", try required(common.ikePort, .ikePort).value)
