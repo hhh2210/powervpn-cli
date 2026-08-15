@@ -169,14 +169,17 @@ let syntheticEmergencyStopContext = VendorCharonStopContext(
 func emergencyStopTask(
   _ factory: EmergencyConnectionDriverFactory,
   gate: @escaping @Sendable () async -> Bool = { true },
-  peerGenerationValidator: @escaping @Sendable () async -> Bool = { true }
+  peerGenerationValidator: @escaping @Sendable () async -> Bool = { true },
+  drainScheduler: @escaping VendorCharonConnectionDrainScheduler =
+    VendorCharonControlConnectionDrain.productionScheduler
 ) -> Task<VendorCharonControlReceipt, Never> {
   Task {
     await emergencyTransport(factory).emergencyStop(
       timeoutMilliseconds: 500,
       stopContext: syntheticEmergencyStopContext,
       expectedRunningPredicate: gate,
-      peerGenerationValidator: peerGenerationValidator
+      peerGenerationValidator: peerGenerationValidator,
+      postStopDrainScheduler: drainScheduler
     )
   }
 }

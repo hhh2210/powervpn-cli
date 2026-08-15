@@ -34,7 +34,8 @@ import Testing
     #expect(receipt.outcome == .transportAcknowledged)
     #expect(receipt.requestSent)
     #expect(factory.driver.submitCount == 2)
-    #expect(factory.driver.cancelCount == 1)
+    #expect(factory.driver.cancelCount == 0)
+    withExtendedLifetime(cleanup) {}
   }
 
   @Test func cancellationBeforeCoreGateConsumesAndSubmitsNothing() async throws {

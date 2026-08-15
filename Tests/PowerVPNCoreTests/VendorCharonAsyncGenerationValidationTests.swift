@@ -152,7 +152,8 @@ import Testing
     #expect(factory.driver.observations.last?.gateway == "synthetic-gateway")
     factory.driver.emitReply(.emptyAcknowledgement, at: 1)
     #expect((await stop.value).transportAcknowledged)
-    #expect(factory.driver.cancelCount == 1)
+    #expect(factory.driver.cancelCount == 0)
+    withExtendedLifetime(capability) {}
   }
 }
 

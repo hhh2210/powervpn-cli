@@ -22,15 +22,18 @@ final class VendorCharonControlState: @unchecked Sendable {
   let queue = DispatchQueue(label: "com.powervpn.vendor-charon-control")
   let observationLock = NSLock()
   let driverFactory: RawVendorCharonControlTransport.DriverFactory
+  let postStopDrainScheduler: VendorCharonConnectionDrainScheduler
   var snapshot: VendorCharonStartSnapshot?
   var stopContext: VendorCharonStopContext?
   var driver: (any VendorCharonControlConnectionDriving)?
+  var postStopDrain: VendorCharonControlConnectionDrain?
   var phase = Phase.idle
   var timer: DispatchSourceTimer?
   var startContinuation: CheckedContinuation<VendorCharonStartControlResult, Never>?
   var completedStartResult: VendorCharonStartControlResult?
   var stopContinuation: CheckedContinuation<VendorCharonControlReceipt, Never>?
   var currentStopAttempt: StopAttempt?
+  var postStopDrainAttempt: StopAttempt?
   var stopStatusAtSubmission: VendorCharonStatusClassification?
   var currentValidator: (@Sendable () async -> Bool)?
   var validation: VendorCharonAsyncValidation?
@@ -49,10 +52,13 @@ final class VendorCharonControlState: @unchecked Sendable {
 
   init(
     snapshot: VendorCharonStartSnapshot,
-    driverFactory: @escaping RawVendorCharonControlTransport.DriverFactory
+    driverFactory: @escaping RawVendorCharonControlTransport.DriverFactory,
+    postStopDrainScheduler: @escaping VendorCharonConnectionDrainScheduler =
+      VendorCharonControlConnectionDrain.productionScheduler
   ) {
     self.snapshot = snapshot
     self.driverFactory = driverFactory
+    self.postStopDrainScheduler = postStopDrainScheduler
   }
 
   var observation: VendorCharonControlObservation {
@@ -101,8 +107,8 @@ final class VendorCharonControlState: @unchecked Sendable {
 
   func abandon() {
     queue.async { [self] in
-      guard phase == .active else { return }
-      finishStatusWait(.leaseClosed)
+      guard phase == .active || postStopDrain != nil else { return }
+      if phase == .active { finishStatusWait(.leaseClosed) }
       _ = cancelDriver()
       phase = .closed
       stopContext = nil
@@ -111,7 +117,7 @@ final class VendorCharonControlState: @unchecked Sendable {
 
   func abandonProvisionalStop() {
     queue.async { [self] in
-      guard phase == .provisional else { return }
+      guard phase == .provisional || postStopDrain != nil else { return }
       _ = cancelDriver()
       phase = .closed
       stopContext = nil
@@ -273,6 +279,8 @@ final class VendorCharonControlState: @unchecked Sendable {
         latestStatus = signal
       }
       handleStatusWait(signal.classification)
+    case .tunnelNameReported:
+      break
     case .emptyDispatcherTail:
       updateObservation {
         if dispatcherTailEvents < Int.max { dispatcherTailEvents += 1 }

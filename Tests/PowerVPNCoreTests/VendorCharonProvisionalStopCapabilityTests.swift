@@ -132,7 +132,8 @@ import Testing
     #expect(!stop.cleanupEstablished)
     #expect(factory.driver.submitCount == 2)
     #expect(factory.callCount == 1)
-    #expect(factory.driver.cancelCount == 1)
+    #expect(factory.driver.cancelCount == 0)
+    withExtendedLifetime(capability) {}
   }
 
   private func startTask(

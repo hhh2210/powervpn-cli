@@ -152,7 +152,8 @@ import Testing
     #expect(result.requestSent)
     #expect(result.statusEventCount == 2)
     #expect(result.statusAtSubmission == .disconnected)
-    #expect(factory.driver.cancelCount == 1)
+    #expect(factory.driver.cancelCount == 0)
+    withExtendedLifetime(lease) {}
   }
 }
 
@@ -181,5 +182,6 @@ private func stop(
   let result = await task.value
   #expect(result.outcome == .transportAcknowledged)
   #expect(result.requestSent)
-  #expect(factory.driver.cancelCount == 1)
+  #expect(factory.driver.cancelCount == 0)
+  withExtendedLifetime(lease) {}
 }

@@ -4,6 +4,7 @@ import Dispatch
 
 enum VendorCharonControlConnectionEvent: Equatable, Sendable {
   case status(VendorCharonStatusSignal)
+  case tunnelNameReported(success: Bool)
   case emptyDispatcherTail
   case unexpectedDictionary
   case connectionInterrupted
@@ -137,6 +138,9 @@ enum VendorCharonControlWireCodec {
     if type == XPC_TYPE_ERROR { return .unexpectedXPCError }
     guard type == XPC_TYPE_DICTIONARY else { return .unexpectedConnectionEvent }
     if xpc_dictionary_get_count(object) == 0 { return .emptyDispatcherTail }
+    if let success = tunnelNameReport(object) {
+      return .tunnelNameReported(success: success)
+    }
     guard hasExactStatusShape(object) else { return .unexpectedDictionary }
     return .status(
       VendorCharonStatusSignal(
@@ -158,6 +162,18 @@ enum VendorCharonControlWireCodec {
       return .unexpectedPayload
     }
     return .emptyAcknowledgement
+  }
+
+  private static func tunnelNameReport(_ object: xpc_object_t) -> Bool? {
+    guard hasType(object, key: "success", type: XPC_TYPE_BOOL) else { return nil }
+    var exactCount = 1
+    for key in ["namev4", "namev6"] {
+      guard let value = xpc_dictionary_get_value(object, key) else { continue }
+      guard xpc_get_type(value) == XPC_TYPE_STRING else { return nil }
+      exactCount += 1
+    }
+    guard xpc_dictionary_get_count(object) == exactCount else { return nil }
+    return xpc_dictionary_get_bool(object, "success")
   }
 
   private static func hasExactStatusShape(_ object: xpc_object_t) -> Bool {

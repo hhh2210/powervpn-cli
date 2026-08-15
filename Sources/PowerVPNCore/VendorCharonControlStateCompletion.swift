@@ -90,8 +90,18 @@ extension VendorCharonControlState {
     timer = nil
     cancelPeerGenerationValidation()
     currentValidator = nil
+    let finishingAttempt = currentStopAttempt
     currentStopAttempt = nil
-    let cancelled = retainConnection ? false : cancelDriver()
+    let acknowledged = outcome == .transportAcknowledged
+    let cancelled: Bool
+    if retainConnection {
+      cancelled = false
+    } else if acknowledged {
+      armPostStopDrain(attempt: finishingAttempt)
+      cancelled = false
+    } else {
+      cancelled = cancelDriver()
+    }
     phase = retainConnection ? .active : .closed
     var receipt = makeReceipt(
       operation: .stopConnection,
@@ -112,10 +122,13 @@ extension VendorCharonControlState {
   ) async -> VendorCharonControlReceipt {
     await withCheckedContinuation { continuation in
       queue.async { [self] in
+        let leaseClosed = phase != allowedPhase
+        let cancelled = leaseClosed && postStopDrain != nil && cancelDriver()
         continuation.resume(
           returning: makeUnsentStopReceipt(
-            phase == allowedPhase ? outcome : .leaseClosed,
-            connectionRetained: allowedPhase == .active && phase == .active
+            leaseClosed ? .leaseClosed : outcome,
+            connectionRetained: allowedPhase == .active && phase == .active,
+            cancelRequested: cancelled
           ))
       }
     }
@@ -123,7 +136,8 @@ extension VendorCharonControlState {
 
   func makeUnsentStopReceipt(
     _ outcome: VendorCharonControlOutcome,
-    connectionRetained: Bool
+    connectionRetained: Bool,
+    cancelRequested: Bool = false
   ) -> VendorCharonControlReceipt {
     VendorCharonControlReceipt(
       operation: .stopConnection,
@@ -132,7 +146,7 @@ extension VendorCharonControlState {
       emptyReplyObserved: false,
       peerGenerationValidated: false,
       connectionRetained: connectionRetained,
-      connectionCancelRequested: false,
+      connectionCancelRequested: cancelRequested,
       encodingError: nil,
       statusEventCount: observation.statusEventCount,
       dispatcherTailEventCount: observation.dispatcherTailEventCount
@@ -161,7 +175,26 @@ extension VendorCharonControlState {
     )
   }
 
+  private func armPostStopDrain(attempt: StopAttempt?) {
+    guard postStopDrain == nil, let current = driver else { return }
+    driver = nil
+    let drain = VendorCharonControlConnectionDrain(
+      cancelDriver: { current.cancel() },
+      scheduler: postStopDrainScheduler
+    )
+    postStopDrain = drain
+    postStopDrainAttempt = attempt
+    drain.arm(on: queue)
+  }
+
   func cancelDriver() -> Bool {
+    if let drain = postStopDrain {
+      postStopDrain = nil
+      postStopDrainAttempt = nil
+      let cancelled = drain.cancelNow()
+      cancelIssued = cancelIssued || cancelled
+      return cancelled
+    }
     guard !cancelIssued, let current = driver else { return false }
     cancelIssued = true
     driver = nil

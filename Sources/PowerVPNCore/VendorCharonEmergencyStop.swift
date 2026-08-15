@@ -8,6 +8,22 @@ extension RawVendorCharonControlTransport {
     expectedRunningPredicate: @escaping @Sendable () async -> Bool,
     peerGenerationValidator: @escaping @Sendable () async -> Bool
   ) async -> VendorCharonControlReceipt {
+    await emergencyStop(
+      timeoutMilliseconds: timeoutMilliseconds,
+      stopContext: stopContext,
+      expectedRunningPredicate: expectedRunningPredicate,
+      peerGenerationValidator: peerGenerationValidator,
+      postStopDrainScheduler: VendorCharonControlConnectionDrain.productionScheduler
+    )
+  }
+
+  func emergencyStop(
+    timeoutMilliseconds: Int,
+    stopContext: VendorCharonStopContext,
+    expectedRunningPredicate: @escaping @Sendable () async -> Bool,
+    peerGenerationValidator: @escaping @Sendable () async -> Bool,
+    postStopDrainScheduler: @escaping VendorCharonConnectionDrainScheduler
+  ) async -> VendorCharonControlReceipt {
     guard Self.validTimeoutMilliseconds.contains(timeoutMilliseconds) else {
       return Self.unsentEmergencyStop(.invalidTimeout)
     }
@@ -18,7 +34,8 @@ extension RawVendorCharonControlTransport {
       driverFactory: emergencyDriverFactory,
       stopContext: stopContext,
       expectedRunningPredicate: expectedRunningPredicate,
-      peerGenerationValidator: peerGenerationValidator
+      peerGenerationValidator: peerGenerationValidator,
+      postStopDrainScheduler: postStopDrainScheduler
     )
     transaction.beginSynchronously(timeoutMilliseconds: timeoutMilliseconds)
     return await transaction.result()
@@ -50,8 +67,10 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
   private let stopContext: VendorCharonStopContext
   private let expectedRunningPredicate: @Sendable () async -> Bool
   private let peerGenerationValidator: @Sendable () async -> Bool
+  private let postStopDrainScheduler: VendorCharonConnectionDrainScheduler
   private var phase = Phase.idle
   private var driver: (any VendorCharonEmergencyConnectionDriving)?
+  private var postStopDrain: VendorCharonControlConnectionDrain?
   private var timer: DispatchSourceTimer?
   private var continuation: CheckedContinuation<VendorCharonControlReceipt, Never>?
   private var completedReceipt: VendorCharonControlReceipt?
@@ -69,12 +88,14 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
     driverFactory: @escaping RawVendorCharonControlTransport.EmergencyDriverFactory,
     stopContext: VendorCharonStopContext,
     expectedRunningPredicate: @escaping @Sendable () async -> Bool,
-    peerGenerationValidator: @escaping @Sendable () async -> Bool
+    peerGenerationValidator: @escaping @Sendable () async -> Bool,
+    postStopDrainScheduler: @escaping VendorCharonConnectionDrainScheduler
   ) {
     self.driverFactory = driverFactory
     self.stopContext = stopContext
     self.expectedRunningPredicate = expectedRunningPredicate
     self.peerGenerationValidator = peerGenerationValidator
+    self.postStopDrainScheduler = postStopDrainScheduler
   }
 
   func beginSynchronously(timeoutMilliseconds: Int) {
@@ -115,7 +136,13 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
   }
 
   private func cancel() {
-    queue.async { [self] in finish(.cancelled) }
+    queue.async { [self] in
+      if phase == .closed {
+        _ = cancelDriver()
+      } else {
+        finish(.cancelled)
+      }
+    }
   }
 
   private func completePreflight(_ accepted: Bool) {
@@ -230,6 +257,8 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
     switch event {
     case .status:
       if statusEventCount < Int.max { statusEventCount += 1 }
+    case .tunnelNameReported:
+      break
     case .emptyDispatcherTail:
       if dispatcherTailEventCount < Int.max { dispatcherTailEventCount += 1 }
     case .unexpectedDictionary: finish(.unexpectedConnectionEvent)
@@ -248,7 +277,13 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
     timer = nil
     validation?.cancel()
     validation = nil
-    let cancelled = cancelDriver()
+    let cancelled: Bool
+    if outcome == .transportAcknowledged {
+      armPostStopDrain()
+      cancelled = false
+    } else {
+      cancelled = cancelDriver()
+    }
     let receipt = VendorCharonControlReceipt(
       operation: .stopConnection,
       outcome: outcome,
@@ -269,7 +304,22 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
     }
   }
 
+  private func armPostStopDrain() {
+    guard let driver else { return }
+    self.driver = nil
+    let drain = VendorCharonControlConnectionDrain(
+      cancelDriver: { driver.cancel() },
+      scheduler: postStopDrainScheduler
+    )
+    postStopDrain = drain
+    drain.arm(on: queue)
+  }
+
   private func cancelDriver() -> Bool {
+    if let drain = postStopDrain {
+      postStopDrain = nil
+      return drain.cancelNow()
+    }
     guard !cancelIssued, let driver else { return false }
     cancelIssued = true
     self.driver = nil

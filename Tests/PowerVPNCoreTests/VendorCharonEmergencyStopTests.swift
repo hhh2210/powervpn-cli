@@ -27,10 +27,12 @@ import Testing
   @Test func exactProbeAuthenticatesBeforeStopOnTheSameSession() async {
     let factory = EmergencyConnectionDriverFactory()
     let gate = EmergencyStopGate(factory: factory, result: true)
+    let scheduler = ManualConnectionDrainScheduler()
     let task = emergencyStopTask(
       factory,
       gate: gate.evaluate,
-      peerGenerationValidator: { true }
+      peerGenerationValidator: { true },
+      drainScheduler: scheduler.schedule
     )
     #expect(await waitForControl { factory.driver.probeCount == 1 })
     #expect(gate.factoryCallsObserved == [0])
@@ -47,6 +49,7 @@ import Testing
     factory.driver.emitStopEvent(
       .status(VendorCharonStatusSignal(type: 1, phase: 2, state: 7))
     )
+    factory.driver.emitStopEvent(.tunnelNameReported(success: true))
     factory.driver.emitStopReply(.emptyAcknowledgement)
     let receipt = await task.value
 
@@ -55,9 +58,12 @@ import Testing
     #expect(receipt.requestSent)
     #expect(receipt.peerGenerationValidated)
     #expect(receipt.statusEventCount == 1)
-    #expect(receipt.connectionCancelRequested)
+    #expect(!receipt.connectionCancelRequested)
     #expect(!receipt.cleanupEstablished)
-    #expect(factory.driver.cancelCount == 1)
+    #expect(scheduler.isArmed)
+    #expect(factory.driver.cancelCount == 0)
+    scheduler.expire()
+    #expect(await waitForControl { factory.driver.cancelCount == 1 })
   }
 
   @Test func businessFirstStillWaitsForEmptyProbeReplyBeforeStop() async {

@@ -73,6 +73,61 @@ import Testing
     }
   }
 
+  @Test func exactTunnelNameReportShapesDecodeValueFreeSuccess() {
+    let names: [(namev4: String?, namev6: String?)] = [
+      (nil, nil),
+      ("utun-v4-must-not-escape", nil),
+      (nil, "utun-v6-must-not-escape"),
+      ("utun-v4-must-not-escape", "utun-v6-must-not-escape"),
+    ]
+
+    for success in [false, true] {
+      for names in names {
+        let event = VendorCharonControlWireCodec.connectionEvent(
+          tunnelNameObject(
+            success: success,
+            namev4: names.namev4,
+            namev6: names.namev6
+          ))
+
+        #expect(event == .tunnelNameReported(success: success))
+        #expect(retainedStrings(in: event).isEmpty)
+        #expect(!String(reflecting: event).contains("utun-v4-must-not-escape"))
+        #expect(!String(reflecting: event).contains("utun-v6-must-not-escape"))
+      }
+    }
+  }
+
+  @Test func malformedTunnelNameReportDictionariesAreRejected() {
+    let extra = tunnelNameObject(success: true, namev4: nil, namev6: nil)
+    xpc_dictionary_set_bool(extra, "extra", true)
+    #expect(VendorCharonControlWireCodec.connectionEvent(extra) == .unexpectedDictionary)
+
+    let missingSuccess = xpc_dictionary_create(nil, nil, 0)
+    xpc_dictionary_set_string(missingSuccess, "namev4", "utun4")
+    #expect(
+      VendorCharonControlWireCodec.connectionEvent(missingSuccess)
+        == .unexpectedDictionary)
+
+    let wrongSuccess = xpc_dictionary_create(nil, nil, 0)
+    xpc_dictionary_set_string(wrongSuccess, "success", "true")
+    #expect(
+      VendorCharonControlWireCodec.connectionEvent(wrongSuccess)
+        == .unexpectedDictionary)
+
+    let wrongNamev4 = tunnelNameObject(success: false, namev4: nil, namev6: nil)
+    xpc_dictionary_set_bool(wrongNamev4, "namev4", true)
+    #expect(
+      VendorCharonControlWireCodec.connectionEvent(wrongNamev4)
+        == .unexpectedDictionary)
+
+    let wrongNamev6 = tunnelNameObject(success: true, namev4: nil, namev6: nil)
+    xpc_dictionary_set_int64(wrongNamev6, "namev6", 6)
+    #expect(
+      VendorCharonControlWireCodec.connectionEvent(wrongNamev6)
+        == .unexpectedDictionary)
+  }
+
   @Test func malformedStatusDictionariesAreRejected() {
     let extra = statusObject(name: "synthetic", type: 1, phase: 2, state: 5)
     xpc_dictionary_set_bool(extra, "extra", true)
@@ -117,6 +172,18 @@ private func statusObject(
   xpc_dictionary_set_int64(result, "type", type)
   xpc_dictionary_set_int64(result, "phase", phase)
   xpc_dictionary_set_int64(result, "state", state)
+  return result
+}
+
+private func tunnelNameObject(
+  success: Bool,
+  namev4: String?,
+  namev6: String?
+) -> xpc_object_t {
+  let result = xpc_dictionary_create(nil, nil, 0)
+  xpc_dictionary_set_bool(result, "success", success)
+  if let namev4 { xpc_dictionary_set_string(result, "namev4", namev4) }
+  if let namev6 { xpc_dictionary_set_string(result, "namev6", namev6) }
   return result
 }
 

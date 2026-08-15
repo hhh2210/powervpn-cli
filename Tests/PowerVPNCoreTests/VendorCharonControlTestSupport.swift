@@ -207,6 +207,70 @@ final class CharonControlDriverFactory: @unchecked Sendable {
 
   var callCount: Int { lock.withLock { calls } }
 }
+final class ManualConnectionDrainScheduler: @unchecked Sendable {
+  private let lock = NSLock()
+  private var scheduledQueue: DispatchQueue?
+  private var expiration: (@Sendable () -> Void)?
+  private var cancellations = 0
+
+  func schedule(
+    queue: DispatchQueue,
+    expiration: @escaping @Sendable () -> Void
+  ) -> @Sendable () -> Void {
+    lock.withLock {
+      precondition(self.expiration == nil)
+      scheduledQueue = queue
+      self.expiration = expiration
+    }
+    return { [self] in
+      lock.withLock {
+        scheduledQueue = nil
+        self.expiration = nil
+        cancellations += 1
+      }
+    }
+  }
+
+  func expire() {
+    let scheduled = lock.withLock { (scheduledQueue, expiration) }
+    guard let queue = scheduled.0, let expiration = scheduled.1 else { return }
+    queue.async(execute: expiration)
+  }
+
+  var isArmed: Bool { lock.withLock { expiration != nil } }
+  var cancellationCount: Int { lock.withLock { cancellations } }
+}
+final class BlockingConnectionDrainScheduler: @unchecked Sendable {
+  private let lock = NSLock()
+  private let releaseGate = DispatchSemaphore(value: 0)
+  private var expiration: (@Sendable () -> Void)?
+  private var entered = false
+  private var cancellations = 0
+
+  func schedule(
+    queue _: DispatchQueue,
+    expiration: @escaping @Sendable () -> Void
+  ) -> @Sendable () -> Void {
+    lock.withLock {
+      self.expiration = expiration
+      entered = true
+    }
+    releaseGate.wait()
+    return { [self] in
+      lock.withLock {
+        self.expiration = nil
+        cancellations += 1
+      }
+    }
+  }
+
+  func release() {
+    releaseGate.signal()
+  }
+
+  var hasEntered: Bool { lock.withLock { entered } }
+  var cancellationCount: Int { lock.withLock { cancellations } }
+}
 
 func controlTransport(
   _ factory: CharonControlDriverFactory
