@@ -6,7 +6,7 @@ import Foundation
 
 enum EmergencyEnvelopeObservation: Equatable, Sendable {
   case getVersion
-  case stopConnection
+  case stopConnection(gateway: String)
   case unexpected
 }
 
@@ -97,15 +97,22 @@ final class ScriptedEmergencyConnectionDriver: @unchecked Sendable,
   }
 
   private static func observation(_ request: xpc_object_t) -> EmergencyEnvelopeObservation {
-    guard xpc_dictionary_get_count(request) == 2,
-      let type = xpc_dictionary_get_string(request, "type"),
+    guard let type = xpc_dictionary_get_string(request, "type"),
       let rpc = xpc_dictionary_get_string(request, "rpc"),
       String(cString: type) == "rpc"
     else { return .unexpected }
     switch String(cString: rpc) {
-    case "get_version": return .getVersion
-    case "stop_connection": return .stopConnection
-    default: return .unexpected
+    case "get_version":
+      return hasExactKeys(request, ["type", "rpc"]) ? .getVersion : .unexpected
+    case "stop_connection":
+      guard hasExactKeys(request, ["type", "rpc", "common"]),
+        let common = try? dictionary(request, "common"),
+        hasExactKeys(common, ["gateway"]),
+        let gateway = try? string(common, "gateway")
+      else { return .unexpected }
+      return .stopConnection(gateway: gateway)
+    default:
+      return .unexpected
     }
   }
 }
@@ -155,6 +162,10 @@ func emergencyTransport(
   )
 }
 
+let syntheticEmergencyStopContext = VendorCharonStopContext(
+  gateway: "synthetic-gateway"
+)!
+
 func emergencyStopTask(
   _ factory: EmergencyConnectionDriverFactory,
   gate: @escaping @Sendable () async -> Bool = { true },
@@ -163,6 +174,7 @@ func emergencyStopTask(
   Task {
     await emergencyTransport(factory).emergencyStop(
       timeoutMilliseconds: 500,
+      stopContext: syntheticEmergencyStopContext,
       expectedRunningPredicate: gate,
       peerGenerationValidator: peerGenerationValidator
     )

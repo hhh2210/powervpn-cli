@@ -61,20 +61,48 @@ package struct VendorCharonControlObservation: Equatable, Sendable {
   package let unexpectedDictionaryEventCount: Int
   package let terminalConnectionOutcome: VendorCharonControlOutcome?
 }
+package struct VendorCharonStopContext: Equatable, Sendable {
+  let gatewayCString: [CChar]
+
+  init?(gatewayCString: [CChar]) {
+    guard !gatewayCString.isEmpty,
+      gatewayCString.last == 0,
+      !gatewayCString.dropLast().contains(0)
+    else { return nil }
+    self.gatewayCString = gatewayCString
+  }
+
+  init?(gateway: String) {
+    var bytes = gateway.utf8.map { CChar(bitPattern: $0) }
+    bytes.append(0)
+    self.init(gatewayCString: bytes)
+  }
+
+  func withGatewayCString<Result>(
+    _ body: (UnsafePointer<CChar>) throws -> Result
+  ) rethrows -> Result {
+    try gatewayCString.withUnsafeBufferPointer {
+      try body($0.baseAddress!)
+    }
+  }
+}
 
 package struct VendorCharonStartControlResult: Sendable {
   package let receipt: VendorCharonControlReceipt
   package let lease: VendorCharonControlLease?
   package let provisionalStopCapability: VendorCharonProvisionalStopCapability?
+  package let stopContext: VendorCharonStopContext?
 
   package init(
     receipt: VendorCharonControlReceipt,
     lease: VendorCharonControlLease?,
-    provisionalStopCapability: VendorCharonProvisionalStopCapability? = nil
+    provisionalStopCapability: VendorCharonProvisionalStopCapability? = nil,
+    stopContext: VendorCharonStopContext? = nil
   ) {
     self.receipt = receipt
     self.lease = lease
     self.provisionalStopCapability = provisionalStopCapability
+    self.stopContext = stopContext
   }
 }
 

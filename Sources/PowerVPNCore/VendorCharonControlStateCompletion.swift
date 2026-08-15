@@ -56,6 +56,7 @@ extension VendorCharonControlState {
     let cleanupCapable = !acknowledged && requestSent && driver != nil
     let provisional = cleanupCapable && !sealSubmittedSession
     let cancelled = acknowledged || provisional ? false : cancelDriver()
+    let retainedStopContext = requestSent ? stopContext : nil
     phase = acknowledged ? .active : provisional ? .provisional : .closed
     let receipt = makeReceipt(
       operation: .startConnection,
@@ -68,8 +69,10 @@ extension VendorCharonControlState {
       receipt: receipt,
       lease: acknowledged ? VendorCharonControlLease(state: self) : nil,
       provisionalStopCapability:
-        cleanupCapable ? VendorCharonProvisionalStopCapability(state: self) : nil
+        cleanupCapable ? VendorCharonProvisionalStopCapability(state: self) : nil,
+      stopContext: retainedStopContext
     )
+    if !acknowledged && !provisional { stopContext = nil }
     if let continuation = startContinuation {
       startContinuation = nil
       continuation.resume(returning: result)
@@ -98,6 +101,7 @@ extension VendorCharonControlState {
     )
     receipt.statusAtSubmission = stopStatusAtSubmission
     stopStatusAtSubmission = nil
+    if !retainConnection { stopContext = nil }
     stopContinuation = nil
     continuation.resume(returning: receipt)
   }

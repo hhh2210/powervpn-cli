@@ -4,6 +4,7 @@ import Foundation
 extension RawVendorCharonControlTransport {
   package func emergencyStop(
     timeoutMilliseconds: Int = Self.defaultTimeoutMilliseconds,
+    stopContext: VendorCharonStopContext,
     expectedRunningPredicate: @escaping @Sendable () async -> Bool,
     peerGenerationValidator: @escaping @Sendable () async -> Bool
   ) async -> VendorCharonControlReceipt {
@@ -15,6 +16,7 @@ extension RawVendorCharonControlTransport {
     }
     let transaction = VendorCharonEmergencyStopTransaction(
       driverFactory: emergencyDriverFactory,
+      stopContext: stopContext,
       expectedRunningPredicate: expectedRunningPredicate,
       peerGenerationValidator: peerGenerationValidator
     )
@@ -45,6 +47,7 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
 
   private let queue = DispatchQueue(label: "com.powervpn.vendor-charon-emergency-stop")
   private let driverFactory: RawVendorCharonControlTransport.EmergencyDriverFactory
+  private let stopContext: VendorCharonStopContext
   private let expectedRunningPredicate: @Sendable () async -> Bool
   private let peerGenerationValidator: @Sendable () async -> Bool
   private var phase = Phase.idle
@@ -64,10 +67,12 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
 
   init(
     driverFactory: @escaping RawVendorCharonControlTransport.EmergencyDriverFactory,
+    stopContext: VendorCharonStopContext,
     expectedRunningPredicate: @escaping @Sendable () async -> Bool,
     peerGenerationValidator: @escaping @Sendable () async -> Bool
   ) {
     self.driverFactory = driverFactory
+    self.stopContext = stopContext
     self.expectedRunningPredicate = expectedRunningPredicate
     self.peerGenerationValidator = peerGenerationValidator
   }
@@ -194,7 +199,7 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
     else { return }
     phase = .stopping
     let submission = driver.submitStop(
-      VendorCharonControlWireCodec.makeStopRequest()
+      VendorCharonControlWireCodec.makeStopRequest(context: stopContext)
     ) { [weak self] event in
       guard let self else { return }
       self.queue.async { self.handleStopReply(event) }

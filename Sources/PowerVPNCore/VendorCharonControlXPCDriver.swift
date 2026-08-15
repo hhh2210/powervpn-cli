@@ -1,3 +1,4 @@
+import Darwin
 import Dispatch
 @preconcurrency import XPC
 
@@ -91,7 +92,23 @@ final class SystemVendorCharonControlConnectionDriver: @unchecked Sendable,
 }
 
 enum VendorCharonControlWireCodec {
-  static func makeStopRequest() -> xpc_object_t {
+  static func stopContext(
+    copyingGatewayFromStartRequest request: xpc_object_t
+  ) -> VendorCharonStopContext? {
+    guard xpc_get_type(request) == XPC_TYPE_DICTIONARY,
+      let common = xpc_dictionary_get_value(request, "common"),
+      xpc_get_type(common) == XPC_TYPE_DICTIONARY,
+      let gateway = xpc_dictionary_get_string(common, "gateway")
+    else { return nil }
+    let copiedGateway = Array(
+      UnsafeBufferPointer(start: gateway, count: strlen(gateway) + 1)
+    )
+    return VendorCharonStopContext(gatewayCString: copiedGateway)
+  }
+
+  static func makeStopRequest(
+    context: VendorCharonStopContext
+  ) -> xpc_object_t {
     let request = xpc_dictionary_create(nil, nil, 0)
     for field in VendorCharonStopContract.orderedFields {
       field.key.withCString { key in
@@ -100,7 +117,13 @@ enum VendorCharonControlWireCodec {
         }
       }
     }
-    precondition(xpc_dictionary_get_count(request) == 2)
+    let common = xpc_dictionary_create(nil, nil, 0)
+    context.withGatewayCString { gateway in
+      xpc_dictionary_set_string(common, "gateway", gateway)
+    }
+    xpc_dictionary_set_value(request, "common", common)
+    precondition(xpc_dictionary_get_count(request) == 3)
+    precondition(xpc_dictionary_get_count(common) == 1)
     return request
   }
 

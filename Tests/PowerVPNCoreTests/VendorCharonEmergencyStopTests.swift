@@ -10,6 +10,7 @@ import Testing
 
     let receipt = await emergencyTransport(factory).emergencyStop(
       timeoutMilliseconds: 500,
+      stopContext: syntheticEmergencyStopContext,
       expectedRunningPredicate: gate.evaluate,
       peerGenerationValidator: { true }
     )
@@ -38,7 +39,11 @@ import Testing
     factory.driver.emitProbeBusiness()
     #expect(await waitForControl { factory.driver.stopCount == 1 })
     #expect(factory.callCount == 1)
-    #expect(factory.driver.observations == [.getVersion, .stopConnection])
+    #expect(
+      factory.driver.observations == [
+        .getVersion,
+        .stopConnection(gateway: "synthetic-gateway"),
+      ])
     factory.driver.emitStopEvent(
       .status(VendorCharonStatusSignal(type: 1, phase: 2, state: 7))
     )
@@ -68,7 +73,11 @@ import Testing
 
     let receipt = await task.value
     #expect(receipt.transportAcknowledged)
-    #expect(factory.driver.observations == [.getVersion, .stopConnection])
+    #expect(
+      factory.driver.observations == [
+        .getVersion,
+        .stopConnection(gateway: "synthetic-gateway"),
+      ])
   }
 
   @Test func generationMismatchNeverSendsStop() async {
@@ -186,6 +195,7 @@ import Testing
     let task = Task {
       await emergencyTransport(factory).emergencyStop(
         timeoutMilliseconds: 100,
+        stopContext: syntheticEmergencyStopContext,
         expectedRunningPredicate: { true },
         peerGenerationValidator: { true }
       )
@@ -209,6 +219,7 @@ import Testing
       let task = Task {
         await emergencyTransport(factory).emergencyStop(
           timeoutMilliseconds: 100,
+          stopContext: syntheticEmergencyStopContext,
           expectedRunningPredicate: { true },
           peerGenerationValidator: { true }
         )

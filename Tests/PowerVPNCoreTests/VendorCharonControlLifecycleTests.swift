@@ -31,7 +31,8 @@ import Testing
   @Test func startAcknowledgementRetainsConnectionUntilSameDriverStops() async throws {
     let factory = CharonControlDriverFactory()
     let transport = controlTransport(factory)
-    let snapshot = try ControlSnapshotFixture().snapshot()
+    let fixture = ControlSnapshotFixture()
+    let snapshot = try fixture.snapshot()
     let startTask = Task {
       await transport.start(
         snapshot: snapshot,
@@ -53,6 +54,7 @@ import Testing
     #expect(start.receipt.connectionRetained)
     #expect(!start.receipt.connectionCancelRequested)
     #expect(start.receipt.helperMayHaveMutated)
+    #expect(start.stopContext != nil)
     #expect(!start.receipt.helperSuccessEstablished)
     #expect(factory.callCount == 1)
     #expect(factory.driver.cancelCount == 0)
@@ -61,11 +63,13 @@ import Testing
         ControlEnvelopeObservation(
           operation: "start_connection",
           exactStartShape: true,
-          exactStopShape: false
+          exactStopShape: false,
+          gateway: "synthetic-gateway"
         )
       ])
 
     let lease = try #require(start.lease)
+    fixture.gateway.failBorrows()
     let connected = VendorCharonStatusSignal(type: 1, phase: 2, state: 5)
     factory.driver.emitConnection(.status(connected))
     #expect(
@@ -88,6 +92,11 @@ import Testing
     #expect(factory.callCount == 1)
     #expect(factory.driver.cancelCount == 1)
     #expect(factory.driver.observations.last?.exactStopShape == true)
+    #expect(factory.driver.observations.last?.gateway == "synthetic-gateway")
+    #expect(
+      factory.driver.observations.first?.gateway
+        == factory.driver.observations.last?.gateway
+    )
     #expect(
       VendorCharonStopContract.orderedFields == [
         VendorXPCRequestField(key: "type", value: "rpc"),
@@ -234,4 +243,48 @@ import Testing
     #expect(factory.driver.submitCount == 0)
     #expect(factory.driver.cancelCount == 0)
   }
+  @Test func submittedStartContextCarriesIntoAuthenticatedEmergencyStop() async throws {
+    let normalFactory = CharonControlDriverFactory()
+    let emergencyFactory = EmergencyConnectionDriverFactory()
+    let transport = RawVendorCharonControlTransport(
+      driverFactory: normalFactory.make,
+      emergencyDriverFactory: emergencyFactory.make
+    )
+    let fixture = ControlSnapshotFixture()
+    let snapshot = try fixture.snapshot()
+    let startTask = Task {
+      await transport.start(
+        snapshot: snapshot,
+        timeoutMilliseconds: 500,
+        peerGenerationValidator: { true }
+      )
+    }
+    #expect(await waitForControl { normalFactory.driver.submitCount == 1 })
+    normalFactory.driver.emitReply(.emptyAcknowledgement, at: 0)
+    let start = await startTask.value
+    let stopContext = try #require(start.stopContext)
+    fixture.gateway.failBorrows()
+
+    let stopTask = Task {
+      await transport.emergencyStop(
+        timeoutMilliseconds: 500,
+        stopContext: stopContext,
+        expectedRunningPredicate: { true },
+        peerGenerationValidator: { true }
+      )
+    }
+    #expect(await waitForControl { emergencyFactory.driver.probeCount == 1 })
+    emergencyFactory.driver.emitProbeReply(.emptyAcknowledgement)
+    emergencyFactory.driver.emitProbeBusiness()
+    #expect(await waitForControl { emergencyFactory.driver.stopCount == 1 })
+    #expect(
+      emergencyFactory.driver.observations == [
+        .getVersion,
+        .stopConnection(gateway: "synthetic-gateway"),
+      ])
+    emergencyFactory.driver.emitStopReply(.emptyAcknowledgement)
+    #expect((await stopTask.value).transportAcknowledged)
+    _ = start.lease
+  }
+
 }

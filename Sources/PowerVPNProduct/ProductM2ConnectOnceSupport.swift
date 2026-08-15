@@ -39,9 +39,7 @@ extension ProductM2ConnectOnceCoordinator {
     coldGeneration: VendorHelperGenerationSnapshot,
     authorizationLease: ProductM2AuthorizedResourceLease? = nil,
     selectedRoutes: VendorCharonSelectedRouteMatcher? = nil,
-    controlLease: ProductM2ControlLease? = nil,
-    provisionalStopCapability: ProductM2ProvisionalStopCapability? = nil,
-    startReceipt: ProductM2ControlReceipt = .unsent(.notAttempted),
+    start: ProductM2StartResult? = nil,
     budget: ProductM2AbsoluteBudget
   ) async -> ProductM2ConnectReport {
     let cleanup = await ProductM2CleanupRunner(dependencies: dependencies).run(
@@ -50,9 +48,12 @@ extension ProductM2ConnectOnceCoordinator {
       coldGeneration: coldGeneration,
       authorizationLease: authorizationLease,
       selectedRoutes: selectedRoutes,
-      controlLease: controlLease,
-      provisionalStopCapability: provisionalStopCapability,
-      startReceipt: startReceipt,
+      controlAuthority: ProductM2ControlCleanupAuthority(
+        lease: start?.lease,
+        provisionalStop: start?.provisionalStopCapability,
+        emergencyStop: start?.emergencyStopCapability,
+        startReceipt: start?.receipt ?? .unsent(.notAttempted)
+      ),
       budget: budget
     )
     execution.apply(cleanup)

@@ -106,6 +106,7 @@ import Testing
     let task = Task {
       await emergencyTransport(factory).emergencyStop(
         timeoutMilliseconds: 100,
+        stopContext: syntheticEmergencyStopContext,
         expectedRunningPredicate: { true },
         peerGenerationValidator: gate.evaluate
       )
@@ -129,6 +130,7 @@ import Testing
     let gate = AsyncValidationGate()
     let receipt = await emergencyTransport(factory).emergencyStop(
       timeoutMilliseconds: 100,
+      stopContext: syntheticEmergencyStopContext,
       expectedRunningPredicate: gate.evaluate,
       peerGenerationValidator: { true }
     )
@@ -146,6 +148,8 @@ import Testing
   ) async throws {
     let stop = Task { await capability.stop(timeoutMilliseconds: 500) }
     #expect(await waitForControl { factory.driver.submitCount == 2 })
+    #expect(factory.driver.observations.last?.exactStopShape == true)
+    #expect(factory.driver.observations.last?.gateway == "synthetic-gateway")
     factory.driver.emitReply(.emptyAcknowledgement, at: 1)
     #expect((await stop.value).transportAcknowledged)
     #expect(factory.driver.cancelCount == 1)

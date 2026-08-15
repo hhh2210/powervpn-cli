@@ -5,7 +5,7 @@ import Testing
 @testable import PowerVPNCore
 
 @Suite struct VendorCharonControlWireCodecTests {
-  @Test func fixedServiceAndStopContractHaveNoInjectionSurface() {
+  @Test func stopCopiesOnlyGatewayFromExactEncodedStartEnvelope() throws {
     #expect(SystemVendorCharonControlConnectionDriver.serviceName == "com.leadsec.charon-xpc")
     #expect(
       VendorCharonStopContract.orderedFields == [
@@ -13,10 +13,27 @@ import Testing
         VendorXPCRequestField(key: "rpc", value: "stop_connection"),
       ])
 
-    let stop = VendorCharonControlWireCodec.makeStopRequest()
-    #expect(hasExactKeys(stop, ["type", "rpc"]))
+    let fixture = ControlSnapshotFixture()
+    var startGateway: String?
+    var retainedContext: VendorCharonStopContext?
+    try fixture.snapshot().withEncodedStartMessage { start in
+      let common = try dictionary(start, "common")
+      startGateway = try string(common, "gateway")
+      retainedContext = VendorCharonControlWireCodec.stopContext(
+        copyingGatewayFromStartRequest: start
+      )
+    }
+    fixture.gateway.failBorrows()
+
+    let stop = VendorCharonControlWireCodec.makeStopRequest(
+      context: try #require(retainedContext)
+    )
+    #expect(hasExactKeys(stop, ["type", "rpc", "common"]))
     #expect((try? string(stop, "type")) == "rpc")
     #expect((try? string(stop, "rpc")) == "stop_connection")
+    let common = try dictionary(stop, "common")
+    #expect(hasExactKeys(common, ["gateway"]))
+    #expect(try string(common, "gateway") == startGateway)
   }
 
   @Test func exactStatusShapeDecodesRawIntegersWithoutRetainingName() throws {

@@ -23,6 +23,7 @@ final class VendorCharonControlState: @unchecked Sendable {
   let observationLock = NSLock()
   let driverFactory: RawVendorCharonControlTransport.DriverFactory
   var snapshot: VendorCharonStartSnapshot?
+  var stopContext: VendorCharonStopContext?
   var driver: (any VendorCharonControlConnectionDriving)?
   var phase = Phase.idle
   var timer: DispatchSourceTimer?
@@ -104,6 +105,7 @@ final class VendorCharonControlState: @unchecked Sendable {
       finishStatusWait(.leaseClosed)
       _ = cancelDriver()
       phase = .closed
+      stopContext = nil
     }
   }
 
@@ -112,6 +114,7 @@ final class VendorCharonControlState: @unchecked Sendable {
       guard phase == .provisional else { return }
       _ = cancelDriver()
       phase = .closed
+      stopContext = nil
     }
   }
 
@@ -124,6 +127,7 @@ final class VendorCharonControlState: @unchecked Sendable {
         phase = .closed
       }
       completedStartResult = nil
+      stopContext = nil
     }
   }
 
@@ -147,11 +151,19 @@ final class VendorCharonControlState: @unchecked Sendable {
     defer { self.snapshot = nil }
     do {
       try snapshot.withEncodedStartMessage { request in
+        guard
+          let stopContext = VendorCharonControlWireCodec.stopContext(
+            copyingGatewayFromStartRequest: request
+          )
+        else {
+          throw VendorCharonStartEncodingError.incompleteSnapshot(.gateway)
+        }
         do {
           try commitStartAuthorization()
         } catch {
           throw VendorCharonStartAuthorizationCommitFailure(underlying: error)
         }
+        self.stopContext = stopContext
         let driver = driverFactory(queue) { [weak self] event in
           guard let self else { return }
           self.queue.async { self.handle(event) }
@@ -176,15 +188,20 @@ final class VendorCharonControlState: @unchecked Sendable {
   }
 
   func beginStop(timeoutMilliseconds: Int) {
-    guard phase == .active || phase == .provisional, let driver else {
-      finishStop(.leaseClosed, retainConnection: false)
+    guard phase == .active || phase == .provisional,
+      let driver,
+      let stopContext
+    else {
+      requestSent = false
+      finishStop(.snapshotEncodingFailed, retainConnection: false)
       return
     }
     phase = .stopping
+    requestSent = false
     emptyReplyObserved = false
     armTimeout(milliseconds: timeoutMilliseconds, operation: .stopConnection)
     let submission = driver.submit(
-      VendorCharonControlWireCodec.makeStopRequest()
+      VendorCharonControlWireCodec.makeStopRequest(context: stopContext)
     ) { [weak self] event in
       guard let self else { return }
       self.queue.async { self.handle(event, operation: .stopConnection) }

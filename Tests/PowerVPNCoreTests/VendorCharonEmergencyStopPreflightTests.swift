@@ -8,6 +8,7 @@ import Testing
     let gate = EmergencyStopGate(factory: invalidFactory, result: true)
     let invalid = await emergencyTransport(invalidFactory).emergencyStop(
       timeoutMilliseconds: 0,
+      stopContext: syntheticEmergencyStopContext,
       expectedRunningPredicate: gate.evaluate,
       peerGenerationValidator: { true }
     )
@@ -20,6 +21,7 @@ import Testing
       withUnsafeCurrentTask { $0?.cancel() }
       return await emergencyTransport(cancelledFactory).emergencyStop(
         timeoutMilliseconds: 500,
+        stopContext: syntheticEmergencyStopContext,
         expectedRunningPredicate: { true },
         peerGenerationValidator: { true }
       )
@@ -28,7 +30,7 @@ import Testing
     #expect(cancelledFactory.callCount == 0)
   }
 
-  @Test func fixedProductionSurfaceHasNoServiceOrPayloadInput() {
+  @Test func fixedProductionSurfaceHasNoServiceOrArbitraryStopPayloadInput() {
     _ = RawVendorCharonControlTransport()
     #expect(
       SystemVendorCharonEmergencyConnectionDriver.serviceName == "com.leadsec.charon-xpc"

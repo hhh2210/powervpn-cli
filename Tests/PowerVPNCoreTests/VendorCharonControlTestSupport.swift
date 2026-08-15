@@ -36,13 +36,14 @@ enum ControlTestError: Error {
 struct ControlSnapshotFixture {
   let lineage = VendorCharonStartLineage()
   let session = ControlTextMaterial("synthetic-session")
+  let gateway = ControlTextMaterial("synthetic-gateway")
 
   func snapshot() throws -> VendorCharonStartSnapshot {
     let candidate = VendorCharonStartCandidate(
       lineage: lineage,
       common: VendorCharonStartCommonCandidate(
         sessionID: text(session),
-        gateway: text("synthetic-gateway"),
+        gateway: text(gateway),
         ikePort: integer(500),
         majorVersion: integer(2),
         ike: text("aes128-sha1-modp1024"),
@@ -95,6 +96,7 @@ struct ControlEnvelopeObservation: Equatable, Sendable {
   let operation: String?
   let exactStartShape: Bool
   let exactStopShape: Bool
+  let gateway: String?
 }
 
 final class ScriptedCharonControlDriver: @unchecked Sendable,
@@ -122,26 +124,31 @@ final class ScriptedCharonControlDriver: @unchecked Sendable,
       return .rejected(.connectionInvalid)
     }
     let operation = xpc_dictionary_get_string(request, "rpc").map(String.init(cString:))
+    let common = try? dictionary(request, "common")
+    let gateway = common.flatMap { try? string($0, "gateway") }
     let startShape: Bool
     if operation == "start_connection" {
       startShape =
         hasExactKeys(request, ["type", "rpc", "common", "tunnels"])
         && (try? string(request, "type")) == "rpc"
-        && (try? dictionary(request, "common")) != nil
+        && common != nil
         && (try? array(request, "tunnels")) != nil
     } else {
       startShape = false
     }
     let stopShape =
       operation == "stop_connection"
-      && hasExactKeys(request, ["type", "rpc"])
+      && hasExactKeys(request, ["type", "rpc", "common"])
       && (try? string(request, "type")) == "rpc"
+      && common.map { hasExactKeys($0, ["gateway"]) } == true
+      && gateway != nil
     lock.withLock {
       envelopes.append(
         ControlEnvelopeObservation(
           operation: operation,
           exactStartShape: startShape,
-          exactStopShape: stopShape
+          exactStopShape: stopShape,
+          gateway: gateway
         ))
       replyHandlers.append(replyHandler)
     }

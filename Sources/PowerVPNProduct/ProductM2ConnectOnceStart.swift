@@ -72,9 +72,7 @@ extension ProductM2ConnectOnceCoordinator {
         coldGeneration: coldGeneration,
         authorizationLease: authorizationLease,
         selectedRoutes: selection.selectedRoutes,
-        controlLease: start.lease,
-        provisionalStopCapability: start.provisionalStopCapability,
-        startReceipt: start.receipt,
+        start: start,
         budget: budget
       )
     }
@@ -87,9 +85,7 @@ extension ProductM2ConnectOnceCoordinator {
           coldGeneration: coldGeneration,
           authorizationLease: authorizationLease,
           selectedRoutes: selection.selectedRoutes,
-          controlLease: start.lease,
-          provisionalStopCapability: start.provisionalStopCapability,
-          startReceipt: start.receipt,
+          start: start,
           budget: budget
         )
       }
@@ -125,9 +121,7 @@ extension ProductM2ConnectOnceCoordinator {
       coldGeneration: coldGeneration,
       authorizationLease: authorizationLease,
       selectedRoutes: selection.selectedRoutes,
-      controlLease: start.lease,
-      provisionalStopCapability: start.provisionalStopCapability,
-      startReceipt: start.receipt,
+      start: start,
       budget: budget
     )
   }

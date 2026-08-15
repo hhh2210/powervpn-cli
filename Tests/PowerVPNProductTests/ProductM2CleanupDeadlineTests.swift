@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import PowerVPNPortal
@@ -82,6 +83,121 @@ import Testing
     #expect(trace.count("emergency_stop") == 1)
   }
 
+  @Test func expiredControlStageUsesReportBudgetForOneBoundedStop() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let clock = ProductM2ManualClock()
+    let timeouts = ProductM2StopTimeoutRecorder()
+    let trace = ProductM2TestTrace()
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        onProveFreshSSH: { _ in clock.set(milliseconds: 73_001) },
+        onStop: timeouts.record
+      )
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21),
+      budget: .start(clock: clock.clock)
+    )
+
+    #expect(report.outcome == .cleanupUnproven)
+    #expect(report.firstBadEvent == .deadlineExceeded)
+    #expect(report.stopOutcome == .transportAcknowledged)
+    #expect(!report.cleanupVerified)
+    #expect(timeouts.values == [2_000])
+    #expect(trace.count("stop") == 1)
+    #expect(trace.count("emergency_stop") == 0)
+  }
+
+  @Test func expiredControlStageFallsBackToEmergencyOnlyAfterUnsentStop() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let clock = ProductM2ManualClock()
+    let stopTimeouts = ProductM2StopTimeoutRecorder()
+    let emergencyTimeouts = ProductM2StopTimeoutRecorder()
+    let trace = ProductM2TestTrace()
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        plan: .acknowledgedStop(
+          outcome: .connectionInvalid,
+          requestSent: false
+        ),
+        onProveFreshSSH: { _ in clock.set(milliseconds: 73_001) },
+        onStop: stopTimeouts.record,
+        onEmergencyStop: emergencyTimeouts.record
+      )
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21),
+      budget: .start(clock: clock.clock)
+    )
+
+    #expect(report.outcome == .cleanupUnproven)
+    #expect(report.stopOutcome == .connectionInvalid)
+    #expect(report.emergencyStopOutcome == .transportAcknowledged)
+    #expect(!report.cleanupVerified)
+    #expect(stopTimeouts.values == [2_000])
+    #expect(emergencyTimeouts.values == [2_000])
+    #expect(trace.count("stop") == 1)
+    #expect(trace.count("emergency_stop") == 1)
+  }
+
+  @Test func sentFallbackStopFailureNeverRepeatsWithEmergencyStop() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let clock = ProductM2ManualClock()
+    let trace = ProductM2TestTrace()
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        plan: .acknowledgedStop(
+          outcome: .timeout,
+          requestSent: true
+        ),
+        onProveFreshSSH: { _ in clock.set(milliseconds: 73_001) }
+      )
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21),
+      budget: .start(clock: clock.clock)
+    )
+
+    #expect(report.outcome == .cleanupUnproven)
+    #expect(report.stopOutcome == .timeout)
+    #expect(report.emergencyStopOutcome == .notAttempted)
+    #expect(!report.cleanupVerified)
+    #expect(trace.count("stop") == 1)
+    #expect(trace.count("emergency_stop") == 0)
+  }
+
+  @Test func exhaustedReportBudgetKeepsStopUnsentAndCleanupUnverified() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let clock = ProductM2ManualClock()
+    let trace = ProductM2TestTrace()
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        onProveFreshSSH: { _ in clock.set(milliseconds: 120_001) }
+      )
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21),
+      budget: .start(clock: clock.clock)
+    )
+
+    #expect(report.outcome == .cleanupUnproven)
+    #expect(report.firstBadEvent == .deadlineExceeded)
+    #expect(report.cleanupPath == .cleanupUnproven)
+    #expect(report.stopOutcome == .timeout)
+    #expect(report.emergencyStopOutcome == .timeout)
+    #expect(!report.cleanupVerified)
+    #expect(trace.count("stop") == 0)
+    #expect(trace.count("emergency_stop") == 0)
+  }
+
   @Test func lateRejectedAcquisitionDoesNotChargeAbsentCleanupStages() async throws {
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
     defer { fixture.erase() }
@@ -133,4 +249,17 @@ enum ProductM2LateCleanupStage: CaseIterable, Sendable {
   case control
   case authorization
   case verification
+}
+
+private final class ProductM2StopTimeoutRecorder: @unchecked Sendable {
+  private let lock = NSLock()
+  private var storage: [Int] = []
+
+  func record(_ timeout: Int) {
+    lock.withLock { storage.append(timeout) }
+  }
+
+  var values: [Int] {
+    lock.withLock { storage }
+  }
 }

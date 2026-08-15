@@ -10,6 +10,13 @@ package struct ProductM2CleanupResult: Sendable {
   let verified: Bool
 }
 
+struct ProductM2ControlCleanupAuthority: Sendable {
+  let lease: ProductM2ControlLease?
+  let provisionalStop: ProductM2ProvisionalStopCapability?
+  let emergencyStop: ProductM2EmergencyStopCapability?
+  let startReceipt: ProductM2ControlReceipt
+}
+
 package struct ProductM2CleanupRunner: Sendable {
   let dependencies: ProductM2ConnectOnceDependencies
 
@@ -19,17 +26,14 @@ package struct ProductM2CleanupRunner: Sendable {
     coldGeneration: VendorHelperGenerationSnapshot,
     authorizationLease: ProductM2AuthorizedResourceLease?,
     selectedRoutes: VendorCharonSelectedRouteMatcher?,
-    controlLease: ProductM2ControlLease?,
-    provisionalStopCapability: ProductM2ProvisionalStopCapability?,
-    startReceipt: ProductM2ControlReceipt,
+    controlAuthority: ProductM2ControlCleanupAuthority,
     budget: ProductM2AbsoluteBudget
   ) async -> ProductM2CleanupResult {
     let completedControl = await closeControl(
       coldGeneration: coldGeneration,
-      controlLease: controlLease,
-      provisionalStopCapability: provisionalStopCapability,
-      startReceipt: startReceipt,
-      deadline: budget.controlCleanup
+      authority: controlAuthority,
+      deadline: budget.controlCleanup,
+      reportDeadline: budget.report
     )
     let controlCompletedWithinDeadline =
       completedControl.path == .notRequired || budget.controlCleanup.hasRemaining
@@ -48,7 +52,7 @@ package struct ProductM2CleanupRunner: Sendable {
         baseline,
         networkWindow,
         selectedRoutes,
-        startReceipt.requestSent,
+        controlAuthority.startReceipt.requestSent,
         budget.verification
       )
     }.value
@@ -75,13 +79,18 @@ package struct ProductM2CleanupRunner: Sendable {
 
   private func closeControl(
     coldGeneration: VendorHelperGenerationSnapshot,
-    controlLease: ProductM2ControlLease?,
-    provisionalStopCapability: ProductM2ProvisionalStopCapability?,
-    startReceipt: ProductM2ControlReceipt,
-    deadline: ProductM2StageDeadline
+    authority: ProductM2ControlCleanupAuthority,
+    deadline: ProductM2StageDeadline,
+    reportDeadline: ProductM2StageDeadline
   ) async -> ControlCleanup {
-    if let controlLease {
-      guard let timeout = deadline.remainingMilliseconds(cappedAt: 2_000) else {
+    if let controlLease = authority.lease {
+      guard
+        let operationDeadline = availableControlDeadline(
+          deadline,
+          reportDeadline: reportDeadline
+        ),
+        let timeout = operationDeadline.remainingMilliseconds(cappedAt: 2_000)
+      else {
         return .deadlineExceeded
       }
       let stop = await Task.detached {
@@ -97,12 +106,20 @@ package struct ProductM2CleanupRunner: Sendable {
       return await classifyPostStartGeneration(
         coldGeneration: coldGeneration,
         stop: stop,
-        deadline: deadline
+        emergencyStopCapability: authority.emergencyStop,
+        deadline: deadline,
+        reportDeadline: reportDeadline
       )
     }
 
-    if let provisionalStopCapability {
-      guard let timeout = deadline.remainingMilliseconds(cappedAt: 2_000) else {
+    if let provisionalStopCapability = authority.provisionalStop {
+      guard
+        let operationDeadline = availableControlDeadline(
+          deadline,
+          reportDeadline: reportDeadline
+        ),
+        let timeout = operationDeadline.remainingMilliseconds(cappedAt: 2_000)
+      else {
         return .deadlineExceeded
       }
       let stop = await Task.detached {
@@ -118,31 +135,44 @@ package struct ProductM2CleanupRunner: Sendable {
       return await classifyPostStartGeneration(
         coldGeneration: coldGeneration,
         stop: stop,
-        deadline: deadline
+        emergencyStopCapability: authority.emergencyStop,
+        deadline: deadline,
+        reportDeadline: reportDeadline
       )
     }
 
-    guard startReceipt.requestSent else { return .notRequired }
+    guard authority.startReceipt.requestSent else { return .notRequired }
     return await classifyPostStartGeneration(
       coldGeneration: coldGeneration,
       stop: .unsent(.notAttempted),
-      deadline: deadline
+      emergencyStopCapability: authority.emergencyStop,
+      deadline: deadline,
+      reportDeadline: reportDeadline
     )
   }
 
   private func classifyPostStartGeneration(
     coldGeneration: VendorHelperGenerationSnapshot,
     stop: ProductM2ControlReceipt,
-    deadline: ProductM2StageDeadline
+    emergencyStopCapability: ProductM2EmergencyStopCapability?,
+    deadline: ProductM2StageDeadline,
+    reportDeadline: ProductM2StageDeadline
   ) async -> ControlCleanup {
-    guard deadline.hasRemaining else {
+    guard
+      let observationDeadline = availableControlDeadline(
+        deadline,
+        reportDeadline: reportDeadline
+      )
+    else {
       return .deadlineExceeded(stop: stop)
     }
     let observe = dependencies.observeGeneration
-    let shieldedObservation: @Sendable () async -> VendorHelperGenerationSnapshot = {
-      await Task.detached { await observe(deadline) }.value
-    }
-    let post = await shieldedObservation()
+    let shieldedObservation:
+      @Sendable (ProductM2StageDeadline) async -> VendorHelperGenerationSnapshot =
+        { observationDeadline in
+          await Task.detached { await observe(observationDeadline) }.value
+        }
+    let post = await shieldedObservation(observationDeadline)
     if ProductM2GenerationFence.singleExitedGeneration(coldGeneration, post) {
       return ControlCleanup(
         path: .naturalHelperExit,
@@ -157,24 +187,35 @@ package struct ProductM2CleanupRunner: Sendable {
         emergencyStop: .unsent(.notAttempted)
       )
     }
-
-    let control = dependencies.control
-    guard let timeout = deadline.remainingMilliseconds(cappedAt: 2_000) else {
+    guard let emergencyStopCapability else {
+      return ControlCleanup(
+        path: .cleanupUnproven,
+        stop: stop,
+        emergencyStop: .unsent(.notAttempted)
+      )
+    }
+    guard
+      let emergencyDeadline = availableControlDeadline(
+        deadline,
+        reportDeadline: reportDeadline
+      ),
+      let timeout = emergencyDeadline.remainingMilliseconds(cappedAt: 2_000)
+    else {
       return .deadlineExceeded(stop: stop)
     }
     let emergency = await Task.detached {
-      await control.emergencyStop(
+      await emergencyStopCapability.stop(
         timeoutMilliseconds: timeout,
         expectedRunningPredicate: {
           ProductM2GenerationFence.singleRunningGeneration(
             coldGeneration,
-            await shieldedObservation()
+            await shieldedObservation(emergencyDeadline)
           )
         },
         peerGenerationValidator: {
           ProductM2GenerationFence.validatesReply(
             before: coldGeneration,
-            current: await shieldedObservation()
+            current: await shieldedObservation(emergencyDeadline)
           )
         }
       )
@@ -184,6 +225,14 @@ package struct ProductM2CleanupRunner: Sendable {
       stop: stop,
       emergencyStop: emergency
     )
+  }
+
+  private func availableControlDeadline(
+    _ deadline: ProductM2StageDeadline,
+    reportDeadline: ProductM2StageDeadline
+  ) -> ProductM2StageDeadline? {
+    if deadline.hasRemaining { return deadline }
+    return reportDeadline.hasRemaining ? reportDeadline : nil
   }
 
   private func closeAuthorization(
