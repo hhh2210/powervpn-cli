@@ -5,8 +5,14 @@ enum M2ConnectOnceCommandError: Error, Equatable, CustomStringConvertible {
   case invalidArguments
 
   var description: String {
-    "usage: powervpn m2 connect-once --resource-display-name <exact> --ssh-target <thu21|thu52> --json"
+    "usage: powervpn m2 connect-once --resource-display-name <exact> "
+      + "--ssh-target <thu21|thu52> [--non-interactive] --json"
   }
+}
+
+struct M2ConnectOnceInvocation: Equatable, Sendable {
+  let request: ProductM2ConnectRequest
+  let nonInteractive: Bool
 }
 
 struct M2ConnectOnceCommandResult: Equatable, Sendable {
@@ -39,23 +45,26 @@ func runM2ConnectOnceCommand(
   },
   runtime: @escaping M2ConnectOnceRuntimeOperation
 ) async throws -> M2ConnectOnceCommandResult {
-  let request = try parseM2ConnectOnceArguments(arguments)
+  let invocation = try parseM2ConnectOnceInvocation(arguments)
+  let request = invocation.request
   if let failure = authorizationAvailabilityFailure() {
     return try lifecycleResult(failure.rawValue, exitCode: 69)
   }
-  let code: String
-  do {
-    code = try generateApprovalCode()
-  } catch {
-    return try approvalResult(.unavailable)
-  }
-  let approvalOutcome = approval.request(
-    code: code,
-    resourceDisplayName: request.resourceDisplayName,
-    sshTarget: request.sshTarget.rawValue
-  )
-  guard approvalOutcome == .accepted else {
-    return try approvalResult(approvalOutcome)
+  if !invocation.nonInteractive {
+    let code: String
+    do {
+      code = try generateApprovalCode()
+    } catch {
+      return try approvalResult(.unavailable)
+    }
+    let approvalOutcome = approval.request(
+      code: code,
+      resourceDisplayName: request.resourceDisplayName,
+      sshTarget: request.sshTarget.rawValue
+    )
+    guard approvalOutcome == .accepted else {
+      return try approvalResult(approvalOutcome)
+    }
   }
 
   let budget = budgetFactory()
@@ -84,19 +93,23 @@ func runM2ConnectOnceCommand(
   case .cancelledBeforeRuntime:
     return try lifecycleResult("cancelled_before_mutation", exitCode: 130)
   case .report(let report):
-    return try encodedResult(report, exitCode: m2ConnectOnceExitCode(report))
+    var annotated = report
+    annotated.approvalMode = invocation.nonInteractive ? "non_interactive" : "tty_code"
+    return try encodedResult(annotated, exitCode: m2ConnectOnceExitCode(annotated))
   }
 }
 
-func parseM2ConnectOnceArguments(
+func parseM2ConnectOnceInvocation(
   _ arguments: [String]
-) throws -> ProductM2ConnectRequest {
-  guard arguments.count == 7,
+) throws -> M2ConnectOnceInvocation {
+  let nonInteractive = arguments.count == 8
+  guard arguments.count == 7 || nonInteractive,
     arguments[0] == "m2",
     arguments[1] == "connect-once",
     arguments[2] == "--resource-display-name",
     arguments[4] == "--ssh-target",
-    arguments[6] == "--json"
+    !nonInteractive || arguments[6] == "--non-interactive",
+    arguments[nonInteractive ? 7 : 6] == "--json"
   else { throw M2ConnectOnceCommandError.invalidArguments }
   let displayName = arguments[3]
   guard validResourceDisplayName(displayName) else {
@@ -108,7 +121,16 @@ func parseM2ConnectOnceArguments(
   case "thu52": target = .thu52
   default: throw M2ConnectOnceCommandError.invalidArguments
   }
-  return ProductM2ConnectRequest(resourceDisplayName: displayName, sshTarget: target)
+  return M2ConnectOnceInvocation(
+    request: ProductM2ConnectRequest(resourceDisplayName: displayName, sshTarget: target),
+    nonInteractive: nonInteractive
+  )
+}
+
+func parseM2ConnectOnceArguments(
+  _ arguments: [String]
+) throws -> ProductM2ConnectRequest {
+  try parseM2ConnectOnceInvocation(arguments).request
 }
 
 func m2ConnectOnceExitCode(_ report: ProductM2ConnectReport) -> Int32 {

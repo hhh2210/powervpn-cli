@@ -29,7 +29,11 @@ func printCLIUsage() {
       snapshot --dry-run --json
                              Check authorized snapshot completeness without serializing it
       m2 connect-once --resource-display-name <exact> --ssh-target <thu21|thu52> --json
-                             Run one approved M2 connect/prove/cleanup transaction
+                             Run one M2 connect/prove/cleanup transaction with TTY code approval
+      m2 connect-once --resource-display-name <exact> --ssh-target <thu21|thu52> --non-interactive --json
+                             Run one M2 transaction without TTY approval; portal credentials
+                             come from ~/.config/powervpn/credentials.env (0600) or
+                             POWERVPN_PORTAL_CREDENTIALS
 
     Options:
       --json                 Emit JSON

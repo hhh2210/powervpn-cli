@@ -36,7 +36,7 @@ struct PortalLoginRuntimeDependencies: Sendable {
         transport: transport
       )
     },
-    credentialReader: DarwinSecureTerminalCredentialReader(),
+    credentialReader: PortalCredentialPrecedenceReader.currentMachine(),
     serialReader: InstalledPlatformSerialNumberReader(),
     sleeper: ContinuousPortalSleeper(),
     operatingSystemVersion: {

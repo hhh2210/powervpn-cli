@@ -240,7 +240,7 @@ public struct ProductM2ConnectRequest: Equatable, Sendable {
 }
 
 public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
-  public let schemaVersion = 7
+  public let schemaVersion = 8
   public let outcome: ProductM2ConnectOutcome
   public let finalState: ProductM2ConnectionState
   public let lastGoodState: ProductM2ConnectionState
@@ -267,4 +267,9 @@ public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
   public let automaticRetryCount = 0
   public let containsSecrets = false
   public let snapshotSerialized = false
+  /// Approval mode the CLI used before invoking the runtime:
+  /// "tty_code" (operator typed the generated code) or "non_interactive"
+  /// (credentials came from a protected file; no TTY approval). Nil when the
+  /// report was produced without a CLI approval stage (runtime-only tests).
+  public var approvalMode: String? = nil
 }
