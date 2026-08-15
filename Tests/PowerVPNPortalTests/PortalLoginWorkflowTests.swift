@@ -276,6 +276,76 @@ import Testing
     #expect(await transport.snapshots().count == 1)
   }
 
+  // MARK: official code-0 fallback-only session (f742c8b live regression)
+
+  /// Live attempt-2 shape (2026-08-15, f742c8b, login52/thu52): password POST
+  /// code=0 with no usable Set-Cookie framing — official parity proceeds from
+  /// code 0 on whatever cookies it holds (`0x1000a72c7`), storage is
+  /// opportunistic (`0x100177610`–`0x100177819`). The resource exchange then
+  /// succeeds, so acquisition must complete on the fallback-only generation
+  /// (active generation, zero retained session bytes).
+  @Test func acquireWithFallbackOnlySessionAfterCodeZeroWithoutCookieSucceeds() async throws {
+    let transport = SyntheticPortalTransport([
+      .response(status: 200, body: acceptedLoginXML),
+      .response(status: 200, body: acceptedResourceXML),
+      .response(status: 200, body: ""),
+    ])
+    let workflow = try PortalLoginWorkflow(
+      factory: syntheticRequestFactory(),
+      transport: transport,
+      sleeper: SyntheticPortalSleeper()
+    )
+
+    let result = await workflow.acquire(
+      credentials: try syntheticCredentials(),
+      platformSerial: try syntheticSerial()
+    )
+
+    guard case .acquired(let lease) = result else {
+      Issue.record("unexpected acquisition rejection: \(result)")
+      return
+    }
+    #expect(lease.snapshot.isAccessible)
+    #expect(await transport.snapshots().map(\.method) == [.post, .get])
+    // The fallback generation carries no session bytes but must still mint a
+    // logout-capable lease: the logout POST goes out with the language-only
+    // cookie header and the close is a completed remote exchange.
+    let snapshots = await transport.snapshots()
+    #expect(snapshots[1].cookie == " VSG_LANGUAGE=zh_CN; ")
+    #expect(
+      await lease.logoutAndErase()
+        == PortalLeaseLogoutResult(
+          status: .accepted,
+          failureClass: .completedRemoteExchange
+        ))
+  }
+
+  /// Same fallback path when the Set-Cookie is present but unsupported for
+  /// storage (verifycode prefix): code 0 still proceeds officially.
+  @Test func acquireWithUnsupportedSessionCookieStillProceedsOfficially() async throws {
+    let transport = SyntheticPortalTransport([
+      .response(status: 200, body: acceptedLoginXML, setCookie: "verifycode=1234; Path=/"),
+      .response(status: 200, body: acceptedResourceXML),
+      .response(status: 200, body: ""),
+    ])
+    let workflow = try PortalLoginWorkflow(
+      factory: syntheticRequestFactory(),
+      transport: transport,
+      sleeper: SyntheticPortalSleeper()
+    )
+
+    let result = await workflow.acquire(
+      credentials: try syntheticCredentials(),
+      platformSerial: try syntheticSerial()
+    )
+
+    guard case .acquired = result else {
+      Issue.record("unexpected acquisition rejection: \(result)")
+      return
+    }
+    #expect(await transport.snapshots().map(\.method) == [.post, .get])
+  }
+
   private func loginXML(_ code: String) -> String {
     "<RESPONSE><RESULT code=\"\(code)\"/></RESPONSE>"
   }

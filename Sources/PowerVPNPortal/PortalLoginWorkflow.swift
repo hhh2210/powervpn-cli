@@ -133,7 +133,7 @@ struct PortalLoginWorkflow: Sendable {
         platformSerial.count == 0,
         cleanup.requests,
         cleanup.responses,
-        factory.retainedSessionByteCount > 0,
+        factory.hasActiveAuthenticatedGeneration,
         snapshot.isAccessible
       else {
         snapshot.erase()

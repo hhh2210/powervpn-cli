@@ -185,6 +185,10 @@ struct PortalRequestFactory: Sendable {
     cookieJar.retainedSessionByteCount
   }
 
+  var hasActiveAuthenticatedGeneration: Bool {
+    cookieJar.hasActiveAuthenticatedGeneration
+  }
+
   private func makeRequest(
     operation: PortalRequestOperation,
     method: PortalHTTPMethod,

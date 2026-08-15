@@ -65,6 +65,14 @@ final class LeadSecPortalCookieJar: @unchecked Sendable {
     lock.withLock { sessionEntry?.count ?? 0 }
   }
 
+  /// Official code-0 parity keeps an active generation even when no session
+  /// cookie could be stored (storage is opportunistic, `0x100177610`–
+  /// `0x100177819`); acquisition invariants must key on this, not on retained
+  /// session bytes.
+  var hasActiveAuthenticatedGeneration: Bool {
+    lock.withLock { !isErased && authenticationGeneration?.isActive == true }
+  }
+
   func currentAuthenticationGeneration() throws -> PortalAuthenticationGeneration {
     try lock.withLock {
       guard !isErased, let authenticationGeneration,
