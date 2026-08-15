@@ -169,6 +169,33 @@ struct ProductPortalDryRunRuntimeTests {
     #expect(fixture.transport.requestCount == 1)
   }
 
+  /// Official logout transport admits exactly 200–204
+  /// (BBHTTPSelectiveDiscarder `0x1001bc8b7`–`0x1001bc99b`); an off-200
+  /// family member accepts the dry run, recording the class additively for
+  /// observability.
+  @Test func officialFamilyLogoutStatusStillAcceptsDryRun() async throws {
+    for statusCode in [201, 204] {
+      let fixture = try portalDryRunLease(
+        resourceXML: m2ResourceXML(["login21"]),
+        logoutStatusCode: statusCode
+      )
+      defer { fixture.erase() }
+      let lease = fixture.lease
+      let runtime = ProductPortalDryRunRuntime { .acquired(lease) }
+
+      let report = await runtime.run(request())
+
+      #expect(report.outcome == .accepted)
+      #expect(report.logoutOutcome == .accepted)
+      #expect(report.logoutFailureClass == .acceptedRemoteExchange)
+      #expect(report.operations.logoutAttempted)
+      #expect(report.operations.logoutAccepted)
+      #expect(report.ownedMaterialErased)
+      #expect(report.dryRunAccepted)
+      #expect(fixture.transport.requestCount == 1)
+    }
+  }
+
   @Test func logoutTransportFailureClassifiesTransportFailed() async throws {
     let fixture = try portalDryRunLease(
       resourceXML: m2ResourceXML(["login21"]),

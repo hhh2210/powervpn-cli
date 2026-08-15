@@ -8,8 +8,9 @@ package enum PortalLeaseLogoutStatus: String, Sendable {
   case alreadyClosed = "already_closed"
 }
 
-/// Value-free class of a rejected logout: whether the request could not be
-/// constructed, the transport failed, or the remote exchange completed.
+/// Value-free class accompanying a logout result: whether the request could
+/// not be constructed, the transport failed, or the remote exchange completed
+/// outside the official 200...204 acceptance family.
 ///
 /// Official-contract context (PowerVPN 3.2.1 (24572) static dossier,
 /// 2026-08-14, `-[VSGAuthManager logout]` `0x1000a6810`): the official
@@ -17,18 +18,30 @@ package enum PortalLeaseLogoutStatus: String, Sendable {
 /// parsed object — it deletes every `VSG_SESSIONID` cookie
 /// (`0x1000a6af1`–`0x1000a6cc0`) and reports literal `0` to the delegate
 /// (`0x1000a6d7a`–`0x1000a6def`). A completed exchange is therefore
-/// officially non-failing regardless of HTTP status. Native acceptance stays
-/// exactly-200 (a separate compatibility decision); local erasure is
+/// officially non-failing regardless of HTTP status.
+///
+/// The native lease mirrors the transport-level half of that contract: the
+/// shared BBHTTPSelectiveDiscarder gate admits exactly 200–204 before any
+/// body is read (construction `0x1001bc8b7`–`0x1001bc99b`, rejection
+/// `0x1001bcac0`), so a status inside 200...204 is `.accepted`, and a
+/// completed exchange outside the family is `.rejected` with the class kept
+/// populated for observability. A completed-remote-exchange rejection is a
+/// divergence marker, not an official failure mode. Local erasure stays
 /// unconditional either way.
 package enum PortalLeaseLogoutFailureClass: String, Equatable, Sendable {
   case requestConstructionFailed = "request_construction_failed"
   case transportFailed = "transport_failed"
   case completedRemoteExchange = "completed_remote_exchange"
+  /// Accepted remote exchange outside plain 200, carried for observability
+  /// only; the status is `.accepted`.
+  case acceptedRemoteExchange = "accepted_remote_exchange"
 }
 
 package struct PortalLeaseLogoutResult: Equatable, Sendable {
   package let status: PortalLeaseLogoutStatus
-  /// Present only when `status == .rejected`.
+  /// Populated when the outcome carries a diagnostic class: non-nil for
+  /// `requestConstructionFailed`/`transportFailed` rejections and for an
+  /// `acceptedRemoteExchange` acceptance; nil otherwise.
   package let failureClass: PortalLeaseLogoutFailureClass?
 
   package init(
@@ -43,6 +56,15 @@ package struct PortalLeaseLogoutResult: Equatable, Sendable {
 package enum PortalSnapshotAcquisitionResult: Sendable {
   case acquired(AuthenticatedPortalLease)
   case rejected(PortalLoginReport)
+}
+
+/// Official logout status acceptance family: the shared converter chain's
+/// BBHTTPSelectiveDiscarder admits exactly these statuses before the
+/// completion block runs (`0x1001bc8b7`–`0x1001bc99b`, immediates
+/// 0xc8...0xcc). Mirrors the password gate's 200...204 boundary
+/// (`PortalAuthenticationFlow.passwordOutcome`).
+package enum PortalLogoutOfficialAcceptance {
+  package static let statusCodes: ClosedRange<Int> = 200...204
 }
 
 /// Package-scoped owner for one authenticated Portal generation. Explicit
@@ -92,11 +114,20 @@ package actor AuthenticatedPortalLease {
       do {
         let response = try await transport.perform(request)
         request.erase()
-        let accepted = response.statusCode == 200
+        // Official transport gate (BBHTTPSelectiveDiscarder, 0x1001bcac0)
+        // rejects any status outside 200...204 before the body is read, so
+        // the completion below mirrors that exact family.
+        let statusCode = response.statusCode
         response.erase()
+        let accepted =
+          PortalLogoutOfficialAcceptance.statusCodes.contains(statusCode)
         observation.complete(
           accepted
-            ? PortalLeaseLogoutResult(status: .accepted)
+            ? PortalLeaseLogoutResult(
+              status: .accepted,
+              failureClass: statusCode == 200
+                ? nil : .acceptedRemoteExchange
+            )
             : PortalLeaseLogoutResult(
               status: .rejected,
               failureClass: .completedRemoteExchange

@@ -135,8 +135,24 @@ import Testing
     #expect(await transport.allOwnedResponseMaterialErased())
   }
 
-  @Test func rejectedAndCancelledLogoutBothCloseAndEraseTheLease() async throws {
+  @Test func nonAcceptedLogoutRejectsClosesAndErasesTheLease() async throws {
     let cases: [(SyntheticTransportStep, PortalLeaseLogoutResult)] = [
+      (
+        .response(status: 199, body: ""),
+        PortalLeaseLogoutResult(status: .rejected, failureClass: .completedRemoteExchange)
+      ),
+      (
+        .response(status: 205, body: ""),
+        PortalLeaseLogoutResult(status: .rejected, failureClass: .completedRemoteExchange)
+      ),
+      (
+        .response(status: 302, body: ""),
+        PortalLeaseLogoutResult(status: .rejected, failureClass: .completedRemoteExchange)
+      ),
+      (
+        .response(status: 404, body: ""),
+        PortalLeaseLogoutResult(status: .rejected, failureClass: .completedRemoteExchange)
+      ),
       (
         .response(status: 500, body: ""),
         PortalLeaseLogoutResult(status: .rejected, failureClass: .completedRemoteExchange)
@@ -173,6 +189,47 @@ import Testing
       #expect(await transport.snapshots().map(\.method) == [.post, .get, .post])
       #expect(await transport.allOwnedRequestMaterialErased())
       #expect(await transport.allOwnedResponseMaterialErased())
+    }
+  }
+
+  /// Official logout transport gate (BBHTTPSelectiveDiscarder,
+  /// `0x1001bc8b7`–`0x1001bc99b`) admits exactly 200–204; the lease-level
+  /// gate mirrors that family, recording non-200 members as accepted remote
+  /// exchanges for observability.
+  @Test func officialAcceptedFamily200to204AcceptsLogout() async throws {
+    let cases: [(Int, PortalLeaseLogoutResult)] = [
+      (200, PortalLeaseLogoutResult(status: .accepted)),
+      (
+        201,
+        PortalLeaseLogoutResult(status: .accepted, failureClass: .acceptedRemoteExchange)
+      ),
+      (
+        204,
+        PortalLeaseLogoutResult(status: .accepted, failureClass: .acceptedRemoteExchange)
+      ),
+    ]
+    for (statusCode, expected) in cases {
+      let transport = SyntheticPortalTransport([
+        .response(status: 200, body: acceptedLoginXML, setCookie: syntheticSessionCookie),
+        .response(status: 200, body: acceptedResourceXML),
+        .response(status: statusCode, body: ""),
+      ])
+      let workflow = try PortalLoginWorkflow(
+        factory: try syntheticRequestFactory(),
+        transport: transport,
+        sleeper: SyntheticPortalSleeper()
+      )
+      let result = await workflow.acquire(
+        credentials: try syntheticCredentials(),
+        platformSerial: try syntheticSerial()
+      )
+      guard case .acquired(let lease) = result else {
+        Issue.record("unexpected acquisition rejection")
+        continue
+      }
+
+      #expect(await lease.logoutAndErase() == expected)
+      #expect(lease.snapshot.isErased)
     }
   }
 
