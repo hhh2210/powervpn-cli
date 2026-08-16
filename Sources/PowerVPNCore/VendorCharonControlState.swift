@@ -44,8 +44,14 @@ final class VendorCharonControlState: @unchecked Sendable {
   var validation: VendorCharonAsyncValidation?
   var ncRouteToggleContinuation: CheckedContinuation<VendorCharonControlReceipt, Never>?
   var ncRouteToggleValidation: VendorCharonAsyncValidation?
+  var ncRouteToggleValidator: (@Sendable () async -> Bool)?
+  var ncRouteToggleAcknowledgementObserved = false
   var ncRouteToggleAttemptSequence: UInt64 = 0
   var activeNCRouteToggleAttempt: UInt64?
+  // Submitted identities stay queued after per-attempt finish so late ordinary
+  // acknowledgements consume their original tombstone instead of a newer attempt.
+  var ncRouteToggleOrdinaryAcknowledgementAttempts: [UInt64] = []
+  var ncRouteToggleOrdinaryAcknowledgementHead = 0
   var requestSent = false
   var emptyReplyObserved = false
   var statusEvents = 0
@@ -342,6 +348,9 @@ final class VendorCharonControlState: @unchecked Sendable {
       handleStatusWait(signal.classification)
     case .tunnelNameReported:
       break
+    case .ncRouteToggleAcknowledgement(let success):
+      guard let attempt = consumeNCRouteToggleOrdinaryAcknowledgementAttempt() else { return }
+      handleNCRouteToggleAcknowledgement(success, attempt: attempt)
     case .emptyDispatcherTail:
       updateObservation {
         if dispatcherTailEvents < Int.max { dispatcherTailEvents += 1 }

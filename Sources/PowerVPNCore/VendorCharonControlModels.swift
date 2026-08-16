@@ -30,7 +30,7 @@ package enum VendorCharonControlOutcome: String, Equatable, Sendable {
 ///
 /// `requestSent` means the request was handed to libxpc. Start/stop use an
 /// exact empty acknowledgement; `resourceToggleNC` uses an exact true boolean
-/// reply. Neither acknowledgement proves tunnel routing or cleanup.
+/// acknowledgement on either XPC channel. Neither proves routing or cleanup.
 package struct VendorCharonControlReceipt: Equatable, Sendable {
   package let operation: VendorCharonControlOperation
   package let outcome: VendorCharonControlOutcome
@@ -89,7 +89,7 @@ package struct VendorCharonControlReceipt: Equatable, Sendable {
 
   package var helperMayHaveMutated: Bool { requestSent }
 
-  /// The route-toggle reply proves only that the helper accepted the request.
+  /// The route-toggle acknowledgement proves only that the helper accepted the request.
   package var helperSuccessEstablished: Bool {
     operation == .resourceToggleNC && transportAcknowledged
   }

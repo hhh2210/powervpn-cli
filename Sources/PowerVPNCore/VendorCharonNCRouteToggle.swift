@@ -111,6 +111,8 @@ extension VendorCharonControlState {
     phase = .togglingNC
     activeNCRouteToggleAttempt = identity
     ncRouteToggleContinuation = continuation
+    ncRouteToggleValidator = peerGenerationValidator
+    ncRouteToggleAcknowledgementObserved = false
     requestSent = false
     emptyReplyObserved = false
     updateObservation { replySignatures = [] }
@@ -127,13 +129,13 @@ extension VendorCharonControlState {
       self.queue.async {
         self.handleNCRouteToggleReply(
           event,
-          attempt: identity,
-          peerGenerationValidator: peerGenerationValidator
+          attempt: identity
         )
       }
     }
     switch submission {
     case .submitted:
+      ncRouteToggleOrdinaryAcknowledgementAttempts.append(identity)
       requestSent = true
     case .rejected(let outcome):
       finishNCRouteToggle(
@@ -146,8 +148,7 @@ extension VendorCharonControlState {
 
   private func handleNCRouteToggleReply(
     _ event: VendorCharonControlReplyEvent,
-    attempt: UInt64,
-    peerGenerationValidator: @escaping @Sendable () async -> Bool
+    attempt: UInt64
   ) {
     guard phase == .togglingNC, activeNCRouteToggleAttempt == attempt else {
       return
@@ -156,8 +157,7 @@ extension VendorCharonControlState {
       recordReplyWireSignature(signature)
       handleNCRouteToggleReply(
         decoded,
-        attempt: attempt,
-        peerGenerationValidator: peerGenerationValidator
+        attempt: attempt
       )
       return
     }
@@ -165,26 +165,7 @@ extension VendorCharonControlState {
     case .decodedDictionary:
       return
     case .ncRouteToggleAcknowledgement(let success):
-      guard success else {
-        finishNCRouteToggle(
-          .helperRejected,
-          retainConnection: true,
-          attempt: attempt
-        )
-        return
-      }
-      guard ncRouteToggleValidation == nil else { return }
-      ncRouteToggleValidation = VendorCharonAsyncValidation(
-        operation: peerGenerationValidator
-      ) { [weak self] accepted in
-        guard let self else { return }
-        self.queue.async {
-          self.completeNCRouteToggleValidation(
-            accepted,
-            attempt: attempt
-          )
-        }
-      }
+      handleNCRouteToggleAcknowledgement(success, attempt: attempt)
     case .emptyAcknowledgement, .unexpectedPayload:
       finishNCRouteToggle(
         .unexpectedReplyPayload,
@@ -198,6 +179,69 @@ extension VendorCharonControlState {
         retainConnection: false,
         attempt: attempt
       )
+    }
+  }
+
+  func consumeNCRouteToggleOrdinaryAcknowledgementAttempt() -> UInt64? {
+    guard
+      ncRouteToggleOrdinaryAcknowledgementHead
+        < ncRouteToggleOrdinaryAcknowledgementAttempts.count
+    else {
+      return nil
+    }
+    let attempt =
+      ncRouteToggleOrdinaryAcknowledgementAttempts[ncRouteToggleOrdinaryAcknowledgementHead]
+    ncRouteToggleOrdinaryAcknowledgementHead += 1
+    if ncRouteToggleOrdinaryAcknowledgementHead >= 32,
+      ncRouteToggleOrdinaryAcknowledgementHead
+        >= ncRouteToggleOrdinaryAcknowledgementAttempts.count
+        - ncRouteToggleOrdinaryAcknowledgementHead
+    {
+      ncRouteToggleOrdinaryAcknowledgementAttempts.removeFirst(
+        ncRouteToggleOrdinaryAcknowledgementHead
+      )
+      ncRouteToggleOrdinaryAcknowledgementHead = 0
+    }
+    return attempt
+  }
+
+  func handleNCRouteToggleAcknowledgement(
+    _ success: Bool,
+    attempt: UInt64
+  ) {
+    guard phase == .togglingNC,
+      activeNCRouteToggleAttempt == attempt,
+      !ncRouteToggleAcknowledgementObserved
+    else {
+      return
+    }
+    ncRouteToggleAcknowledgementObserved = true
+    guard success else {
+      finishNCRouteToggle(
+        .helperRejected,
+        retainConnection: true,
+        attempt: attempt
+      )
+      return
+    }
+    guard let validator = ncRouteToggleValidator else {
+      finishNCRouteToggle(
+        .unexpectedXPCError,
+        retainConnection: false,
+        attempt: attempt
+      )
+      return
+    }
+    ncRouteToggleValidation = VendorCharonAsyncValidation(
+      operation: validator
+    ) { [weak self] accepted in
+      guard let self else { return }
+      self.queue.async {
+        self.completeNCRouteToggleValidation(
+          accepted,
+          attempt: attempt
+        )
+      }
     }
   }
 
@@ -258,6 +302,8 @@ extension VendorCharonControlState {
     timer = nil
     ncRouteToggleValidation?.cancel()
     ncRouteToggleValidation = nil
+    ncRouteToggleValidator = nil
+    ncRouteToggleAcknowledgementObserved = false
     let cancelled = retainConnection ? false : cancelDriver()
     phase = retainConnection ? .active : .closed
     let receipt = makeReceipt(

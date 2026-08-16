@@ -9,6 +9,7 @@ enum VendorCharonControlConnectionEvent: Equatable, Sendable {
   )
   case status(VendorCharonStatusSignal)
   case tunnelNameReported(success: Bool)
+  case ncRouteToggleAcknowledgement(success: Bool)
   case emptyDispatcherTail
   case unexpectedDictionary
   case connectionInterrupted
@@ -219,6 +220,9 @@ enum VendorCharonControlWireCodec {
     if type == XPC_TYPE_ERROR { return .unexpectedXPCError }
     guard type == XPC_TYPE_DICTIONARY else { return .unexpectedConnectionEvent }
     if xpc_dictionary_get_count(object) == 0 { return .emptyDispatcherTail }
+    if let success = ncRouteToggleAcknowledgement(object) {
+      return .ncRouteToggleAcknowledgement(success: success)
+    }
     if let success = tunnelNameReport(object) {
       return .tunnelNameReported(success: success)
     }
@@ -243,12 +247,17 @@ enum VendorCharonControlWireCodec {
     if xpc_dictionary_get_count(object) == 0 {
       return .emptyAcknowledgement
     }
+    guard let success = ncRouteToggleAcknowledgement(object) else {
+      return .unexpectedPayload
+    }
+    return .ncRouteToggleAcknowledgement(success: success)
+  }
+
+  private static func ncRouteToggleAcknowledgement(_ object: xpc_object_t) -> Bool? {
     guard xpc_dictionary_get_count(object) == 1,
       hasType(object, key: "updown_nc_success", type: XPC_TYPE_BOOL)
-    else { return .unexpectedPayload }
-    return .ncRouteToggleAcknowledgement(
-      success: xpc_dictionary_get_bool(object, "updown_nc_success")
-    )
+    else { return nil }
+    return xpc_dictionary_get_bool(object, "updown_nc_success")
   }
 
   private static func tunnelNameReport(_ object: xpc_object_t) -> Bool? {

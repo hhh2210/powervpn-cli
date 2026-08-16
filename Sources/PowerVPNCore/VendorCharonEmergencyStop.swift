@@ -264,6 +264,8 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
       if statusEventCount < Int.max { statusEventCount += 1 }
     case .tunnelNameReported:
       break
+    case .ncRouteToggleAcknowledgement:
+      break
     case .emptyDispatcherTail:
       if dispatcherTailEventCount < Int.max { dispatcherTailEventCount += 1 }
       guard stopRequestSent else { return }
