@@ -154,7 +154,7 @@ private func authenticatedContextFactory() throws -> PortalRequestFactory {
   defer { response.erase() }
   try factory.acceptPasswordSession(
     from: response,
-    passwordURL: URL(string: "https://166.111.143.19:4443/vpn/user/auth/password")!
+    passwordURL: URL(string: "https://192.0.2.1:4443/vpn/user/auth/password")!
   )
   return factory
 }

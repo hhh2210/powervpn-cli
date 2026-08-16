@@ -8,8 +8,8 @@ import Testing
     let invocation = try parseProxySSHInvocation(proxySSHArguments)
     #expect(invocation.request.resourceDisplayName == "Marker Resource")
     #expect(invocation.request.sshTarget == .thu21)
-    #expect(invocation.destinationText == "11.11.30.21")
-    #expect(invocation.destinationIPv4 == 0x0b0b_1e15)
+    #expect(invocation.destinationText == "192.0.2.21")
+    #expect(invocation.destinationIPv4 == 0xC000_0215)
     #expect(invocation.destinationPort == 22)
     #expect(invocation.nonInteractive)
 
@@ -38,12 +38,11 @@ import Testing
     }
   }
 
-  @Test func sshRejectsOpenGrammarAndUnsafeNamesBeforeRuntime() {
+  @Test func sshRejectsOpenGrammarAndUnsafeResourceNamesBeforeRuntime() {
     let invalidShapes = [
       Array(proxySSHArguments.dropLast(2)),
       proxySSHArguments + ["extra"],
       proxySSHArguments.enumerated().map { $0.offset == 1 ? "serve" : $0.element },
-      proxySSHArguments.enumerated().map { $0.offset == 5 ? "other" : $0.element },
       proxySSHArguments.enumerated().map { $0.offset == 3 ? "bad\nname" : $0.element },
     ]
     for arguments in invalidShapes {

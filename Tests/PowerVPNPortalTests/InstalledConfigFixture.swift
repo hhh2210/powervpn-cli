@@ -82,7 +82,7 @@ final class InstalledConfigFixture {
 
   static let lockedEndpoint = SealedPortalEndpoint(
     scheme: "https",
-    host: "166.111.143.19",
+    host: "192.0.2.1",
     port: 4_443,
     portalVersion: "2.0",
     selectionSemantics: .latestPrimaryKeyFallback

@@ -4,12 +4,12 @@ import Testing
 @testable import PowerVPNPortal
 
 @Suite struct PortalTrustPolicyTests {
-  private let policy = PortalTrustPolicy(exactHost: "166.111.143.19")
+  private let policy = PortalTrustPolicy(exactHost: "192.0.2.1")
 
   @Test func exactHostRequiresSuccessfulSystemTrust() {
     #expect(
-      decision(host: "166.111.143.19", systemTrustAccepted: true) == .useSystemCredential)
-    #expect(decision(host: "166.111.143.19", systemTrustAccepted: false) == .reject)
+      decision(host: "192.0.2.1", systemTrustAccepted: true) == .useSystemCredential)
+    #expect(decision(host: "192.0.2.1", systemTrustAccepted: false) == .reject)
   }
 
   @Test func hostComparisonIsExactAndFailsBeforeTrustEvaluation() {
@@ -32,22 +32,22 @@ import Testing
     #expect(
       policy.authenticationDisposition(
         authenticationMethod: NSURLAuthenticationMethodServerTrust,
-        host: "166.111.143.19",
+        host: "192.0.2.1",
         serverTrustAvailable: false,
         evaluateSystemTrust: { true }
       ) == .reject)
     #expect(
       policy.authenticationDisposition(
         authenticationMethod: NSURLAuthenticationMethodHTTPBasic,
-        host: "166.111.143.19",
+        host: "192.0.2.1",
         serverTrustAvailable: true,
         evaluateSystemTrust: { true }
       ) == .reject)
   }
 
   @Test func sameOriginAndCrossOriginRedirectsAreBothRejected() throws {
-    let source = try #require(URL(string: "https://166.111.143.19:4443/login"))
-    let sameOrigin = try #require(URL(string: "https://166.111.143.19:4443/next"))
+    let source = try #require(URL(string: "https://192.0.2.1:4443/login"))
+    let sameOrigin = try #require(URL(string: "https://192.0.2.1:4443/next"))
     let crossOrigin = try #require(URL(string: "https://example.invalid/next"))
 
     #expect(policy.redirectDisposition(from: source, to: sameOrigin) == .reject)
@@ -55,9 +55,9 @@ import Testing
   }
 
   @Test func urlSessionDelegateCancelsBothRedirectCallbacksBeforeSecondRequest() throws {
-    let source = try #require(URL(string: "https://166.111.143.19:4443/login"))
+    let source = try #require(URL(string: "https://192.0.2.1:4443/login"))
     let targets = [
-      try #require(URL(string: "https://166.111.143.19:4443/next")),
+      try #require(URL(string: "https://192.0.2.1:4443/next")),
       try #require(URL(string: "https://example.invalid/next")),
     ]
     let delegate = PortalURLSessionDelegate(
@@ -90,7 +90,7 @@ import Testing
   }
 
   @Test func urlSessionDelegateRejectsEveryTaskLevelAuthenticationChallenge() throws {
-    let source = try #require(URL(string: "https://166.111.143.19:4443/login"))
+    let source = try #require(URL(string: "https://192.0.2.1:4443/login"))
     let delegate = PortalURLSessionDelegate(
       policy: policy,
       evaluateSystemTrust: { _, _ in true }
@@ -99,7 +99,7 @@ import Testing
     defer { session.invalidateAndCancel() }
     let task = session.dataTask(with: source)
     let protectionSpace = URLProtectionSpace(
-      host: "166.111.143.19",
+      host: "192.0.2.1",
       port: 4_443,
       protocol: "https",
       realm: "synthetic",

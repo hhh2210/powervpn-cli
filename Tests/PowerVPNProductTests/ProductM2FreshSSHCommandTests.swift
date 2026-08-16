@@ -1,4 +1,5 @@
 import Foundation
+import PowerVPNPortal
 import Testing
 
 @testable import PowerVPNProduct
@@ -6,12 +7,22 @@ import Testing
 @Suite struct ProductM2FreshSSHCommandTests {
   private let challenge = "0123456789abcdef0123456789abcdef"
 
-  @Test func allowlistedTargetsUseLockedNumericDestinations() throws {
-    let cases: [(ProductM2SSHTarget, String, UInt32)] = [
-      (.thu21, "11.11.30.21", 0x0B0B_1E15),
-      (.thu52, "11.11.37.52", 0x0B0B_2534),
+  @Test func configuredTargetsUseResolvedNumericDestinationsAndUsers() throws {
+    let configuration = try PowerVPNTargetsConfiguration.decode(
+      Data(
+        """
+        {"portalOrigin":"https://192.0.2.1:4443","targets":{
+          "lab-a":{"host":"192.0.2.21","user":"synthetic-user"},
+          "lab-third":{"host":"198.51.100.7","user":"third_user"}
+        }}
+        """.utf8
+      ))
+    let cases: [(String, String, UInt32, String)] = [
+      ("lab-a", "192.0.2.21", 0xC000_0215, "synthetic-user"),
+      ("lab-third", "198.51.100.7", 0xC633_6407, "third_user"),
     ]
-    for (target, host, address) in cases {
+    for (key, host, address, user) in cases {
+      let target = try ProductM2SSHTarget(key: key, configuration: configuration)
       let command = try ProductM2FreshSSHCommand.make(
         target: target,
         challenge: challenge,
@@ -22,7 +33,7 @@ import Testing
       #expect(command.arguments.contains("HostKeyAlias=\(host)"))
       #expect(command.arguments.contains("UserKnownHostsFile=/Users/tester/.ssh/known_hosts"))
       #expect(command.arguments.contains("-l"))
-      #expect(command.arguments.contains("lijuanzi"))
+      #expect(command.arguments.contains(user))
       #expect(command.expectedStandardOutput == Data("POWERVPN_M2:\(challenge)\n".utf8))
     }
   }

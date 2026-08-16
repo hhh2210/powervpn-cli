@@ -14,7 +14,7 @@ import Testing
       owner: getuid()
     )
 
-    #expect(profile.origin.absoluteString == "https://166.111.143.19:4443")
+    #expect(profile.origin.absoluteString == "https://192.0.2.1:4443")
     #expect(profile.portalVersion == "2.0")
     #expect(profile.selectionSemantics == .latestPrimaryKeyFallback)
     #expect(profile.vendorLanguageIndex == 0)
@@ -28,9 +28,6 @@ import Testing
     #expect(throws: InstalledConfigDiscoveryError.missingArtifact) {
       _ = try discover(fixture)
     }
-
-    let fixed = try PortalFixedTOFUAuthority.currentProfile()
-    #expect(fixed.selectionSemantics == .operatorApprovedFixedOrigin)
   }
 
   @Test func symbolicLinkArtifactFailsClosed() throws {
@@ -144,16 +141,16 @@ import Testing
     }
   }
 
-  @Test func hostPortAndVersionDriftFailClosed() throws {
+  @Test func invalidSchemeHostAndVersionFailClosed() throws {
     let fixture = try InstalledConfigFixture()
     defer { fixture.cleanup() }
     let locked = fixture.evidence.endpoint
     let drifts = [
       SealedPortalEndpoint(
-        scheme: locked.scheme, host: "example.invalid", port: locked.port,
+        scheme: "http", host: locked.host, port: locked.port,
         portalVersion: locked.portalVersion, selectionSemantics: locked.selectionSemantics),
       SealedPortalEndpoint(
-        scheme: locked.scheme, host: locked.host, port: 443,
+        scheme: locked.scheme, host: "", port: locked.port,
         portalVersion: locked.portalVersion, selectionSemantics: locked.selectionSemantics),
       SealedPortalEndpoint(
         scheme: locked.scheme, host: locked.host, port: locked.port,
@@ -166,10 +163,6 @@ import Testing
         _ = try discover(fixture)
       }
     }
-
-    let fixed = try PortalFixedTOFUAuthority.currentProfile()
-    #expect(fixed.origin.absoluteString == "https://166.111.143.19:4443")
-    #expect(fixed.selectionSemantics == .operatorApprovedFixedOrigin)
   }
 
   @Test func resourceXMLIsExplicitlyForbidden() throws {

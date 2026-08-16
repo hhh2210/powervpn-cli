@@ -6,9 +6,12 @@ import Testing
 @testable import PowerVPNProduct
 
 @Suite struct ProductM2CurrentMachineRuntimeTests {
-  @Test func productionCompositionIsInertAndAdvertisesNativePortalAvailability() {
-    let runtime = ProductM2CurrentMachineRuntime()
-
+  @Test func productionCompositionWithInjectedConfigIsInertAndAdvertisesNativePortalAvailability()
+    throws
+  {
+    let runtime = ProductM2CurrentMachineRuntime(
+      configuration: try currentMachineSyntheticConfiguration()
+    )
     #expect(runtime.authorizationAvailabilityFailure == nil)
   }
 
@@ -96,6 +99,17 @@ import Testing
     #expect(coordinatorTrace.count("begin_start") == 0)
     #expect(coordinatorTrace.count("emergency_stop") == 0)
   }
+}
+
+private func currentMachineSyntheticConfiguration() throws -> PowerVPNTargetsConfiguration {
+  try PowerVPNTargetsConfiguration.decode(
+    Data(
+      """
+      {"portalOrigin":"https://192.0.2.1:4443","targets":{
+        "thu21":{"host":"192.0.2.21","user":"synthetic-user"}
+      }}
+      """.utf8
+    ))
 }
 
 private final class CurrentMachineRuntimeTrace: @unchecked Sendable {

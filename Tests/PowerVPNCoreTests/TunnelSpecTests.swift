@@ -47,13 +47,13 @@ private func redactedTunnelSpec() -> TunnelSpec {
     espProposal: ["aes256-sha256"],
     modeConfig: .unknown,
     vendorIds: [],
-    routes: [.init(identifier: "<route-id>", destination: "11.11.30.21/32")],
+    routes: [.init(identifier: "<route-id>", destination: "192.0.2.21/32")],
     resourceOperations: [.addRule, .deleteRule],
     resources: [
       .init(
         name: "login21",
         ruleIdentifier: "<rule-id>",
-        remoteTrafficSelectors: ["11.11.30.21/32"]
+        remoteTrafficSelectors: ["192.0.2.21/32"]
       )
     ]
   )
@@ -64,7 +64,7 @@ private func redactedTunnelSpec() -> TunnelSpec {
   #expect(report.issues.contains { $0.path == "resources[0].remoteTrafficSelectors[0]" })
   let output = String(decoding: try JSONEncoder().encode(report), as: UTF8.self)
   #expect(!output.contains(sensitiveValue))
-  #expect(!output.contains("11.11.30.21"))
+  #expect(!output.contains("192.0.2.21"))
 }
 
 @Test func rejectsUnknownSchemaFields() throws {
@@ -75,13 +75,14 @@ private func redactedTunnelSpec() -> TunnelSpec {
 
   let report = TunnelSpecRedactedValidator.validate(data: data)
   #expect(!report.valid)
-  #expect(report.issues == [
-    TunnelSpecValidationIssue(
-      path: "$",
-      code: "invalid_schema",
-      message: "document does not match the closed TunnelSpec schema"
-    )
-  ])
+  #expect(
+    report.issues == [
+      TunnelSpecValidationIssue(
+        path: "$",
+        code: "invalid_schema",
+        message: "document does not match the closed TunnelSpec schema"
+      )
+    ])
 }
 
 @Test func tunnelSpecModelCanRepresentFutureRuntimeValues() {

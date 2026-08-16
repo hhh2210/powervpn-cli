@@ -167,10 +167,7 @@ struct PortalRequestFactory: Sendable {
     else {
       throw LeadSecPortalCookieJarError.generationMismatch
     }
-    guard Self.isExactOrigin(profile.origin),
-      let host = profile.origin.host,
-      host == "166.111.143.19"
-    else {
+    guard Self.isExactOrigin(profile.origin), let host = profile.origin.host else {
       throw PortalRequestFactoryError.invalidProfile
     }
     let vendorGateway = try SecureBytes(copying: Array(host.utf8))
@@ -233,10 +230,9 @@ struct PortalRequestFactory: Sendable {
   }
 
   private static func isExactOrigin(_ url: URL) -> Bool {
-    url.absoluteString == "https://166.111.143.19:4443"
-      && url.scheme == "https"
-      && url.host == "166.111.143.19"
-      && url.port == 4_443
+    url.scheme == "https"
+      && url.host != nil
+      && url.port != nil
       && url.user == nil
       && url.password == nil
       && url.query == nil

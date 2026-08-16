@@ -1,4 +1,5 @@
 import Foundation
+import PowerVPNPortal
 import Testing
 
 @testable import PowerVPNCLI
@@ -17,6 +18,9 @@ import Testing
     #expect(
       try parseM2ConnectOnceArguments(arguments(name: "Campus", target: "thu52"))
         .sshTarget == .thu52)
+    #expect(
+      try parseM2ConnectOnceArguments(arguments(name: "Campus", target: "lab-third"))
+        .sshTarget.rawValue == "lab-third")
 
     let boundary = String(repeating: "é", count: 128)
     #expect(
@@ -33,7 +37,6 @@ import Testing
       arguments(name: "Campus\u{2029}NC"),
       arguments(name: "Campus\u{0000}NC"),
       arguments(name: String(repeating: "é", count: 129)),
-      arguments(name: "Campus", target: "THU21"),
       arguments(name: "Campus") + ["--yes"],
       arguments(name: "Campus") + ["--resource-display-name", "Campus"],
       [
@@ -192,6 +195,39 @@ import Testing
     #expect(result.standardOutput.contains("\"runtimeInvoked\" : false"))
     #expect(!result.standardOutput.contains("Campus NC"))
     assertSortedJSON(result.standardOutput)
+  }
+
+  @Test func missingConfigReturnsClosedTokenBeforeRuntimeConstruction() async throws {
+    let result = try await runCurrentMachineM2ConnectOnceCommand(
+      arguments(name: "Campus", target: "lab-a"),
+      loadConfiguration: {
+        throw PowerVPNTargetsConfigurationError.missing
+      }
+    )
+
+    #expect(result.exitCode == 69)
+    #expect(result.standardOutput.contains("\"outcome\" : \"config_missing\""))
+    #expect(result.standardOutput.contains("\"runtimeInvoked\" : false"))
+    #expect(!result.standardOutput.contains("Campus"))
+  }
+
+  @Test func unknownConfiguredTargetReturnsClosedTokenBeforeRuntime() async throws {
+    let configuration = try PowerVPNTargetsConfiguration.decode(
+      Data(
+        """
+        {"portalOrigin":"https://192.0.2.1:4443","targets":{
+          "lab-a":{"host":"192.0.2.21","user":"synthetic-user"}
+        }}
+        """.utf8
+      ))
+    let result = try await runCurrentMachineM2ConnectOnceCommand(
+      arguments(name: "Campus", target: "lab-absent"),
+      loadConfiguration: { configuration }
+    )
+
+    #expect(result.exitCode == 69)
+    #expect(result.standardOutput.contains("\"outcome\" : \"target_unknown\""))
+    #expect(result.standardOutput.contains("\"runtimeInvoked\" : false"))
   }
 
   @Test func invocationParsesBothFormsAndRejectsMisplacedNonInteractiveFlag() throws {

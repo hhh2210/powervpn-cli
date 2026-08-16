@@ -155,7 +155,7 @@ import Testing
         PVCURL_STATUS_HEADER_FRAMING_REJECTED,
         diagnostics: diagnostics
       ))
-    let origin = try PortalHTTPOrigin(host: "166.111.143.19", port: 4_443)
+    let origin = try PortalHTTPOrigin(host: "192.0.2.1", port: 4_443)
     let workflow = try PortalLoginWorkflow(
       factory: syntheticRequestFactory(),
       transport: CurlPortalTransport(

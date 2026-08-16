@@ -18,10 +18,6 @@ struct PortalDryRunCommandTests {
       Array(validArguments().dropLast()),
       ["portal", "dry-run", "--resource", "login21", "--ssh-target", "thu21", "--json"],
       [
-        "portal", "dry-run", "--resource-display-name", "login21", "--ssh-target", "other",
-        "--json",
-      ],
-      [
         "portal", "dry-run", "--resource-display-name", "login21", "--ssh-target", "thu21",
         "--verbose",
       ],

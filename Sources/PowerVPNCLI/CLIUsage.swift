@@ -20,7 +20,7 @@ func printCLIUsage() {
       xpc get-version [--timeout-ms N]
                              Read the installed charon helper version over exact XPC
       login                  Run the sealed username/password portal transaction
-      portal dry-run --resource-display-name <exact> --ssh-target <thu21|thu52> --json
+      portal dry-run --resource-display-name <exact> --ssh-target <key> --json
                              Validate one Portal snapshot and logout without helper/SSH
       doctor --json          Show product readiness and the first blocker
       helper status [--probe] --json
@@ -28,18 +28,20 @@ func printCLIUsage() {
       resources --json       List selectable authorized resources, if available
       snapshot --dry-run --json
                              Check authorized snapshot completeness without serializing it
-      m2 connect-once --resource-display-name <exact> --ssh-target <thu21|thu52> --json
+      m2 connect-once --resource-display-name <exact> --ssh-target <key> --json
                              Run one M2 connect/prove/cleanup transaction with TTY code approval
-      m2 connect-once --resource-display-name <exact> --ssh-target <thu21|thu52> --non-interactive --json
+      m2 connect-once --resource-display-name <exact> --ssh-target <key> --non-interactive --json
                              Run one M2 transaction without TTY approval; portal credentials
                              come from ~/.config/powervpn/credentials.env (0600) or
                              POWERVPN_PORTAL_CREDENTIALS
-      proxy ssh --resource-display-name <exact> --ssh-target <thu21|thu52> <numeric-ipv4> <port> [--non-interactive]
+      proxy ssh --resource-display-name <exact> --ssh-target <key> <numeric-ipv4> <port> [--non-interactive]
                              Open one foreground nc stream through an approved tunnel
-      proxy serve --resource-display-name <exact> --ssh-target <thu21|thu52>
+      proxy serve --resource-display-name <exact> --ssh-target <key>
                   [--listen-port <1-65535>] [--non-interactive] [--json]
                              Run foreground OpenSSH dynamic forwarding for other TCP apps;
                              Remote-SSH continues to use its normal route or ProxyJump
+      targets config         ~/.config/powervpn/targets.json (regular file, mode 0600);
+                             --ssh-target resolves an exact key from its targets object
 
 
     Options:

@@ -130,7 +130,7 @@ struct ProductPortalDryRunRuntimeTests {
 
   @Test func targetOutsideSelectedRoutesFailsClosedAndLogsOut() async throws {
     let xml = m2ResourceXML(["login21"]).replacingOccurrences(
-      of: "11.11.0.0/16",
+      of: "192.0.2.0/24",
       with: "10.1.2.0/24"
     )
     let fixture = try portalDryRunLease(resourceXML: xml)

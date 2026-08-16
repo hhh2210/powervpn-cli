@@ -11,6 +11,12 @@ public struct ProductPortalDryRunRuntime: Sendable {
     acquirePortal = { await PortalLoginRuntime.acquireCurrentMachine() }
   }
 
+  package init(configuration: PowerVPNTargetsConfiguration) {
+    acquirePortal = {
+      await PortalLoginRuntime.acquire(configuration: configuration)
+    }
+  }
+
   package init(acquirePortal: @escaping AcquirePortal) {
     self.acquirePortal = acquirePortal
   }
@@ -116,6 +122,10 @@ public struct ProductPortalDryRunRuntime: Sendable {
     }
     result.selectedCandidateCount = 1
     result.validationRequested = true
+    guard let requiredTargetIPv4 = request.sshTarget.resolvedTargetIPv4 else {
+      result.outcome = .startSnapshotRejected
+      return
+    }
 
     do {
       try AuthenticatedPortalSnapshotMapper.withValidatedStartSnapshot(
@@ -125,7 +135,7 @@ public struct ProductPortalDryRunRuntime: Sendable {
         result.startSnapshotComplete = true
         result.targetValidationRequested = true
         _ = try startSnapshot.makeSelectedRouteMatcher(
-          requiredTargetIPv4: request.sshTarget.requiredTargetIPv4
+          requiredTargetIPv4: requiredTargetIPv4
         )
         result.targetRouteCovered = true
       }

@@ -37,6 +37,11 @@ struct InstalledConfigEvidence: Equatable, Sendable {
       throw InstalledConfigDiscoveryError.malformedEvidence
     }
     let home = String(cString: homePointer)
+    let configuredOrigin = try PowerVPNTargetsConfiguration.currentMachine().portalOrigin
+    guard let configuredHost = configuredOrigin.host, let configuredPort = configuredOrigin.port
+    else {
+      throw InstalledConfigDiscoveryError.endpointMismatch
+    }
     let applicationSupport = "\(home)/Library/Application Support/com.leadsec.PowerVPN-Mac"
     let preferences = "\(home)/Library/Preferences/com.leadsec.PowerVPN-Mac.plist"
 
@@ -73,8 +78,8 @@ struct InstalledConfigEvidence: Equatable, Sendable {
       ],
       endpoint: SealedPortalEndpoint(
         scheme: "https",
-        host: "166.111.143.19",
-        port: 4_443,
+        host: configuredHost,
+        port: configuredPort,
         portalVersion: "2.0",
         selectionSemantics: .latestPrimaryKeyFallback
       )

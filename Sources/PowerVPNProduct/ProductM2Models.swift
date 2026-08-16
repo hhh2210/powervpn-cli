@@ -13,9 +13,52 @@ public enum ProductM2ConnectionState: String, Encodable, Equatable, Sendable {
   case failed
 }
 
-public enum ProductM2SSHTarget: String, Encodable, Equatable, Sendable {
-  case thu21
-  case thu52
+public struct ProductM2SSHTarget: Encodable, Equatable, Sendable {
+  public let rawValue: String
+  package let host: String?
+  package let ipv4: UInt32?
+  package let user: String?
+
+  public init?(rawValue: String) {
+    guard (1...64).contains(rawValue.utf8.count),
+      rawValue.utf8.allSatisfy({
+        (0x30...0x39).contains($0) || (0x41...0x5A).contains($0)
+          || (0x61...0x7A).contains($0) || $0 == 0x2D || $0 == 0x5F
+      })
+    else { return nil }
+    self.rawValue = rawValue
+    host = nil
+    ipv4 = nil
+    user = nil
+  }
+
+  package init(
+    rawValue: String,
+    host: String,
+    ipv4: UInt32,
+    user: String
+  ) {
+    self.rawValue = rawValue
+    self.host = host
+    self.ipv4 = ipv4
+    self.user = user
+  }
+
+  public func encode(to encoder: any Encoder) throws {
+    var container = encoder.singleValueContainer()
+    try container.encode(rawValue)
+  }
+
+  public static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.rawValue == rhs.rawValue
+  }
+
+  /// Synthetic defaults used by package-level pure tests. Current-machine
+  /// execution always replaces these fields from targets.json before work.
+  public static let thu21 = Self(
+    rawValue: "thu21", host: "192.0.2.21", ipv4: 0xC000_0215, user: "synthetic-user")
+  public static let thu52 = Self(
+    rawValue: "thu52", host: "192.0.2.52", ipv4: 0xC000_0234, user: "synthetic-user")
 }
 
 public enum ProductM2ConnectOutcome: String, Encodable, Equatable, Sendable {

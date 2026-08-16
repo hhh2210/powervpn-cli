@@ -1,4 +1,5 @@
 import Foundation
+import PowerVPNPortal
 import PowerVPNProduct
 
 enum ProxyCommandError: Error, Equatable, CustomStringConvertible {
@@ -9,10 +10,10 @@ enum ProxyCommandError: Error, Equatable, CustomStringConvertible {
     switch self {
     case .invalidSSHArguments:
       return "usage: powervpn proxy ssh --resource-display-name <exact> "
-        + "--ssh-target <thu21|thu52> <numeric-ipv4> <port> [--non-interactive]"
+        + "--ssh-target <key> <numeric-ipv4> <port> [--non-interactive]"
     case .invalidServeArguments:
       return "usage: powervpn proxy serve --resource-display-name <exact> "
-        + "--ssh-target <thu21|thu52> [--listen-port <1-65535>] "
+        + "--ssh-target <key> [--listen-port <1-65535>] "
         + "[--non-interactive] [--json]"
     }
   }
@@ -33,7 +34,10 @@ struct ProxyServeInvocation: Equatable, Sendable {
   let json: Bool
 }
 
-func parseProxySSHInvocation(_ arguments: [String]) throws -> ProxySSHInvocation {
+func parseProxySSHInvocation(
+  _ arguments: [String],
+  resolveTarget: (String) throws -> ProductM2SSHTarget = defaultProxySSHTarget
+) throws -> ProxySSHInvocation {
   let nonInteractive = arguments.count == 9
   guard arguments.count == 8 || nonInteractive,
     arguments[0] == "proxy",
@@ -42,7 +46,7 @@ func parseProxySSHInvocation(_ arguments: [String]) throws -> ProxySSHInvocation
     arguments[4] == "--ssh-target",
     !nonInteractive || arguments[8] == "--non-interactive",
     validResourceDisplayName(arguments[3]),
-    let target = parseProxySSHTarget(arguments[5]),
+    let target = try? resolveTarget(arguments[5]),
     let address = parseProxyIPv4(arguments[6]),
     let port = parseProxyPort(arguments[7])
   else { throw ProxyCommandError.invalidSSHArguments }
@@ -59,14 +63,17 @@ func parseProxySSHInvocation(_ arguments: [String]) throws -> ProxySSHInvocation
   )
 }
 
-func parseProxyServeInvocation(_ arguments: [String]) throws -> ProxyServeInvocation {
+func parseProxyServeInvocation(
+  _ arguments: [String],
+  resolveTarget: (String) throws -> ProductM2SSHTarget = defaultProxySSHTarget
+) throws -> ProxyServeInvocation {
   guard arguments.count >= 6,
     arguments[0] == "proxy",
     arguments[1] == "serve",
     arguments[2] == "--resource-display-name",
     arguments[4] == "--ssh-target",
     validResourceDisplayName(arguments[3]),
-    let target = parseProxySSHTarget(arguments[5])
+    let target = try? resolveTarget(arguments[5])
   else { throw ProxyCommandError.invalidServeArguments }
 
   var index = 6
@@ -129,10 +136,9 @@ func parseProxyPort(_ text: String) -> UInt16? {
   return UInt16(value)
 }
 
-private func parseProxySSHTarget(_ text: String) -> ProductM2SSHTarget? {
-  switch text {
-  case "thu21": return .thu21
-  case "thu52": return .thu52
-  default: return nil
+private func defaultProxySSHTarget(_ text: String) throws -> ProductM2SSHTarget {
+  guard let target = ProductM2SSHTarget(rawValue: text) else {
+    throw ProxyCommandError.invalidSSHArguments
   }
+  return target
 }

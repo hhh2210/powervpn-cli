@@ -101,11 +101,11 @@ import Testing
   }
 
   @Test func targetCoverageAcceptsDefaultExactAndBroaderButRejectsMiss() throws {
-    let target = ipv4(11, 11, 30, 21)
+    let target = ipv4(192, 0, 2, 21)
     let defaultRoute = try selectedSnapshot(family: 4, routes: [("0.0.0.0", 0)])
-    let exact = try selectedSnapshot(family: 4, routes: [("11.11.30.21", 32)])
-    let broader = try selectedSnapshot(family: 4, routes: [("11.11.0.7", 16)])
-    let miss = try selectedSnapshot(family: 4, routes: [("11.12.0.0", 16)])
+    let exact = try selectedSnapshot(family: 4, routes: [("192.0.2.21", 32)])
+    let broader = try selectedSnapshot(family: 4, routes: [("192.0.2.7", 16)])
+    let miss = try selectedSnapshot(family: 4, routes: [("198.51.100.0", 16)])
 
     #expect(
       try defaultRoute.makeSelectedRouteMatcher(requiredTargetIPv4: target).selectedRouteCount == 1)
@@ -121,14 +121,14 @@ import Testing
     let snapshot = try selectedSnapshot(
       tunnels: [
         (family: 4, routes: [("10.0.0.0", 24)]),
-        (family: 4, routes: [("11.11.30.0", 24)]),
+        (family: 4, routes: [("192.0.2.0", 24)]),
       ],
       selectedEncodedTunnelIndex: 0
     )
 
     #expect(throws: VendorCharonSelectedRouteMatcherError.requiredTargetNotCovered) {
       try snapshot.makeSelectedRouteMatcher(
-        requiredTargetIPv4: ipv4(11, 11, 30, 21)
+        requiredTargetIPv4: ipv4(192, 0, 2, 21)
       )
     }
   }
@@ -136,30 +136,30 @@ import Testing
   @Test func overlappingSiblingRoutesDoNotChangeSelectedTunnelMatcher() throws {
     let snapshot = try selectedSnapshot(
       tunnels: [
-        (family: 4, routes: [("11.11.30.0", 24), ("203.0.113.9", 32)]),
-        (family: 4, routes: [("11.11.30.0", 24)]),
+        (family: 4, routes: [("192.0.2.0", 24), ("203.0.113.9", 32)]),
+        (family: 4, routes: [("192.0.2.0", 24)]),
       ],
       selectedEncodedTunnelIndex: 1
     )
     let matcher = try snapshot.makeSelectedRouteMatcher(
-      requiredTargetIPv4: ipv4(11, 11, 30, 21)
+      requiredTargetIPv4: ipv4(192, 0, 2, 21)
     )
 
     #expect(matcher.selectedRouteCount == 1)
-    #expect(matcher.permitsIPv4(ipv4(11, 11, 30, 52)))
+    #expect(matcher.permitsIPv4(ipv4(192, 0, 2, 52)))
     #expect(!matcher.permitsIPv4(ipv4(203, 0, 113, 9)))
   }
 
   @Test func selectedTunnelOrdinalParticipatesInSnapshotBinding() throws {
     let selectedFirst = try selectedSnapshot(
       tunnels: [
-        (family: 4, routes: [("11.11.30.0", 24)]),
-        (family: 4, routes: [("11.11.30.0", 24)]),
+        (family: 4, routes: [("192.0.2.0", 24)]),
+        (family: 4, routes: [("192.0.2.0", 24)]),
       ],
       selectedEncodedTunnelIndex: 0
     )
     let selectedSecond = try #require(selectedFirst.selectingTunnel(atEncodedIndex: 1))
-    let target = ipv4(11, 11, 30, 21)
+    let target = ipv4(192, 0, 2, 21)
     let matcher = try selectedFirst.makeSelectedRouteMatcher(requiredTargetIPv4: target)
 
     #expect(selectedFirst.isBound(to: matcher, requiredTargetIPv4: target))
@@ -167,10 +167,10 @@ import Testing
   }
 
   @Test func matcherBindsTheExactSnapshotLineageAndRequiredTarget() throws {
-    let target = ipv4(11, 11, 30, 21)
-    let otherTarget = ipv4(11, 11, 30, 52)
-    let first = try selectedSnapshot(family: 4, routes: [("11.11.30.0", 24)])
-    let second = try selectedSnapshot(family: 4, routes: [("11.11.30.0", 24)])
+    let target = ipv4(192, 0, 2, 21)
+    let otherTarget = ipv4(192, 0, 2, 52)
+    let first = try selectedSnapshot(family: 4, routes: [("192.0.2.0", 24)])
+    let second = try selectedSnapshot(family: 4, routes: [("192.0.2.0", 24)])
     let matcher = try first.makeSelectedRouteMatcher(requiredTargetIPv4: target)
 
     #expect(first.isBound(to: matcher, requiredTargetIPv4: target))

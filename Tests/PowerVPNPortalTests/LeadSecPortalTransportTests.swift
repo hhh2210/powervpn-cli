@@ -4,7 +4,7 @@ import Testing
 @testable import PowerVPNPortal
 
 @Suite struct LeadSecPortalTransportTests {
-  private let origin = try! PortalHTTPOrigin(host: "166.111.143.19", port: 4_443)
+  private let origin = try! PortalHTTPOrigin(host: "192.0.2.1", port: 4_443)
 
   @Test func allFourExactOperationsUseOnlyTheSharedPinnedLane() async throws {
     let lane = RoutingPortalTransport()
@@ -34,16 +34,16 @@ import Testing
     let lane = RoutingPortalTransport()
     let transport = composite(lane)
     let nearMisses: [(PortalHTTPMethod, String)] = [
-      (.post, "https://166.111.143.19:4443/vpn/user/auth/password?extra=1"),
+      (.post, "https://192.0.2.1:4443/vpn/user/auth/password?extra=1"),
       (.post, "https://other.example.invalid/vpn/user/auth/password"),
-      (.post, "https://166.111.143.19:4443/vpn/user/auth/%70assword"),
-      (.post, "https://synthetic@166.111.143.19:4443/vpn/user/auth/password"),
-      (.post, "https://synthetic:value@166.111.143.19:4443/vpn/user/auth/password"),
-      (.get, "https://166.111.143.19:4443/vpn/user/auth/password"),
-      (.get, "https://166.111.143.19:4443/vpn/user/portal/intergration.xml"),
-      (.get, "https://166.111.143.19:4443/vpn/user/portal/intergration.xml?version=2.1"),
-      (.get, "https://166.111.143.19:4443/vpn/user/check/session?key=other"),
-      (.post, "https://166.111.143.19:4443/vpn/user/logout?extra=1"),
+      (.post, "https://192.0.2.1:4443/vpn/user/auth/%70assword"),
+      (.post, "https://synthetic@192.0.2.1:4443/vpn/user/auth/password"),
+      (.post, "https://synthetic:value@192.0.2.1:4443/vpn/user/auth/password"),
+      (.get, "https://192.0.2.1:4443/vpn/user/auth/password"),
+      (.get, "https://192.0.2.1:4443/vpn/user/portal/intergration.xml"),
+      (.get, "https://192.0.2.1:4443/vpn/user/portal/intergration.xml?version=2.1"),
+      (.get, "https://192.0.2.1:4443/vpn/user/check/session?key=other"),
+      (.post, "https://192.0.2.1:4443/vpn/user/logout?extra=1"),
     ]
 
     for (method, url) in nearMisses {
@@ -58,7 +58,7 @@ import Testing
   @Test func directBodyCookieAndUserAgentNearMissesReachNoLane() async throws {
     let lane = RoutingPortalTransport()
     let transport = composite(lane)
-    let url = "https://166.111.143.19:4443/vpn/user/auth/password"
+    let url = "https://192.0.2.1:4443/vpn/user/auth/password"
     let requests = [
       request(.post, url, body: "factory_bypass=body"),
       request(.post, url, cookie: "VSG_LANGUAGE=en_US"),

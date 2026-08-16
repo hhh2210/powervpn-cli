@@ -6,11 +6,12 @@ import Testing
 @testable import PowerVPNPortal
 
 @Suite struct PortalFixedTOFUVerifierTests {
-  @Test func productionProfileIsExactImmutableLocalMVPAuthority() throws {
-    let verifier = try PortalFixedTOFUVerifier.currentMachine()
-    let expectedOrigin = try PortalHTTPOrigin(host: "166.111.143.19", port: 4_443)
+  @Test func configuredProfileUsesExactEndpointAndImmutableTrustMaterial() throws {
+    let configuration = try syntheticTOFUConfiguration()
+    let verifier = try PortalFixedTOFUVerifier.configured(configuration)
+    let expectedOrigin = try PortalHTTPOrigin(host: "192.0.2.1", port: 4_443)
 
-    #expect(verifier.profile.origin.absoluteString == "https://166.111.143.19:4443")
+    #expect(verifier.profile.origin.absoluteString == "https://192.0.2.1:4443")
     #expect(verifier.origin == expectedOrigin)
     #expect(verifier.profile.selectionSemantics == .operatorApprovedFixedOrigin)
     #expect(PortalFixedTOFUVerifier.trustMode.rawValue == "operator_approved_tofu")
@@ -49,9 +50,22 @@ import Testing
     #expect(hex == PortalFixedTOFUVerifier.spkiSHA256Hex)
   }
 
-  @Test func productionDiscoveryUsesFixedAuthorityWithoutInstalledDatabase() throws {
-    let profile = try PortalLoginRuntimeDependencies.currentMachine.discoverProfile()
-    let fixedProfile = try PortalFixedTOFUVerifier.currentMachine().profile
+  @Test func configuredDiscoveryUsesTheSameAuthorityWithoutInstalledDatabase() throws {
+    let configuration = try syntheticTOFUConfiguration()
+    let dependencies = PortalLoginRuntimeDependencies.configured(configuration)
+    let profile = try dependencies.discoverProfile()
+    let fixedProfile = try PortalFixedTOFUVerifier.configured(configuration).profile
     #expect(profile == fixedProfile)
   }
+}
+
+private func syntheticTOFUConfiguration() throws -> PowerVPNTargetsConfiguration {
+  try PowerVPNTargetsConfiguration.decode(
+    Data(
+      """
+      {"portalOrigin":"https://192.0.2.1:4443","targets":{
+        "lab-a":{"host":"192.0.2.21","user":"synthetic-user"}
+      }}
+      """.utf8
+    ))
 }

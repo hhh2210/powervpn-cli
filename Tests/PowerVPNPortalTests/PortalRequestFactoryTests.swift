@@ -25,7 +25,7 @@ import Testing
     #expect(password.method == .post)
     #expect(
       password.url.absoluteString
-        == "https://166.111.143.19:4443/vpn/user/auth/password"
+        == "https://192.0.2.1:4443/vpn/user/auth/password"
     )
     #expect(password.headers.accept == "*/*")
     #expect(password.headers.contentType == "text/xml")
@@ -63,15 +63,15 @@ import Testing
     #expect(resource.method == .get)
     #expect(
       resource.url.absoluteString
-        == "https://166.111.143.19:4443/vpn/user/portal/intergration.xml?version=2.0"
+        == "https://192.0.2.1:4443/vpn/user/portal/intergration.xml?version=2.0"
     )
     #expect(session.method == .get)
     #expect(
       session.url.absoluteString
-        == "https://166.111.143.19:4443/vpn/user/check/session?key=hostid"
+        == "https://192.0.2.1:4443/vpn/user/check/session?key=hostid"
     )
     #expect(logout.method == .post)
-    #expect(logout.url.absoluteString == "https://166.111.143.19:4443/vpn/user/logout")
+    #expect(logout.url.absoluteString == "https://192.0.2.1:4443/vpn/user/logout")
     for (request, operation) in [
       (resource, PortalRequestOperation.resource),
       (session, .session),
@@ -103,7 +103,7 @@ import Testing
     try factory.acceptPasswordSession(
       from: response,
       passwordURL: URL(
-        string: "https://166.111.143.19:4443/vpn/user/auth/password"
+        string: "https://192.0.2.1:4443/vpn/user/auth/password"
       )!
     )
     let resource = try factory.makeResourceRequest()
@@ -131,7 +131,7 @@ import Testing
     try factory.acceptPasswordSession(
       from: response,
       passwordURL: URL(
-        string: "https://166.111.143.19:4443/vpn/user/auth/password"
+        string: "https://192.0.2.1:4443/vpn/user/auth/password"
       )!
     )
     let resource = try factory.makeResourceRequest()
@@ -158,7 +158,7 @@ import Testing
   }
 
   private var expectedAuthenticatedCookie: String {
-    "VSG_SESSIONID=synthetic ORIGINURL=https://166.111.143.19:4443/vpn/user/auth/password;  VSG_LANGUAGE=zh_CN; "
+    "VSG_SESSIONID=synthetic ORIGINURL=https://192.0.2.1:4443/vpn/user/auth/password;  VSG_LANGUAGE=zh_CN; "
   }
 
   private func decode(_ bytes: SecureBytes?) throws -> String? {

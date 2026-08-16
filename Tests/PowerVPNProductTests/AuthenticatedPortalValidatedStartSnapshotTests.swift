@@ -26,7 +26,7 @@ import Testing
       }
     }
 
-    #expect(encodedGateway == "166.111.143.19")
+    #expect(encodedGateway == "192.0.2.1")
     let retainedSnapshot = try #require(escapedSnapshot)
     #expect(
       throws: VendorCharonStartEncodingError.textMaterialUnavailable(.sessionID)

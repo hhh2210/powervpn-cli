@@ -53,7 +53,7 @@ func authenticatedSnapshot(
   resourceXML: String
 ) throws -> AuthenticatedSnapshotFixture {
   let profile = InstalledPortalProfile(
-    origin: URL(string: "https://166.111.143.19:4443")!,
+    origin: URL(string: "https://192.0.2.1:4443")!,
     portalVersion: "2.0",
     selectionSemantics: .latestPrimaryKeyFallback,
     vendorLanguageIndex: 0
@@ -74,7 +74,7 @@ func authenticatedSnapshot(
   try factory.acceptPasswordSession(
     from: passwordResponse,
     passwordURL: URL(
-      string: "https://166.111.143.19:4443/vpn/user/auth/password"
+      string: "https://192.0.2.1:4443/vpn/user/auth/password"
     )!
   )
   let request = try factory.makeResourceRequest()

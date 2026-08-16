@@ -11,9 +11,6 @@ public struct VPNTarget: Codable, Hashable, Sendable {
     self.port = port
   }
 
-  public static let thu21 = VPNTarget(name: "thu21", host: "11.11.30.21")
-  public static let thu52 = VPNTarget(name: "thu52", host: "11.11.37.52")
-  public static let defaults = [thu21, thu52]
 }
 
 public enum ProbeStatus: String, Codable, Sendable {

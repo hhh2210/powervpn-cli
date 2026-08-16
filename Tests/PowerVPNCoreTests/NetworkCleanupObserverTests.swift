@@ -65,7 +65,7 @@ import Testing
     let forbidden = ["curl", "nc", "ssh", "surge-cli", "sh", "zsh", "bash"]
     let commands: [NetworkCleanupCommand] = [
       .helperGeneration, .surgeProcesses, .defaultRoute, .dns, .interfaces,
-      .ipv4Routes, .ipv6Routes, .effectiveRoute(targetIPv4: 0x0B0B_1E15),
+      .ipv4Routes, .ipv6Routes, .effectiveRoute(targetIPv4: 0xC000_0215),
     ]
     for command in commands {
       let request = command.request

@@ -27,7 +27,7 @@ let package = Package(
       name: "PowerVPNProduct",
       dependencies: ["PowerVPNCore", "PowerVPNPortal"]
     ),
-    .target(name: "PowerVPNTLSEvidence"),
+    .target(name: "PowerVPNTLSEvidence", dependencies: ["PowerVPNPortal"]),
     .executableTarget(
       name: "PowerVPNCLI",
       dependencies: ["PowerVPNCore", "PowerVPNPortal", "PowerVPNProduct"]

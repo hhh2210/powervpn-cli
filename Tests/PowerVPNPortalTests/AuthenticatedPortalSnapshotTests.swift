@@ -14,7 +14,7 @@ import Testing
     try factory.acceptPasswordSession(
       from: loginResponse,
       passwordURL: URL(
-        string: "https://166.111.143.19:4443/vpn/user/auth/password"
+        string: "https://192.0.2.1:4443/vpn/user/auth/password"
       )!
     )
     let resourceRequest = try factory.makeResourceRequest()
@@ -231,7 +231,7 @@ import Testing
     try factory.acceptPasswordSession(
       from: response,
       passwordURL: URL(
-        string: "https://166.111.143.19:4443/vpn/user/auth/password"
+        string: "https://192.0.2.1:4443/vpn/user/auth/password"
       )!
     )
     return factory

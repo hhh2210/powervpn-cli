@@ -1,14 +1,18 @@
 import Foundation
+import PowerVPNPortal
 import PowerVPNProduct
 
 enum PortalDryRunCommandError: Error, Equatable, CustomStringConvertible {
   case invalidArguments
+  case configuration(String)
 
   var description: String {
     switch self {
     case .invalidArguments:
       return
-        "usage: powervpn portal dry-run --resource-display-name <exact> --ssh-target <thu21|thu52> --json"
+        "usage: powervpn portal dry-run --resource-display-name <exact> --ssh-target <key> --json"
+    case .configuration(let token):
+      return token
     }
   }
 }
@@ -23,14 +27,51 @@ typealias PortalDryRunRuntimeOperation =
     ProductPortalDryRunRequest
   ) async -> ProductPortalDryRunReport
 
+func runCurrentMachinePortalDryRunCommand(
+  _ arguments: [String],
+  loadConfiguration: @escaping @Sendable () throws -> PowerVPNTargetsConfiguration = {
+    try PowerVPNTargetsConfiguration.currentMachine()
+  }
+) async throws -> PortalDryRunCommandResult {
+  let unresolved = try parsePortalDryRunArguments(arguments)
+  let configuration: PowerVPNTargetsConfiguration
+  do {
+    configuration = try loadConfiguration()
+  } catch let error as PowerVPNTargetsConfigurationError {
+    throw PortalDryRunCommandError.configuration(error.token)
+  }
+  do {
+    _ = try ProductM2SSHTarget(
+      key: unresolved.sshTarget.rawValue,
+      configuration: configuration
+    )
+  } catch let error as PowerVPNTargetsConfigurationError {
+    throw PortalDryRunCommandError.configuration(error.token)
+  }
+  let runtime = ProductPortalDryRunRuntime(configuration: configuration)
+  return try await runPortalDryRunCommand(
+    arguments,
+    resolveTarget: { key in
+      try ProductM2SSHTarget(key: key, configuration: configuration)
+    },
+    runtime: { request in await runtime.run(request) }
+  )
+}
+
 func runPortalDryRunCommand(
   _ arguments: [String],
+  resolveTarget: @escaping @Sendable (String) throws -> ProductM2SSHTarget = {
+    guard let target = ProductM2SSHTarget(rawValue: $0) else {
+      throw PortalDryRunCommandError.invalidArguments
+    }
+    return target
+  },
   runtime: @escaping PortalDryRunRuntimeOperation = { request in
     await ProductPortalDryRunRuntime().run(request)
   },
   signalMonitorFactory: CLISignalMonitorFactory = { DarwinCLISignalMonitor() }
 ) async throws -> PortalDryRunCommandResult {
-  let request = try parsePortalDryRunArguments(arguments)
+  let request = try parsePortalDryRunArguments(arguments, resolveTarget: resolveTarget)
   let cancellation = CLITaskCancellation<ProductPortalDryRunReport>()
   let monitor = signalMonitorFactory()
   monitor.start { cancellation.request() }
@@ -48,7 +89,13 @@ func runPortalDryRunCommand(
   )
 }
 func parsePortalDryRunArguments(
-  _ arguments: [String]
+  _ arguments: [String],
+  resolveTarget: (String) throws -> ProductM2SSHTarget = {
+    guard let target = ProductM2SSHTarget(rawValue: $0) else {
+      throw PortalDryRunCommandError.invalidArguments
+    }
+    return target
+  }
 ) throws -> ProductPortalDryRunRequest {
   guard arguments.count == 7,
     arguments[0] == "portal",
@@ -59,12 +106,7 @@ func parsePortalDryRunArguments(
     validResourceDisplayName(arguments[3])
   else { throw PortalDryRunCommandError.invalidArguments }
 
-  let target: ProductM2SSHTarget
-  switch arguments[5] {
-  case "thu21": target = .thu21
-  case "thu52": target = .thu52
-  default: throw PortalDryRunCommandError.invalidArguments
-  }
+  let target = try resolveTarget(arguments[5])
   return ProductPortalDryRunRequest(
     resourceDisplayName: arguments[3],
     sshTarget: target

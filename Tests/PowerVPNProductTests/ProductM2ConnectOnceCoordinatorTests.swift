@@ -326,7 +326,7 @@ import Testing
 
   @Test func selectedRouteThatMissesLockedTargetFailsBeforeSecondBaseline() async throws {
     let xml = m2ResourceXML(["Campus NC"])
-      .replacingOccurrences(of: "11.11.0.0/16", with: "10.1.2.0/24")
+      .replacingOccurrences(of: "192.0.2.0/24", with: "10.1.2.0/24")
     let fixture = try authenticatedSnapshot(resourceXML: xml)
     defer { fixture.erase() }
     let trace = ProductM2TestTrace()
@@ -456,9 +456,9 @@ import Testing
     #expect(!json.contains("portal:"))
     #expect(!json.contains("helper-session-material"))
     #expect(!json.contains("psk-material"))
-    #expect(!json.contains("166.111.143.19"))
+    #expect(!json.contains("192.0.2.1"))
     #expect(!json.contains("10.1.2.3"))
-    #expect(!json.contains("11.11.0.0"))
+    #expect(!json.contains("192.0.2.0"))
     #expect(!json.contains("\"handle\""))
     #expect(!json.contains("tunnel-name"))
     #expect(!json.contains("updown_nc"))

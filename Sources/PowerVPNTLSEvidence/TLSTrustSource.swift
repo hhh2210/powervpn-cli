@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import PowerVPNPortal
 import Security
 
 enum TLSTrustSourceEvent: Equatable, Sendable {
@@ -42,9 +43,10 @@ final class NetworkTLSTrustSource: TLSTrustSource, @unchecked Sendable {
       NWParameters
     ) -> any TLSNetworkConnection
 
-  static let sealedHost = "166.111.143.19"
-  static let sealedPort: UInt16 = 4_443
   static let observationHoldMilliseconds = 250
+
+  private let host: String?
+  private let portNumber: UInt16?
 
   private let queue = DispatchQueue(label: "org.powervpn.tls-peer-evidence")
   private let connectionFactory: ConnectionFactory
@@ -57,12 +59,22 @@ final class NetworkTLSTrustSource: TLSTrustSource, @unchecked Sendable {
   private let progress = TLSPeerProgressRecorder()
 
   init(
+    host: String? = (try? PowerVPNTargetsConfiguration.currentMachine())?.portalOrigin.host,
+    port: UInt16? = {
+      guard
+        let configured = try? PowerVPNTargetsConfiguration.currentMachine(),
+        let value = configured.portalOrigin.port
+      else { return nil }
+      return UInt16(exactly: value)
+    }(),
     connectionFactory: @escaping ConnectionFactory = { host, port, parameters in
       NWConnection(host: host, port: port, using: parameters)
     },
     chainCapturer: any TLSPeerChainCapturing = MetadataTLSPeerChainCapturer(),
     trustEvaluator: any TLSAsyncTrustEvaluating = AsyncSecTrustEvaluator()
   ) {
+    self.host = host
+    portNumber = port
     self.connectionFactory = connectionFactory
     self.chainCapturer = chainCapturer
     self.trustEvaluator = trustEvaluator
@@ -73,7 +85,7 @@ final class NetworkTLSTrustSource: TLSTrustSource, @unchecked Sendable {
       handler(.unavailable)
       return
     }
-    guard let port = NWEndpoint.Port(rawValue: Self.sealedPort) else {
+    guard let host, let portNumber, let port = NWEndpoint.Port(rawValue: portNumber) else {
       deliver(.unavailable)
       return
     }
@@ -125,7 +137,7 @@ final class NetworkTLSTrustSource: TLSTrustSource, @unchecked Sendable {
     )
     let parameters = NWParameters(tls: tls, tcp: NWProtocolTCP.Options())
     let connection = connectionFactory(
-      NWEndpoint.Host(Self.sealedHost), port, parameters
+      NWEndpoint.Host(host), port, parameters
     )
     connection.setEvidenceStateUpdateHandler { [weak self] state in
       guard let self, lifecycle.acceptsCallbacks else { return }
@@ -167,11 +179,15 @@ final class NetworkTLSTrustSource: TLSTrustSource, @unchecked Sendable {
   private func handleCapturedChain(
     _ captured: Result<TLSPeerCertificateChain, TLSPeerChainCaptureError>
   ) {
+    guard let host else {
+      deliver(.unavailable)
+      return
+    }
     switch captured {
     case .success(let chain):
       trustEvaluator.evaluate(
         chain: chain,
-        exactHost: Self.sealedHost,
+        exactHost: host,
         phase: { [weak self] phase in self?.progress.record(phase) },
         completion: { [weak self] result in
           guard let self else { return }

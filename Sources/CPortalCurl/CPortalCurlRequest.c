@@ -1,5 +1,4 @@
 #include "CPortalCurlInternal.h"
-#include "CPortalCurlTrustProfile.h"
 
 #include <curl/curl.h>
 #include <stdio.h>
@@ -36,19 +35,27 @@ static bool pvcurl_absent(pvcurl_bytes_t value) {
   return value.pointer == NULL && value.length == 0U;
 }
 
+static bool pvcurl_url_matches_host(pvcurl_bytes_t url,
+    pvcurl_bytes_t host_header) {
+  static const uint8_t https_prefix[] = "https://";
+  const size_t prefix_length = sizeof(https_prefix) - 1U;
+  if (!pvcurl_valid_bytes(host_header, 512U, 0x21U) ||
+      url.length <= prefix_length + host_header.length ||
+      memcmp(url.pointer, https_prefix, prefix_length) != 0 ||
+      memcmp(url.pointer + prefix_length, host_header.pointer,
+             host_header.length) != 0 ||
+      url.pointer[prefix_length + host_header.length] != '/') {
+    return false;
+  }
+  return true;
+}
+
 static bool pvcurl_valid_config(const pvcurl_request_config_t *config) {
-  static const uint8_t approved_url_prefix[] = PVCURL_APPROVED_URL_PREFIX;
-  static const uint8_t approved_host[] = PVCURL_APPROVED_HOST;
   if (config == NULL ||
       (config->method != PVCURL_METHOD_GET &&
        config->method != PVCURL_METHOD_POST) ||
       !pvcurl_valid_bytes(config->url, 4096U, 0x21U) ||
-      config->url.length <= sizeof(approved_url_prefix) - 1U ||
-      memcmp(config->url.pointer, approved_url_prefix,
-             sizeof(approved_url_prefix) - 1U) != 0 ||
-      config->host_header.length != sizeof(approved_host) - 1U ||
-      memcmp(config->host_header.pointer, approved_host,
-             sizeof(approved_host) - 1U) != 0 ||
+      !pvcurl_url_matches_host(config->url, config->host_header) ||
       !pvcurl_valid_bytes(config->accept_header, 8192U, 0x20U) ||
       !pvcurl_valid_bytes(config->user_agent_header, 8192U, 0x20U) ||
       !pvcurl_valid_bytes(config->cookie_header, PVCURL_MAX_COOKIE_BYTES,

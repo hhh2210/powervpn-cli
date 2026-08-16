@@ -11,9 +11,12 @@ extension ProductPersistentTunnelCoordinator {
   ) async -> ProductPersistentTunnelSessionOpenResult {
     let selection: ProductM2AuthorizedResourceSelection
     do {
+      guard let requiredTargetIPv4 = execution.request.sshTarget.resolvedTargetIPv4 else {
+        throw ProductM2AuthorizedResourceSelectionError.invalidSelection
+      }
       selection = try await authorizationLease.selectUnique(
         displayName: execution.request.resourceDisplayName,
-        requiredTargetIPv4: execution.request.sshTarget.requiredTargetIPv4
+        requiredTargetIPv4: requiredTargetIPv4
       )
     } catch {
       applySelectionFailure(error, to: &execution)

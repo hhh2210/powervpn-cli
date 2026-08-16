@@ -41,10 +41,10 @@ import Testing
     #expect(snapshots.map(\.method) == [.post, .get, .get, .post])
     #expect(
       snapshots.map(\.url) == [
-        "https://166.111.143.19:4443/vpn/user/auth/password",
-        "https://166.111.143.19:4443/vpn/user/portal/intergration.xml?version=2.0",
-        "https://166.111.143.19:4443/vpn/user/check/session?key=hostid",
-        "https://166.111.143.19:4443/vpn/user/logout",
+        "https://192.0.2.1:4443/vpn/user/auth/password",
+        "https://192.0.2.1:4443/vpn/user/portal/intergration.xml?version=2.0",
+        "https://192.0.2.1:4443/vpn/user/check/session?key=hostid",
+        "https://192.0.2.1:4443/vpn/user/logout",
       ]
     )
     #expect(snapshots[0].contentType == "text/xml")
@@ -400,7 +400,7 @@ import Testing
   }
 
   private var authenticatedCookie: String {
-    "VSG_SESSIONID=synthetic ORIGINURL=https://166.111.143.19:4443/vpn/user/auth/password;  VSG_LANGUAGE=zh_CN; "
+    "VSG_SESSIONID=synthetic ORIGINURL=https://192.0.2.1:4443/vpn/user/auth/password;  VSG_LANGUAGE=zh_CN; "
   }
 
   private var syntheticUserAgent: String {

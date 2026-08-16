@@ -1,4 +1,5 @@
 import Foundation
+import PowerVPNPortal
 import Testing
 
 @testable import PowerVPNCLI
@@ -39,6 +40,19 @@ import Testing
     #expect(child.invocationCount == 0)
   }
 
+  @Test func missingConfigStopsCurrentMachineProxyBeforeRuntimeAndChild() async throws {
+    let result = try await runCurrentMachineProxyCommand(
+      proxySSHArguments,
+      loadConfiguration: {
+        throw PowerVPNTargetsConfigurationError.missing
+      }
+    )
+
+    #expect(result.exitCode == 69)
+    #expect(result.standardOutput.isEmpty)
+    #expect(result.standardError == "config_missing\n")
+  }
+
   @Test func nonInteractiveSkipsApprovalAndRouteDenialNeverSpawnsChild() async throws {
     let lease = ProxyTestLease(permitted: false)
     let child = ProxyTestChildRunner()
@@ -60,7 +74,7 @@ import Testing
     #expect(child.invocationCount == 0)
     #expect(lease.recordedEvents.last == "shutdown")
     #expect(!result.standardError.contains("Marker Resource"))
-    #expect(!result.standardError.contains("11.11.30.21"))
+    #expect(!result.standardError.contains("192.0.2.21"))
   }
 
   @Test func sshUsesExactNCArgvAndPreservesChildExitAfterCleanup() async throws {
@@ -80,7 +94,7 @@ import Testing
       child.specification
         == ProxyChildSpecification(
           executable: "/usr/bin/nc",
-          arguments: ["11.11.30.21", "22"],
+          arguments: ["192.0.2.21", "22"],
           standardInput: .inherited,
           standardOutput: .inherited
         ))
@@ -182,6 +196,7 @@ import Testing
     let result = try await runProxySSHCommand(
       proxySSHArguments,
       authorizationAvailabilityFailure: { nil },
+      resolveTarget: { _ in .thu21 },
       childRunner: child,
       runtime: { request, budget in
         await openProductProxyTunnel(runtime: runtime, request: request, budget: budget)
@@ -237,6 +252,7 @@ import Testing
     let result = try await runProxySSHCommand(
       proxySSHArguments,
       authorizationAvailabilityFailure: { nil },
+      resolveTarget: { _ in .thu21 },
       childRunner: child,
       runtime: { request, budget in
         await openProductProxyTunnel(runtime: runtime, request: request, budget: budget)
@@ -310,7 +326,7 @@ import Testing
       #expect(result.standardOutput.isEmpty)
       #expect(result.standardError == "\(token)\n")
       #expect(!result.standardError.contains("Marker Resource"))
-      #expect(!result.standardError.contains("11.11.30.21"))
+      #expect(!result.standardError.contains("192.0.2.21"))
       #expect(child.invocationCount == 0)
       #expect(monitor.stopCount == 1)
     }

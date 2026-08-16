@@ -1,8 +1,10 @@
 import Foundation
+import PowerVPNPortal
 
 package enum ProductM2FreshSSHCommandError: Error, Equatable, Sendable {
   case invalidChallenge
   case invalidHomeDirectory
+  case unresolvedTarget
 }
 
 package struct ProductM2FreshSSHCommand: Equatable, Sendable {
@@ -30,7 +32,9 @@ package struct ProductM2FreshSSHCommand: Equatable, Sendable {
       !homeDirectory.contains("\r"), !homeDirectory.contains("\0")
     else { throw ProductM2FreshSSHCommandError.invalidHomeDirectory }
 
-    let destination = target.lockedDestination
+    guard let destination = target.resolvedDestination else {
+      throw ProductM2FreshSSHCommandError.unresolvedTarget
+    }
     let knownHosts = URL(fileURLWithPath: homeDirectory, isDirectory: true)
       .appendingPathComponent(".ssh/known_hosts").path
     let options = [
@@ -80,23 +84,35 @@ package struct ProductM2FreshSSHCommand: Equatable, Sendable {
   }
 }
 
-private struct ProductM2SSHLockedDestination: Sendable {
+package struct ProductM2SSHResolvedDestination: Sendable {
   let host: String
   let ipv4: UInt32
   let user: String
 }
 
 extension ProductM2SSHTarget {
-  fileprivate var lockedDestination: ProductM2SSHLockedDestination {
-    switch self {
-    case .thu21:
-      ProductM2SSHLockedDestination(
-        host: "11.11.30.21", ipv4: 0x0B0B_1E15, user: "lijuanzi")
-    case .thu52:
-      ProductM2SSHLockedDestination(
-        host: "11.11.37.52", ipv4: 0x0B0B_2534, user: "lijuanzi")
-    }
+  package init(
+    key: String,
+    configuration: PowerVPNTargetsConfiguration
+  ) throws {
+    let target = try configuration.target(named: key)
+    self.init(
+      rawValue: key,
+      host: target.host,
+      ipv4: target.ipv4,
+      user: target.user
+    )
   }
 
-  package var requiredTargetIPv4: UInt32 { lockedDestination.ipv4 }
+  fileprivate var resolvedDestination: ProductM2SSHResolvedDestination? {
+    guard let host, let ipv4, let user else { return nil }
+    return ProductM2SSHResolvedDestination(host: host, ipv4: ipv4, user: user)
+  }
+
+  package var resolvedTargetIPv4: UInt32? { ipv4 }
+
+  package var requiredTargetIPv4: UInt32 {
+    guard let ipv4 else { preconditionFailure("unresolved SSH target") }
+    return ipv4
+  }
 }

@@ -5,7 +5,7 @@ import Foundation
 
 let proxySSHArguments = [
   "proxy", "ssh", "--resource-display-name", "Marker Resource",
-  "--ssh-target", "thu21", "11.11.30.21", "22", "--non-interactive",
+  "--ssh-target", "thu21", "192.0.2.21", "22", "--non-interactive",
 ]
 
 let proxyServeArguments = [

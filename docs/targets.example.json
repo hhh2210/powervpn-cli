@@ -1,0 +1,13 @@
+{
+  "portalOrigin": "https://192.0.2.1:4443",
+  "targets": {
+    "lab-a": {
+      "host": "192.0.2.21",
+      "user": "synthetic-user"
+    },
+    "lab-b": {
+      "host": "192.0.2.52",
+      "user": "synthetic-user"
+    }
+  }
+}

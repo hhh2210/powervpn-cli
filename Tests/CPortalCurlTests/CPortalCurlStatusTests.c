@@ -30,8 +30,8 @@ static pvcurl_request_config_t valid_config(void) {
   pvcurl_request_config_t config = {
       .method = PVCURL_METHOD_POST,
       .require_set_cookie = true,
-      .url = bytes("https://166.111.143.19:4443/password"),
-      .host_header = bytes("166.111.143.19:4443"),
+      .url = bytes("https://192.0.2.1:4443/password"),
+      .host_header = bytes("192.0.2.1:4443"),
       .accept_header = bytes("*/*"),
       .user_agent_header = bytes("VSG-libCurl/synthetic"),
       .content_type_header = bytes("text/xml"),
@@ -111,7 +111,7 @@ static void test_status_mapping(void) {
 static void test_exact_authority_rejected_before_request_creation(void) {
   const char *name = "exact_authority_rejected_before_request_creation";
   pvcurl_request_config_t config = valid_config();
-  config.url = bytes("https://user@166.111.143.19:4443/password");
+  config.url = bytes("https://user@192.0.2.1:4443/password");
   pvcurl_request_t *request = (pvcurl_request_t *)(uintptr_t)1U;
   expect_status(name, pvcurl_request_create(&config, &request),
       PVCURL_STATUS_INVALID_ARGUMENT);
@@ -120,7 +120,7 @@ static void test_exact_authority_rejected_before_request_creation(void) {
   }
 
   config = valid_config();
-  config.host_header = bytes("166.111.143.19:443");
+  config.host_header = bytes("192.0.2.1:443");
   request = (pvcurl_request_t *)(uintptr_t)1U;
   expect_status(name, pvcurl_request_create(&config, &request),
                 PVCURL_STATUS_INVALID_ARGUMENT);
@@ -142,7 +142,7 @@ static void test_borrowed_body_and_exact_headers(void) {
   struct curl_slist *headers = NULL;
   expect_status(name, pvcurl_request_build_headers(request, &headers),
       PVCURL_STATUS_OK);
-  static const char *const expected[] = {"Host: 166.111.143.19:4443",
+  static const char *const expected[] = {"Host: 192.0.2.1:4443",
       "Accept: */*",
       "User-Agent: VSG-libCurl/synthetic",
       "Content-Type: text/xml",
@@ -184,7 +184,7 @@ static void test_get_has_no_entity_headers(void) {
   pvcurl_request_config_t config = valid_config();
   config.method = PVCURL_METHOD_GET;
   config.require_set_cookie = false;
-  config.url = bytes("https://166.111.143.19:4443/resource");
+  config.url = bytes("https://192.0.2.1:4443/resource");
   config.content_type_header = (pvcurl_bytes_t){0};
   config.body = (pvcurl_bytes_t){0};
   pvcurl_request_t *request = NULL;
@@ -194,7 +194,7 @@ static void test_get_has_no_entity_headers(void) {
   expect_status(name, pvcurl_request_build_headers(request, &headers),
                 PVCURL_STATUS_OK);
   static const char *const expected[] = {
-      "Host: 166.111.143.19:4443", "Accept: */*",
+      "Host: 192.0.2.1:4443", "Accept: */*",
       "User-Agent: VSG-libCurl/synthetic", "Cookie: VSG_LANGUAGE=zh_CN; "};
   struct curl_slist *item = headers;
   for (size_t index = 0U; index < sizeof(expected) / sizeof(expected[0]);

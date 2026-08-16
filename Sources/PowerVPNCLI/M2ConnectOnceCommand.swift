@@ -1,4 +1,5 @@
 import Foundation
+import PowerVPNPortal
 import PowerVPNProduct
 
 enum M2ConnectOnceCommandError: Error, Equatable, CustomStringConvertible {
@@ -6,7 +7,7 @@ enum M2ConnectOnceCommandError: Error, Equatable, CustomStringConvertible {
 
   var description: String {
     "usage: powervpn m2 connect-once --resource-display-name <exact> "
-      + "--ssh-target <thu21|thu52> [--non-interactive] --json"
+      + "--ssh-target <key> [--non-interactive] --json"
   }
 }
 
@@ -26,11 +27,53 @@ typealias M2ConnectOnceRuntimeOperation =
     ProductM2AbsoluteBudget
   ) async -> ProductM2ConnectReport
 
+func runCurrentMachineM2ConnectOnceCommand(
+  _ arguments: [String],
+  loadConfiguration: @escaping @Sendable () throws -> PowerVPNTargetsConfiguration = {
+    try PowerVPNTargetsConfiguration.currentMachine()
+  }
+) async throws -> M2ConnectOnceCommandResult {
+  let unresolved = try parseM2ConnectOnceInvocation(arguments)
+  let configuration: PowerVPNTargetsConfiguration
+  do {
+    configuration = try loadConfiguration()
+  } catch let error as PowerVPNTargetsConfigurationError {
+    return try lifecycleResult(error.token, exitCode: 69)
+  }
+  do {
+    _ = try ProductM2SSHTarget(
+      key: unresolved.request.sshTarget.rawValue,
+      configuration: configuration
+    )
+  } catch let error as PowerVPNTargetsConfigurationError {
+    return try lifecycleResult(error.token, exitCode: 69)
+  }
+  let runtime = ProductM2CurrentMachineRuntime(configuration: configuration)
+  return try await runM2ConnectOnceCommand(
+    arguments,
+    authorizationAvailabilityFailure: {
+      runtime.authorizationAvailabilityFailure
+    },
+    resolveTarget: { key in
+      try ProductM2SSHTarget(key: key, configuration: configuration)
+    },
+    runtime: { request, budget in
+      await runtime.run(request, budget: budget)
+    }
+  )
+}
+
 func runM2ConnectOnceCommand(
   _ arguments: [String],
   authorizationAvailabilityFailure: @escaping @Sendable () -> ProductM2AuthorizationFailure?,
   generateApprovalCode: @escaping @Sendable () throws -> String = M2TTYApproval.secureCode,
   approval: M2TTYApproval = M2TTYApproval(),
+  resolveTarget: @escaping @Sendable (String) throws -> ProductM2SSHTarget = {
+    guard let target = ProductM2SSHTarget(rawValue: $0) else {
+      throw M2ConnectOnceCommandError.invalidArguments
+    }
+    return target
+  },
   signalMonitorFactory: CLISignalMonitorFactory = { DarwinCLISignalMonitor() },
   budgetFactory: @escaping @Sendable () -> ProductM2AbsoluteBudget = {
     ProductM2AbsoluteBudget.start()
@@ -45,7 +88,7 @@ func runM2ConnectOnceCommand(
   },
   runtime: @escaping M2ConnectOnceRuntimeOperation
 ) async throws -> M2ConnectOnceCommandResult {
-  let invocation = try parseM2ConnectOnceInvocation(arguments)
+  let invocation = try parseM2ConnectOnceInvocation(arguments, resolveTarget: resolveTarget)
   let request = invocation.request
   if let failure = authorizationAvailabilityFailure() {
     return try lifecycleResult(failure.rawValue, exitCode: 69)
@@ -100,7 +143,13 @@ func runM2ConnectOnceCommand(
 }
 
 func parseM2ConnectOnceInvocation(
-  _ arguments: [String]
+  _ arguments: [String],
+  resolveTarget: (String) throws -> ProductM2SSHTarget = {
+    guard let target = ProductM2SSHTarget(rawValue: $0) else {
+      throw M2ConnectOnceCommandError.invalidArguments
+    }
+    return target
+  }
 ) throws -> M2ConnectOnceInvocation {
   let nonInteractive = arguments.count == 8
   guard arguments.count == 7 || nonInteractive,
@@ -115,12 +164,7 @@ func parseM2ConnectOnceInvocation(
   guard validResourceDisplayName(displayName) else {
     throw M2ConnectOnceCommandError.invalidArguments
   }
-  let target: ProductM2SSHTarget
-  switch arguments[5] {
-  case "thu21": target = .thu21
-  case "thu52": target = .thu52
-  default: throw M2ConnectOnceCommandError.invalidArguments
-  }
+  let target = try resolveTarget(arguments[5])
   return M2ConnectOnceInvocation(
     request: ProductM2ConnectRequest(resourceDisplayName: displayName, sshTarget: target),
     nonInteractive: nonInteractive

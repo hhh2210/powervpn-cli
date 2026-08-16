@@ -50,6 +50,21 @@ proxy serve 底层是系统 /usr/bin/ssh -D，不是自研 SOCKS 实现，也没
 LaunchAgent/daemon。两个命令都在前台运行，SIGHUP/SIGINT/SIGTERM 停止，
 退出前会停掉 helper 租约并验证清理。
 
+## 目标配置
+
+所有 current-machine 命令都先读取 `~/.config/powervpn/targets.json`。
+文件必须是当前用户拥有的普通文件且权限严格为 `0600`；`--ssh-target <key>`
+精确查找 `targets[key]`。配置缺失、目标不存在或字段非法时会分别返回
+`config_missing`、`target_unknown`、`target_invalid`，不会联系 Portal 或
+请求 helper 变更。闭合 schema 示例见 `docs/targets.example.json`；先复制后
+替换 `portalOrigin`、目标数字 IPv4 和 SSH 用户名：
+
+```sh
+mkdir -p ~/.config/powervpn
+cp docs/targets.example.json ~/.config/powervpn/targets.json
+chmod 600 ~/.config/powervpn/targets.json
+```
+
 ## 凭据
 
 --non-interactive 模式从 ~/.config/powervpn/credentials.env（0600）读：

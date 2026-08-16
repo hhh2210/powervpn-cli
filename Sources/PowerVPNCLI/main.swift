@@ -61,7 +61,7 @@ struct PowerVPNCommand {
         Foundation.exit(result.exitCode)
       }
     case "portal":
-      let result = try await runPortalDryRunCommand(arguments)
+      let result = try await runCurrentMachinePortalDryRunCommand(arguments)
       print(result.standardOutput)
       if result.exitCode != 0 {
         Foundation.exit(result.exitCode)
@@ -69,16 +69,7 @@ struct PowerVPNCommand {
     case "proxy":
       writeProxyCommandResult(try await runCurrentMachineProxyCommand(arguments))
     case "m2":
-      let runtime = ProductM2CurrentMachineRuntime()
-      let result = try await runM2ConnectOnceCommand(
-        arguments,
-        authorizationAvailabilityFailure: {
-          runtime.authorizationAvailabilityFailure
-        },
-        runtime: { request, budget in
-          await runtime.run(request, budget: budget)
-        }
-      )
+      let result = try await runCurrentMachineM2ConnectOnceCommand(arguments)
       print(result.standardOutput)
       if result.exitCode != 0 {
         Foundation.exit(result.exitCode)

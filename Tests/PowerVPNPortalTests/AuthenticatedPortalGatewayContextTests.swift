@@ -14,14 +14,14 @@ import Testing
       #expect((context as Any) is any Encodable == false)
       return try context.withVendorGatewayBytes {
         (
-          exactSealedGateway: $0.elementsEqual(Array("166.111.143.19".utf8)),
+          exactSealedGateway: $0.elementsEqual(Array("192.0.2.1".utf8)),
           byteCount: $0.count
         )
       }
     }
 
     #expect(shape.exactSealedGateway)
-    #expect(shape.byteCount == 14)
+    #expect(shape.byteCount == 9)
     #expect(throws: AuthenticatedPortalContextBorrowError.expired) {
       _ = try escaped?.withVendorGatewayBytes(\.count)
     }
@@ -46,7 +46,7 @@ import Testing
     let observation = GatewayZeroObservation()
     let generation = PortalAuthenticationGeneration()
     let gateway = try SecureBytes(
-      copying: Array("166.111.143.19".utf8),
+      copying: Array("192.0.2.1".utf8),
       eraseObserver: { observation.record($0) }
     )
     let snapshot = try AuthenticatedPortalSnapshot(
@@ -55,20 +55,20 @@ import Testing
       vendorGateway: gateway
     )
 
-    #expect(gateway.count == 14)
+    #expect(gateway.count == 9)
     snapshot.erase()
 
     #expect(snapshot.isErased)
     #expect(gateway.count == 0)
     #expect(observation.snapshots.count == 1)
-    #expect(observation.snapshots[0].count == 14)
+    #expect(observation.snapshots[0].count == 9)
     #expect(observation.snapshots[0].allSatisfy { $0 == 0 })
   }
 
   @Test func snapshotDeinitZeroesOwnedGatewayStorage() throws {
     let observation = GatewayZeroObservation()
     let gateway = try SecureBytes(
-      copying: Array("166.111.143.19".utf8),
+      copying: Array("192.0.2.1".utf8),
       eraseObserver: { observation.record($0) }
     )
     var snapshot: AuthenticatedPortalSnapshot? = try AuthenticatedPortalSnapshot(
@@ -84,29 +84,6 @@ import Testing
     #expect(gateway.count == 0)
     #expect(observation.snapshots.count == 1)
     #expect(observation.snapshots[0].allSatisfy { $0 == 0 })
-  }
-
-  @Test func hostnameIPv6AndDifferentLiteralProfilesFailClosed() {
-    let origins = [
-      "https://portal.example.invalid:4443",
-      "https://[2001:db8::1]:4443",
-      "https://192.0.2.1:4443",
-    ]
-
-    for origin in origins {
-      let profile = InstalledPortalProfile(
-        origin: URL(string: origin)!,
-        portalVersion: "2.0",
-        selectionSemantics: .latestPrimaryKeyFallback,
-        vendorLanguageIndex: 0
-      )
-      #expect(throws: PortalRequestFactoryError.invalidProfile) {
-        _ = try PortalRequestFactory(
-          profile: profile,
-          operatingSystemVersion: "gateway-negative-test"
-        )
-      }
-    }
   }
 }
 
@@ -135,7 +112,7 @@ private func gatewayContextFixture() throws -> GatewayContextFixture {
   defer { response.erase() }
   try factory.acceptPasswordSession(
     from: response,
-    passwordURL: URL(string: "https://166.111.143.19:4443/vpn/user/auth/password")!
+    passwordURL: URL(string: "https://192.0.2.1:4443/vpn/user/auth/password")!
   )
   let request = try factory.makeResourceRequest()
   do {

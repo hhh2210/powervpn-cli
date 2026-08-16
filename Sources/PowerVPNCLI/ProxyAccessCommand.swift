@@ -1,12 +1,38 @@
 import Foundation
+import PowerVPNPortal
 import PowerVPNProduct
 
-func runCurrentMachineProxyCommand(_ arguments: [String]) async throws -> ProxyCommandResult {
+func runCurrentMachineProxyCommand(
+  _ arguments: [String],
+  loadConfiguration: @escaping @Sendable () throws -> PowerVPNTargetsConfiguration = {
+    try PowerVPNTargetsConfiguration.currentMachine()
+  }
+) async throws -> ProxyCommandResult {
   guard let subcommand = arguments.dropFirst().first,
     subcommand == "ssh" || subcommand == "serve"
   else { throw ProxyCommandError.invalidSSHArguments }
+  let targetKey: String
+  if subcommand == "ssh" {
+    targetKey = try parseProxySSHInvocation(arguments).request.sshTarget.rawValue
+  } else {
+    targetKey = try parseProxyServeInvocation(arguments).request.sshTarget.rawValue
+  }
 
-  let runtime = ProductPersistentTunnelRuntime()
+  let configuration: PowerVPNTargetsConfiguration
+  do {
+    configuration = try loadConfiguration()
+  } catch let error as PowerVPNTargetsConfigurationError {
+    return proxyHumanResult(error: error.token, exitCode: 69)
+  }
+  do {
+    _ = try ProductM2SSHTarget(key: targetKey, configuration: configuration)
+  } catch let error as PowerVPNTargetsConfigurationError {
+    return proxyHumanResult(error: error.token, exitCode: 69)
+  }
+  let resolveTarget: @Sendable (String) throws -> ProductM2SSHTarget = { key in
+    try ProductM2SSHTarget(key: key, configuration: configuration)
+  }
+  let runtime = ProductPersistentTunnelRuntime(configuration: configuration)
   let open: ProxyTunnelOpenOperation = { request, budget in
     await openProductProxyTunnel(
       runtime: runtime,
@@ -21,12 +47,14 @@ func runCurrentMachineProxyCommand(_ arguments: [String]) async throws -> ProxyC
     return try await runProxySSHCommand(
       arguments,
       authorizationAvailabilityFailure: availability,
+      resolveTarget: resolveTarget,
       runtime: open
     )
   }
   return try await runProxyServeCommand(
     arguments,
     authorizationAvailabilityFailure: availability,
+    resolveTarget: resolveTarget,
     runtime: open
   )
 }
@@ -35,6 +63,12 @@ func runProxySSHCommand(
   _ arguments: [String],
   authorizationAvailabilityFailure: @escaping @Sendable () -> ProductM2AuthorizationFailure?,
   generateApprovalCode: @escaping @Sendable () throws -> String = M2TTYApproval.secureCode,
+  resolveTarget: @escaping @Sendable (String) throws -> ProductM2SSHTarget = {
+    guard let target = ProductM2SSHTarget(rawValue: $0) else {
+      throw ProxyCommandError.invalidSSHArguments
+    }
+    return target
+  },
   approval: M2TTYApproval = M2TTYApproval(),
   signalMonitorFactory: CLISignalMonitorFactory = { DarwinCLISignalMonitor() },
   startupBudgetFactory: @escaping @Sendable () -> ProductM2AbsoluteBudget = {
@@ -46,7 +80,7 @@ func runProxySSHCommand(
   childRunner: any ProxyChildRunning = FoundationProxyChildRunner(),
   runtime: @escaping ProxyTunnelOpenOperation
 ) async throws -> ProxyCommandResult {
-  let invocation = try parseProxySSHInvocation(arguments)
+  let invocation = try parseProxySSHInvocation(arguments, resolveTarget: resolveTarget)
   if authorizationAvailabilityFailure() != nil {
     return proxyHumanResult(error: "runtime_unavailable", exitCode: 69)
   }
@@ -73,6 +107,12 @@ func runProxySSHCommand(
 func runProxyServeCommand(
   _ arguments: [String],
   authorizationAvailabilityFailure: @escaping @Sendable () -> ProductM2AuthorizationFailure?,
+  resolveTarget: @escaping @Sendable (String) throws -> ProductM2SSHTarget = {
+    guard let target = ProductM2SSHTarget(rawValue: $0) else {
+      throw ProxyCommandError.invalidServeArguments
+    }
+    return target
+  },
   generateApprovalCode: @escaping @Sendable () throws -> String = M2TTYApproval.secureCode,
   approval: M2TTYApproval = M2TTYApproval(),
   signalMonitorFactory: CLISignalMonitorFactory = { DarwinCLISignalMonitor() },
@@ -88,7 +128,7 @@ func runProxyServeCommand(
   },
   runtime: @escaping ProxyTunnelOpenOperation
 ) async throws -> ProxyCommandResult {
-  let invocation = try parseProxyServeInvocation(arguments)
+  let invocation = try parseProxyServeInvocation(arguments, resolveTarget: resolveTarget)
   if authorizationAvailabilityFailure() != nil {
     return try proxyServeResult(
       invocation: invocation,

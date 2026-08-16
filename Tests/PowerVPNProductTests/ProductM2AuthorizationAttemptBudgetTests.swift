@@ -298,7 +298,7 @@ private struct ProductM2ImmediatePortalLogoutBounder: PortalLogoutBounding {
 private func productM2PortalRequestFactory() throws -> PortalRequestFactory {
   try PortalRequestFactory(
     profile: InstalledPortalProfile(
-      origin: URL(string: "https://166.111.143.19:4443")!,
+      origin: URL(string: "https://192.0.2.1:4443")!,
       portalVersion: "2.0",
       selectionSemantics: .latestPrimaryKeyFallback,
       vendorLanguageIndex: 0

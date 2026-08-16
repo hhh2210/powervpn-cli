@@ -27,7 +27,11 @@ import Testing
     let connection = FakeTLSNetworkConnection()
     let barrier = ConstructionBarrier(connection: connection)
     let events = EventRecorder()
-    let source = NetworkTLSTrustSource(connectionFactory: barrier.makeConnection)
+    let source = NetworkTLSTrustSource(
+      host: "192.0.2.1",
+      port: 4_443,
+      connectionFactory: barrier.makeConnection
+    )
     let startReturned = DispatchSemaphore(value: 0)
 
     DispatchQueue.global().async {
@@ -53,7 +57,10 @@ import Testing
     let factoryCalls = LockedCounter()
     let primaryEvents = EventRecorder()
     let duplicateEvents = EventRecorder()
-    let source = NetworkTLSTrustSource { _, _, _ in
+    let source = NetworkTLSTrustSource(
+      host: "192.0.2.1",
+      port: 4_443
+    ) { _, _, _ in
       factoryCalls.increment()
       return connection
     }

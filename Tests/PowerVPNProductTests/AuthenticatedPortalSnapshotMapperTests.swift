@@ -77,7 +77,7 @@ import Testing
     #expect(!json.contains("helper-session-material"))
     #expect(!json.contains("cookie-session-material"))
     #expect(!json.contains("gateway-material"))
-    #expect(!json.contains("166.111.143.19"))
+    #expect(!json.contains("192.0.2.1"))
     #expect(!json.contains("psk-material"))
   }
 

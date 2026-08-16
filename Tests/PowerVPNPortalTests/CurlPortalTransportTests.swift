@@ -5,7 +5,7 @@ import Testing
 @testable import PowerVPNPortal
 
 @Suite struct CurlPortalTransportTests {
-  private let origin = try! PortalHTTPOrigin(host: "166.111.143.19", port: 4_443)
+  private let origin = try! PortalHTTPOrigin(host: "192.0.2.1", port: 4_443)
 
   @Test func cRuntimePreflightIsNetworkFreeAndAvailableBeforeCredentialInput() throws {
     _ = try CPortalCurlDriver()
@@ -26,8 +26,8 @@ import Testing
     let response = try await transport.perform(request)
 
     let snapshot = try #require(driver.snapshot)
-    #expect(snapshot.url == "https://166.111.143.19:4443/vpn/user/auth/password")
-    #expect(snapshot.host == "166.111.143.19:4443")
+    #expect(snapshot.url == "https://192.0.2.1:4443/vpn/user/auth/password")
+    #expect(snapshot.host == "192.0.2.1:4443")
     #expect(snapshot.accept == PortalWireContract.accept)
     #expect(snapshot.contentType == PortalWireContract.passwordContentType)
     #expect(
@@ -154,10 +154,10 @@ import Testing
     #expect(snapshots.map(\.requireSetCookie) == [false, false, false, false])
     #expect(
       snapshots.map(\.url) == [
-        "https://166.111.143.19:4443/vpn/user/auth/password",
-        "https://166.111.143.19:4443/vpn/user/portal/intergration.xml?version=2.0",
-        "https://166.111.143.19:4443/vpn/user/check/session?key=hostid",
-        "https://166.111.143.19:4443/vpn/user/logout",
+        "https://192.0.2.1:4443/vpn/user/auth/password",
+        "https://192.0.2.1:4443/vpn/user/portal/intergration.xml?version=2.0",
+        "https://192.0.2.1:4443/vpn/user/check/session?key=hostid",
+        "https://192.0.2.1:4443/vpn/user/logout",
       ])
   }
 
@@ -166,10 +166,10 @@ import Testing
     let transport = try CurlPortalTransport(allowedOrigin: origin, driver: driver)
     let requests = [
       directPasswordRequest(
-        url: "https://166.111.143.19:4443/vpn/user/auth/password?extra=1"
+        url: "https://192.0.2.1:4443/vpn/user/auth/password?extra=1"
       ),
       directPasswordRequest(
-        url: "https://synthetic:value@166.111.143.19:4443/vpn/user/auth/password"
+        url: "https://synthetic:value@192.0.2.1:4443/vpn/user/auth/password"
       ),
       directPasswordRequest(body: "encode='1'&factory_bypass=body"),
       directPasswordRequest(cookie: "VSG_LANGUAGE=en_US"),
@@ -282,7 +282,7 @@ import Testing
   }
 
   private func directPasswordRequest(
-    url: String = "https://166.111.143.19:4443/vpn/user/auth/password",
+    url: String = "https://192.0.2.1:4443/vpn/user/auth/password",
     body: String = "encode='1'&hardware_hash=SERIAL",
     cookie: String = " VSG_LANGUAGE=zh_CN; ",
     userAgent: String = "VSG-libCurl/0.9.9 PowerVPN/3.2.1 (Mac OS X synthetic-os)"

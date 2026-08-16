@@ -78,8 +78,8 @@ public enum InstalledConfigDiscovery {
     _ endpoint: SealedPortalEndpoint
   ) throws -> InstalledPortalProfile {
     guard endpoint.scheme == "https",
-      endpoint.host == "166.111.143.19",
-      endpoint.port == 4_443,
+      !endpoint.host.isEmpty,
+      (1...65_535).contains(endpoint.port),
       endpoint.portalVersion == "2.0",
       endpoint.selectionSemantics == .latestPrimaryKeyFallback
     else {
@@ -90,7 +90,10 @@ public enum InstalledConfigDiscovery {
     components.host = endpoint.host
     components.port = endpoint.port
     guard let origin = components.url,
-      origin.absoluteString == "https://166.111.143.19:4443"
+      origin.scheme == "https",
+      origin.host == endpoint.host,
+      origin.port == endpoint.port,
+      origin.path.isEmpty
     else {
       throw InstalledConfigDiscoveryError.endpointMismatch
     }

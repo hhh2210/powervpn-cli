@@ -13,6 +13,14 @@ public enum PortalLoginRuntime {
   package static func acquireCurrentMachine() async -> PortalSnapshotAcquisitionResult {
     await PortalLoginRuntimeRunner(dependencies: .currentMachine).acquire()
   }
+
+  package static func acquire(
+    configuration: PowerVPNTargetsConfiguration
+  ) async -> PortalSnapshotAcquisitionResult {
+    await PortalLoginRuntimeRunner(
+      dependencies: .configured(configuration)
+    ).acquire()
+  }
 }
 
 struct PortalLoginRuntimeDependencies: Sendable {
@@ -24,17 +32,9 @@ struct PortalLoginRuntimeDependencies: Sendable {
   let operatingSystemVersion: @Sendable () -> String
 
   static let currentMachine = PortalLoginRuntimeDependencies(
-    discoverProfile: { try PortalFixedTOFUVerifier.currentMachine().profile },
+    discoverProfile: { try PowerVPNTargetsConfiguration.currentMachine().portalProfile },
     makeTransport: { profile in
-      let verifier = try PortalFixedTOFUVerifier.currentMachine()
-      guard profile == verifier.profile else {
-        throw PortalTransportError.invalidOrigin
-      }
-      let transport = try CurlPortalTransport(allowedOrigin: verifier.origin)
-      return LeadSecPortalTransport(
-        allowedOrigin: verifier.origin,
-        transport: transport
-      )
+      try makeTransport(profile: profile)
     },
     credentialReader: PortalCredentialPrecedenceReader.currentMachine(),
     serialReader: InstalledPlatformSerialNumberReader(),
@@ -43,6 +43,32 @@ struct PortalLoginRuntimeDependencies: Sendable {
       ProcessInfo.processInfo.operatingSystemVersionString
     }
   )
+
+  static func configured(
+    _ configuration: PowerVPNTargetsConfiguration
+  ) -> PortalLoginRuntimeDependencies {
+    PortalLoginRuntimeDependencies(
+      discoverProfile: { configuration.portalProfile },
+      makeTransport: { profile in try makeTransport(profile: profile) },
+      credentialReader: PortalCredentialPrecedenceReader.currentMachine(),
+      serialReader: InstalledPlatformSerialNumberReader(),
+      sleeper: ContinuousPortalSleeper(),
+      operatingSystemVersion: {
+        ProcessInfo.processInfo.operatingSystemVersionString
+      }
+    )
+  }
+
+  private static func makeTransport(
+    profile: InstalledPortalProfile
+  ) throws -> any PortalTransporting {
+    let origin = try PortalHTTPOrigin(
+      host: profile.origin.host ?? "",
+      port: profile.origin.port ?? 0
+    )
+    let transport = try CurlPortalTransport(allowedOrigin: origin)
+    return LeadSecPortalTransport(allowedOrigin: origin, transport: transport)
+  }
 }
 
 struct PortalLoginRuntimeRunner: Sendable {

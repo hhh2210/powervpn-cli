@@ -45,7 +45,7 @@ import Testing
     )
     #expect(!encodedOpenReport.contains("Campus NC"))
     #expect(!encodedOpenReport.contains("thu21"))
-    let targetPermitted = await lease.permitsIPv4(ipv4(11, 11, 30, 21))
+    let targetPermitted = await lease.permitsIPv4(ipv4(192, 0, 2, 21))
     let unrelatedPermitted = await lease.permitsIPv4(ipv4(203, 0, 113, 1))
     #expect(targetPermitted)
     #expect(!unrelatedPermitted)
@@ -60,7 +60,7 @@ import Testing
     #expect(trace.count("stop") == 1)
     #expect(trace.count("logout") == 1)
     #expect(trace.count("verify") == 1)
-    let targetPermittedAfterShutdown = await lease.permitsIPv4(ipv4(11, 11, 30, 21))
+    let targetPermittedAfterShutdown = await lease.permitsIPv4(ipv4(192, 0, 2, 21))
     #expect(!targetPermittedAfterShutdown)
   }
   @Test func shutdownCapturesCleanupBeforeWaitingForUncancellablePostStopDrain()

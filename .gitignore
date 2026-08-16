@@ -19,3 +19,6 @@ fixtures/private/
 *.p12
 *.mobileconfig
 *.secrets
+
+# Local target configuration contains private network coordinates.
+targets.json

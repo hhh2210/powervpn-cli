@@ -363,7 +363,7 @@ func m2ResourceXML(_ displayNames: [String]) -> String {
       <IPSEC-SA><PROPOSAL><TRANSFORMS><TRANSFORM enc="aes256" hash="sha256"
         life-time="1800"/></TRANSFORMS></PROPOSAL></IPSEC-SA>
       <PSK key="psk-material"/><EXTENSIONS><PRIVATE-IP addr="10.10.10.4"/>
-      <SECURED-ROUTES name="direct"><ROUTE addr="11.11.0.0/16"/>
+      <SECURED-ROUTES name="direct"><ROUTE addr="192.0.2.0/24"/>
       </SECURED-ROUTES></EXTENSIONS></IKE></TUNNEL></NC_RESOURCE>
     """
   }.joined()
@@ -381,7 +381,7 @@ func m2SingleResourceMultiTunnelXML(_ displayNames: [String]) -> String {
         <IPSEC-SA><PROPOSAL><TRANSFORMS><TRANSFORM enc="aes256" hash="sha256"
           life-time="1800"/></TRANSFORMS></PROPOSAL></IPSEC-SA>
         <PSK key="psk-material"/><EXTENSIONS><PRIVATE-IP addr="10.10.10.4"/>
-          <SECURED-ROUTES name="direct"><ROUTE addr="11.11.0.0/16"/>
+          <SECURED-ROUTES name="direct"><ROUTE addr="192.0.2.0/24"/>
           </SECURED-ROUTES>
         </EXTENSIONS>
       </IKE>

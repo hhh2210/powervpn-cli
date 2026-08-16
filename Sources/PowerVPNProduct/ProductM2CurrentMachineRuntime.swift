@@ -7,9 +7,9 @@ package struct ProductM2CurrentMachineRuntime: Sendable {
   private let coordinator: ProductM2ConnectOnceCoordinator
   package let authorizationAvailabilityFailure: ProductM2AuthorizationFailure?
 
-  package init() {
+  package init(configuration: PowerVPNTargetsConfiguration) {
     let authorizationProvider = ProductM2PortalAdapter { _ in
-      await PortalLoginRuntime.acquireCurrentMachine()
+      await PortalLoginRuntime.acquire(configuration: configuration)
     }
     self.init(
       authorizationProvider: authorizationProvider,
@@ -17,6 +17,20 @@ package struct ProductM2CurrentMachineRuntime: Sendable {
         authorizationProvider: authorizationProvider
       )
     )
+  }
+
+  package init() {
+    if let configuration = try? PowerVPNTargetsConfiguration.currentMachine() {
+      self.init(configuration: configuration)
+    } else {
+      let unavailable = ProductM2UnavailableNativePortalProvider()
+      self.init(
+        authorizationProvider: unavailable,
+        dependencies: ProductM2CurrentMachineComposition.dependencies(
+          authorizationProvider: unavailable
+        )
+      )
+    }
   }
 
   init(
@@ -60,15 +74,27 @@ package struct ProductM2CurrentMachineRuntime: Sendable {
 }
 
 extension ProductPersistentTunnelRuntime {
-  package init() {
+  package init(configuration: PowerVPNTargetsConfiguration) {
     let authorizationProvider = ProductM2PortalAdapter { _ in
-      await PortalLoginRuntime.acquireCurrentMachine()
+      await PortalLoginRuntime.acquire(configuration: configuration)
     }
     self.init(
       dependencies: ProductM2CurrentMachineComposition.dependencies(
         authorizationProvider: authorizationProvider
       )
     )
+  }
+
+  package init() {
+    if let configuration = try? PowerVPNTargetsConfiguration.currentMachine() {
+      self.init(configuration: configuration)
+    } else {
+      self.init(
+        dependencies: ProductM2CurrentMachineComposition.dependencies(
+          authorizationProvider: ProductM2UnavailableNativePortalProvider()
+        )
+      )
+    }
   }
 }
 
