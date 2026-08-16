@@ -325,6 +325,28 @@ func m2ResourceXML(_ displayNames: [String]) -> String {
     + resources + "</RESOURCE_LIST></INTERGRATION_INFO></ROOT>"
 }
 
+func m2SingleResourceMultiTunnelXML(_ displayNames: [String]) -> String {
+  let tunnels = displayNames.map { name in
+    """
+    <TUNNEL tunnel-name="\(name)" authority="7" status="9" negotiate-mode="3">
+      <IKE family="4"><CLIENT id="helper-session-material"/><SERVER port="500"/>
+        <ISAKMP-SA><PROPOSAL><TRANSFORMS><TRANSFORM enc="null" hash="null"
+          life-time="3600"/></TRANSFORMS></PROPOSAL></ISAKMP-SA>
+        <IPSEC-SA><PROPOSAL><TRANSFORMS><TRANSFORM enc="aes256" hash="sha256"
+          life-time="1800"/></TRANSFORMS></PROPOSAL></IPSEC-SA>
+        <PSK key="psk-material"/><EXTENSIONS><PRIVATE-IP addr="10.10.10.4"/>
+          <SECURED-ROUTES name="direct"><ROUTE addr="11.11.0.0/16"/>
+          </SECURED-ROUTES>
+        </EXTENSIONS>
+      </IKE>
+    </TUNNEL>
+    """
+  }.joined()
+  return "<ROOT><INTERGRATION_INFO><VERSION major=\"2\"/><RESOURCE_LIST>"
+    + "<NC_RESOURCE status=\"1\" mapid=\"resource-map\">\(tunnels)</NC_RESOURCE>"
+    + "</RESOURCE_LIST></INTERGRATION_INFO></ROOT>"
+}
+
 let m2ColdGeneration = VendorHelperGenerationSnapshot(
   launchdObserved: true, running: false, inactiveConfirmed: true,
   activeCount: 0, pid: nil, runs: 19)

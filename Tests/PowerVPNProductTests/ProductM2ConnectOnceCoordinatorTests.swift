@@ -224,6 +224,41 @@ import Testing
     }
   }
 
+  @Test func explicitSecondChildWithEqualSiblingRoutesSelectsUniquely() async throws {
+    let fixture = try authenticatedSnapshot(
+      resourceXML: m2SingleResourceMultiTunnelXML(["Campus First", "Campus Second"])
+    )
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(snapshot: fixture.snapshot, trace: trace)
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus Second", sshTarget: .thu21)
+    )
+
+    #expect(report.outcome == .connectedAndCleanedUp)
+    #expect(trace.count("begin_start") == 1)
+    #expect(trace.matcherPresence == [false, true, true, true])
+  }
+
+  @Test func duplicateChildDisplayNamesRemainAmbiguous() async throws {
+    let fixture = try authenticatedSnapshot(
+      resourceXML: m2SingleResourceMultiTunnelXML(["Campus NC", "Campus NC"])
+    )
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(snapshot: fixture.snapshot, trace: trace)
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(report.outcome == .resourceAmbiguous)
+    #expect(trace.count("begin_start") == 0)
+  }
+
   @Test func secondPreflightFailureAfterStableBaselineSendsNoStart() async throws {
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
     defer { fixture.erase() }

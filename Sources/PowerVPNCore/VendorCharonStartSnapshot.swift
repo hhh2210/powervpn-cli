@@ -160,9 +160,28 @@ public struct VendorCharonStartFieldReport: Codable, Equatable, Sendable {
 /// The value is deliberately non-Codable and exposes no field material.
 public struct VendorCharonStartSnapshot: Sendable {
   let candidate: VendorCharonStartCandidate
+  package let selectedTunnelEncodedIndex: Int?
 
   init(candidate: VendorCharonStartCandidate) {
     self.candidate = candidate
+    selectedTunnelEncodedIndex = candidate.tunnels?.count == 1 ? 0 : nil
+  }
+
+  private init(candidate: VendorCharonStartCandidate, selectedTunnelEncodedIndex: Int) {
+    self.candidate = candidate
+    self.selectedTunnelEncodedIndex = selectedTunnelEncodedIndex
+  }
+
+  package func selectingTunnel(
+    atEncodedIndex index: Int
+  ) -> VendorCharonStartSnapshot? {
+    guard let tunnels = candidate.tunnels, tunnels.indices.contains(index) else {
+      return nil
+    }
+    return VendorCharonStartSnapshot(
+      candidate: candidate,
+      selectedTunnelEncodedIndex: index
+    )
   }
 
   public var tunnelCount: Int { candidate.tunnels?.count ?? 0 }

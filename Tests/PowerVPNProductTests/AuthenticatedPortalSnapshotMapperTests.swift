@@ -24,9 +24,9 @@ import Testing
     #expect(resources.selectableResources.count == 1)
     #expect(resource.displayName == "raw-resource-name")
     #expect(resource.handle.hasPrefix("portal:"))
-    #expect(resource.handle.hasSuffix(":nc:0"))
+    #expect(resource.handle.hasSuffix(":nc:0:tunnel:0"))
     let handleComponents = resource.handle.split(separator: ":")
-    #expect(handleComponents.count == 4)
+    #expect(handleComponents.count == 6)
     #expect(UUID(uuidString: String(handleComponents[1])) != nil)
 
     let repeatedResources = try runtime.resources(from: fixture.snapshot)
@@ -86,10 +86,10 @@ import Testing
       cookie: "cookie-session-material",
       resourceXML: """
         <ROOT><INTERGRATION_INFO><VERSION major="2"/><RESOURCE_LIST>
-          <NC_RESOURCE><TUNNEL tunnel-name="raw-one"><IKE><CLIENT
+          <NC_RESOURCE status="1"><TUNNEL tunnel-name="raw-one"><IKE><CLIENT
             id="first-helper-session"/>
           </IKE></TUNNEL></NC_RESOURCE>
-          <NC_RESOURCE><TUNNEL tunnel-name="raw-two"><IKE><CLIENT/>
+          <NC_RESOURCE status="1"><TUNNEL tunnel-name="raw-two"><IKE><CLIENT/>
           </IKE></TUNNEL></NC_RESOURCE>
         </RESOURCE_LIST></INTERGRATION_INFO></ROOT>
         """
@@ -117,11 +117,13 @@ import Testing
     let fixture = try authenticatedSnapshot(
       cookie: "cookie-session-material",
       resourceXML: """
-        <ROOT><INTERGRATION_INFO><VERSION major="2"/><RESOURCE_LIST><NC_RESOURCE>
-          <TUNNEL tunnel-name="raw-resource-name"><IKE><CLIENT id="first-helper-session">
-            <id>second-helper-session</id>
-          </CLIENT></IKE></TUNNEL>
-        </NC_RESOURCE></RESOURCE_LIST></INTERGRATION_INFO></ROOT>
+        <ROOT><INTERGRATION_INFO><VERSION major="2"/><RESOURCE_LIST>
+          <NC_RESOURCE status="1">
+            <TUNNEL tunnel-name="raw-resource-name"><IKE>
+              <CLIENT id="first-helper-session"><id>second-helper-session</id></CLIENT>
+            </IKE></TUNNEL>
+          </NC_RESOURCE>
+        </RESOURCE_LIST></INTERGRATION_INFO></ROOT>
         """
     )
     defer { fixture.erase() }
@@ -139,9 +141,10 @@ import Testing
     let fixture = try authenticatedSnapshot(
       cookie: "cookie-session-material",
       resourceXML: """
-        <ROOT><INTERGRATION_INFO><VERSION major="2"/><RESOURCE_LIST><NC_RESOURCE>
-          <TUNNEL><IKE><CLIENT id="helper-session"/></IKE></TUNNEL>
-        </NC_RESOURCE></RESOURCE_LIST></INTERGRATION_INFO></ROOT>
+        <ROOT><INTERGRATION_INFO><VERSION major="2"/><RESOURCE_LIST>
+          <NC_RESOURCE status="1"><TUNNEL><IKE><CLIENT id="helper-session"/></IKE></TUNNEL>
+          </NC_RESOURCE>
+        </RESOURCE_LIST></INTERGRATION_INFO></ROOT>
         """
     )
     defer { fixture.erase() }
@@ -171,11 +174,13 @@ import Testing
     let fixture = try authenticatedSnapshot(
       cookie: "cookie-session-material",
       resourceXML: """
-        <ROOT><INTERGRATION_INFO><VERSION major="2"/><RESOURCE_LIST><NC_RESOURCE>
-          <TUNNEL tunnel-name="first-name"><tunnel-name>second-name</tunnel-name>
-            <IKE><CLIENT id="helper-session"/></IKE>
-          </TUNNEL>
-        </NC_RESOURCE></RESOURCE_LIST></INTERGRATION_INFO></ROOT>
+        <ROOT><INTERGRATION_INFO><VERSION major="2"/><RESOURCE_LIST>
+          <NC_RESOURCE status="1">
+            <TUNNEL tunnel-name="first-name"><tunnel-name>second-name</tunnel-name>
+              <IKE><CLIENT id="helper-session"/></IKE>
+            </TUNNEL>
+          </NC_RESOURCE>
+        </RESOURCE_LIST></INTERGRATION_INFO></ROOT>
         """
     )
     defer { fixture.erase() }

@@ -1,35 +1,43 @@
 import PowerVPNCore
 import PowerVPNPortal
 
-enum AuthenticatedPortalSP2Mapper {
-  static func candidate(
-    _ resource: AuthenticatedPortalResourceElement,
-    handle: String,
-    majorVersion: Int32,
-    gateway: any VendorCharonStartTextMaterial
-  ) throws -> ProductResourceCandidate {
-    let (summary, validation) = try validatedCandidate(
-      resource,
-      handle: handle,
-      majorVersion: majorVersion,
-      gateway: gateway
-    )
-    return ProductResourceCandidate(summary: summary, validation: validation)
-  }
+struct AuthenticatedPortalSP2MappedTunnel {
+  let displayName: String
+  let sourceTunnelIndex: Int
+  let encodedTunnelIndex: Int
+}
 
-  static func validatedCandidate(
+struct AuthenticatedPortalSP2MappedResource {
+  let validation: VendorCharonStartValidation
+  let tunnels: [AuthenticatedPortalSP2MappedTunnel]
+}
+
+enum AuthenticatedPortalSP2Mapper {
+  static func mappedResource(
     _ resource: AuthenticatedPortalResourceElement,
-    handle: String,
     majorVersion: Int32,
     gateway: any VendorCharonStartTextMaterial,
     lineage: VendorCharonStartLineage = VendorCharonStartLineage()
-  ) throws -> (ProductResourceSummary, VendorCharonStartValidation) {
+  ) throws -> AuthenticatedPortalSP2MappedResource {
     let tunnelElements = try PortalSP2Tree.children(named: "TUNNEL", of: resource)
-    guard let firstTunnel = tunnelElements.first else {
+    guard !tunnelElements.isEmpty else {
       throw AuthenticatedPortalSnapshotMappingError.missingTunnelElement
     }
-    let displayName = try PortalSP2Tree.displayName(of: firstTunnel)
     let commonIKE = try commonIKE(resource: resource, tunnels: tunnelElements)
+    var mappedTunnels: [VendorCharonStartTunnelCandidate] = []
+    var descriptors: [AuthenticatedPortalSP2MappedTunnel] = []
+    for (sourceTunnelIndex, element) in tunnelElements.enumerated() {
+      guard let tunnel = try mapTunnel(element, resource: resource, lineage: lineage) else {
+        continue
+      }
+      descriptors.append(
+        AuthenticatedPortalSP2MappedTunnel(
+          displayName: try PortalSP2Tree.displayName(of: element),
+          sourceTunnelIndex: sourceTunnelIndex,
+          encodedTunnelIndex: mappedTunnels.count
+        ))
+      mappedTunnels.append(tunnel)
+    }
     let coreCandidate = VendorCharonStartCandidate(
       lineage: lineage,
       common: try common(
@@ -39,15 +47,11 @@ enum AuthenticatedPortalSP2Mapper {
         gateway: gateway,
         lineage: lineage
       ),
-      tunnels: try tunnels(
-        tunnelElements,
-        resource: resource,
-        lineage: lineage
-      )
+      tunnels: mappedTunnels
     )
-    return (
-      ProductResourceSummary(handle: handle, displayName: displayName),
-      VendorCharonStartValidator.validate(coreCandidate)
+    return AuthenticatedPortalSP2MappedResource(
+      validation: VendorCharonStartValidator.validate(coreCandidate),
+      tunnels: descriptors
     )
   }
 
@@ -197,20 +201,6 @@ enum AuthenticatedPortalSP2Mapper {
       return PortalSP2ConstantTextMaterial(nullDefault)
     }
     return try PortalSP2BorrowedTextMaterial(scalar)
-  }
-
-  private static func tunnels(
-    _ elements: [AuthenticatedPortalResourceElement],
-    resource: AuthenticatedPortalResourceElement,
-    lineage: VendorCharonStartLineage
-  ) throws -> [VendorCharonStartTunnelCandidate] {
-    var result: [VendorCharonStartTunnelCandidate] = []
-    for element in elements {
-      if let mapped = try mapTunnel(element, resource: resource, lineage: lineage) {
-        result.append(mapped)
-      }
-    }
-    return result
   }
 
   private static func mapTunnel(

@@ -179,6 +179,9 @@ final class VendorCharonControlState: @unchecked Sendable {
     currentValidator = peerGenerationValidator
     defer { self.snapshot = nil }
     do {
+      guard let selectedTunnelIndex = snapshot.selectedTunnelEncodedIndex else {
+        throw VendorCharonStartEncodingError.incompleteSnapshot(.tunnelName)
+      }
       try snapshot.withEncodedStartMessage { request in
         guard
           let stopContext = VendorCharonControlWireCodec.stopContext(
@@ -190,7 +193,8 @@ final class VendorCharonControlState: @unchecked Sendable {
         guard
           let ncRouteToggleContext =
             VendorCharonControlWireCodec.ncRouteToggleContext(
-              copyingTunnelNameFromStartRequest: request
+              copyingTunnelNameFromStartRequest: request,
+              selectedTunnelIndex: selectedTunnelIndex
             )
         else {
           throw VendorCharonStartEncodingError.incompleteSnapshot(.tunnelName)

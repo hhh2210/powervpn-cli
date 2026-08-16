@@ -117,6 +117,55 @@ import Testing
     }
   }
 
+  @Test func siblingOnlyCoverageCannotAuthorizeSelectedTunnel() throws {
+    let snapshot = try selectedSnapshot(
+      tunnels: [
+        (family: 4, routes: [("10.0.0.0", 24)]),
+        (family: 4, routes: [("11.11.30.0", 24)]),
+      ],
+      selectedEncodedTunnelIndex: 0
+    )
+
+    #expect(throws: VendorCharonSelectedRouteMatcherError.requiredTargetNotCovered) {
+      try snapshot.makeSelectedRouteMatcher(
+        requiredTargetIPv4: ipv4(11, 11, 30, 21)
+      )
+    }
+  }
+
+  @Test func overlappingSiblingRoutesDoNotChangeSelectedTunnelMatcher() throws {
+    let snapshot = try selectedSnapshot(
+      tunnels: [
+        (family: 4, routes: [("11.11.30.0", 24), ("203.0.113.9", 32)]),
+        (family: 4, routes: [("11.11.30.0", 24)]),
+      ],
+      selectedEncodedTunnelIndex: 1
+    )
+    let matcher = try snapshot.makeSelectedRouteMatcher(
+      requiredTargetIPv4: ipv4(11, 11, 30, 21)
+    )
+
+    #expect(matcher.selectedRouteCount == 1)
+    #expect(matcher.permitsIPv4(ipv4(11, 11, 30, 52)))
+    #expect(!matcher.permitsIPv4(ipv4(203, 0, 113, 9)))
+  }
+
+  @Test func selectedTunnelOrdinalParticipatesInSnapshotBinding() throws {
+    let selectedFirst = try selectedSnapshot(
+      tunnels: [
+        (family: 4, routes: [("11.11.30.0", 24)]),
+        (family: 4, routes: [("11.11.30.0", 24)]),
+      ],
+      selectedEncodedTunnelIndex: 0
+    )
+    let selectedSecond = try #require(selectedFirst.selectingTunnel(atEncodedIndex: 1))
+    let target = ipv4(11, 11, 30, 21)
+    let matcher = try selectedFirst.makeSelectedRouteMatcher(requiredTargetIPv4: target)
+
+    #expect(selectedFirst.isBound(to: matcher, requiredTargetIPv4: target))
+    #expect(!selectedSecond.isBound(to: matcher, requiredTargetIPv4: target))
+  }
+
   @Test func matcherBindsTheExactSnapshotLineageAndRequiredTarget() throws {
     let target = ipv4(11, 11, 30, 21)
     let otherTarget = ipv4(11, 11, 30, 52)
@@ -162,13 +211,17 @@ private func selectedSnapshot(
   family: Int32,
   routes: [(String, Int32)]
 ) throws -> VendorCharonStartSnapshot {
+  try selectedSnapshot(
+    tunnels: [(family: family, routes: routes)],
+    selectedEncodedTunnelIndex: 0
+  )
+}
+
+private func selectedSnapshot(
+  tunnels: [(family: Int32, routes: [(String, Int32)])],
+  selectedEncodedTunnelIndex: Int
+) throws -> VendorCharonStartSnapshot {
   let values = SelectedRouteTestValues()
-  let candidates = routes.map { network, prefix in
-    VendorCharonStartRouteCandidate(
-      network: values.text(network),
-      prefix: values.prefix(prefix)
-    )
-  }
   let candidate = VendorCharonStartCandidate(
     lineage: values.lineage,
     common: VendorCharonStartCommonCandidate(
@@ -182,20 +235,28 @@ private func selectedSnapshot(
       ikeLifetime: values.integer(3_600),
       ipsecLifetime: values.integer(3_600)
     ),
-    tunnels: [
+    tunnels: tunnels.enumerated().map { tunnelIndex, tunnel in
       VendorCharonStartTunnelCandidate(
         authority: values.integer(1),
         status: values.integer(1),
-        tunnelName: values.text("tunnel"),
-        family: values.integer(family),
+        tunnelName: values.text("tunnel-\(tunnelIndex)"),
+        family: values.integer(tunnel.family),
         resourceFlag: values.integer(1),
         name: values.text("resource"),
-        routes: candidates,
+        routes: tunnel.routes.map { network, prefix in
+          VendorCharonStartRouteCandidate(
+            network: values.text(network),
+            prefix: values.prefix(prefix)
+          )
+        },
         mapID: values.text("map")
       )
-    ]
+    }
   )
-  return try #require(VendorCharonStartValidator.validate(candidate).snapshot)
+  let snapshot = try #require(VendorCharonStartValidator.validate(candidate).snapshot)
+  return try #require(
+    snapshot.selectingTunnel(atEncodedIndex: selectedEncodedTunnelIndex)
+  )
 }
 
 private struct SelectedRouteTestValues {

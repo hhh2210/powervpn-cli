@@ -6,7 +6,7 @@ enum AuthenticatedPortalSnapshotMappingError: Error, Equatable, Sendable {
   case duplicateField(String)
   /// The `NC_RESOURCE` has no `TUNNEL` child at all.
   case missingTunnelElement
-  /// The first `TUNNEL` has no `tunnel-name` attribute.
+  /// An accepted `TUNNEL` has no `tunnel-name` attribute.
   case missingDisplayName
   case invalidDisplayName
   case invalidInteger(String)
@@ -24,13 +24,25 @@ package enum AuthenticatedPortalSnapshotMapper {
     _ snapshot: AuthenticatedPortalSnapshot
   ) throws -> [ProductResourceCandidate] {
     try withAuthenticatedPortalSP2MappingScope(snapshot) { gateway, majorVersion, resources in
-      try resources.enumerated().map { index, resource in
-        try AuthenticatedPortalSP2Mapper.candidate(
+      try resources.enumerated().flatMap { resourceIndex, resource in
+        let mapped = try AuthenticatedPortalSP2Mapper.mappedResource(
           resource,
-          handle: authenticatedPortalResourceHandle(snapshot, index: index),
           majorVersion: majorVersion,
           gateway: gateway
         )
+        return mapped.tunnels.map { tunnel in
+          ProductResourceCandidate(
+            summary: ProductResourceSummary(
+              handle: authenticatedPortalResourceHandle(
+                snapshot,
+                resourceIndex: resourceIndex,
+                sourceTunnelIndex: tunnel.sourceTunnelIndex
+              ),
+              displayName: tunnel.displayName
+            ),
+            validation: mapped.validation
+          )
+        }
       }
     }
   }
@@ -51,17 +63,29 @@ extension AuthenticatedPortalSnapshotMapper {
       let candidates: [ProductResourceCandidate] =
         try withAuthenticatedPortalSP2MappingScope(snapshot) {
           gateway, majorVersion, resources in
-          try resources.indices.map { index in
+          try resources.indices.flatMap { resourceIndex in
             do {
-              return try AuthenticatedPortalSP2Mapper.candidate(
-                resources[index],
-                handle: authenticatedPortalResourceHandle(snapshot, index: index),
+              let mapped = try AuthenticatedPortalSP2Mapper.mappedResource(
+                resources[resourceIndex],
                 majorVersion: majorVersion,
                 gateway: gateway
               )
+              return mapped.tunnels.map { tunnel in
+                ProductResourceCandidate(
+                  summary: ProductResourceSummary(
+                    handle: authenticatedPortalResourceHandle(
+                      snapshot,
+                      resourceIndex: resourceIndex,
+                      sourceTunnelIndex: tunnel.sourceTunnelIndex
+                    ),
+                    displayName: tunnel.displayName
+                  ),
+                  validation: mapped.validation
+                )
+              }
             } catch let error as AuthenticatedPortalSnapshotMappingError {
               throw AuthenticatedPortalResourceCatalogDiagnostic(
-                resourceOrdinal: index + 1,
+                resourceOrdinal: resourceIndex + 1,
                 mappingError: error
               )
             }

@@ -95,6 +95,7 @@ import Testing
     #expect(validation.lineageStatus == .consistent)
     #expect(validation.firstMissingField == nil)
     #expect(snapshot.tunnelCount == 1)
+    #expect(snapshot.selectedTunnelEncodedIndex == 0)
     #expect(report(.vip, in: validation).availability == .absentOptional)
     #expect(report(.vipv6, in: validation).availability == .absentOptional)
     #expect(report(.negotiateMode, in: validation).availability == .absentOptional)
@@ -103,6 +104,23 @@ import Testing
     #expect(!isCodableType(VendorCharonStartSnapshot.self))
     #expect(!isCodableType(VendorCharonStartLineage.self))
     #expect(isCodableType(VendorCharonStartFieldReport.self))
+  }
+
+  @Test func multiTunnelSnapshotRequiresBoundsCheckedSelectionBinding() throws {
+    let values = CoreStartTestValues()
+    let validation = VendorCharonStartValidator.validate(
+      VendorCharonStartCandidate(
+        lineage: values.lineage,
+        common: values.completeCommon(),
+        tunnels: [values.completeTunnel(), values.completeTunnel()]
+      ))
+    let snapshot = try #require(validation.snapshot)
+
+    #expect(snapshot.selectedTunnelEncodedIndex == nil)
+    #expect(snapshot.selectingTunnel(atEncodedIndex: -1) == nil)
+    #expect(snapshot.selectingTunnel(atEncodedIndex: 2) == nil)
+    #expect(snapshot.selectingTunnel(atEncodedIndex: 0)?.selectedTunnelEncodedIndex == 0)
+    #expect(snapshot.selectingTunnel(atEncodedIndex: 1)?.selectedTunnelEncodedIndex == 1)
   }
 
   @Test func oneIncompleteTunnelCannotBorrowAFieldFromAnotherTunnel() {

@@ -18,10 +18,12 @@ package final class VendorCharonSelectedRouteMatcher: @unchecked Sendable {
   package let requiredTargetIPv4: UInt32
   package let selectedRouteCount: Int
 
+  package let selectedTunnelEncodedIndex: Int
   init(
     keyData: Data,
     routes: [(network: UInt32, prefix: UInt8)],
     requiredTargetIPv4: UInt32,
+    selectedTunnelEncodedIndex: Int,
     lineage: VendorCharonStartLineage
   ) {
     let localKey = SymmetricKey(data: keyData)
@@ -31,6 +33,7 @@ package final class VendorCharonSelectedRouteMatcher: @unchecked Sendable {
     selectedPrefixes = Set(routes.map(\.prefix))
     self.requiredTargetIPv4 = requiredTargetIPv4
     self.lineage = lineage
+    self.selectedTunnelEncodedIndex = selectedTunnelEncodedIndex
     selectedRouteCount = localTokens.count
   }
 
@@ -168,6 +171,7 @@ extension VendorCharonStartSnapshot {
     requiredTargetIPv4: UInt32
   ) -> Bool {
     guard matcher.requiredTargetIPv4 == requiredTargetIPv4,
+      matcher.selectedTunnelEncodedIndex == selectedTunnelEncodedIndex,
       let lineage = candidate.lineage
     else { return false }
     return matcher.lineage === lineage
@@ -179,25 +183,27 @@ extension VendorCharonStartSnapshot {
   package func makeSelectedRouteMatcher(
     requiredTargetIPv4: UInt32
   ) throws -> VendorCharonSelectedRouteMatcher {
-    guard let tunnels = candidate.tunnels else {
+    guard let tunnels = candidate.tunnels,
+      let selectedTunnelEncodedIndex,
+      tunnels.indices.contains(selectedTunnelEncodedIndex)
+    else {
+      throw VendorCharonSelectedRouteMatcherError.incompleteSnapshot
+    }
+    let tunnel = tunnels[selectedTunnelEncodedIndex]
+    guard tunnel.family?.value == 4 else {
+      throw VendorCharonSelectedRouteMatcherError.unsupportedFamily
+    }
+    guard let candidates = tunnel.routes else {
       throw VendorCharonSelectedRouteMatcherError.incompleteSnapshot
     }
     var routes: [(network: UInt32, prefix: UInt8)] = []
-    for tunnel in tunnels {
-      guard tunnel.family?.value == 4 else {
-        throw VendorCharonSelectedRouteMatcherError.unsupportedFamily
-      }
-      guard let candidates = tunnel.routes else {
-        throw VendorCharonSelectedRouteMatcherError.incompleteSnapshot
-      }
-      for candidate in candidates {
-        guard let networkMaterial = candidate.network?.value,
-          let prefixValue = candidate.prefix?.value
-        else { throw VendorCharonSelectedRouteMatcherError.incompleteSnapshot }
-        let network = try Self.parseSelectedIPv4(networkMaterial)
-        let prefix = try Self.parseSelectedPrefix(prefixValue)
-        routes.append((Self.masked(network, prefix: prefix), prefix))
-      }
+    for candidate in candidates {
+      guard let networkMaterial = candidate.network?.value,
+        let prefixValue = candidate.prefix?.value
+      else { throw VendorCharonSelectedRouteMatcherError.incompleteSnapshot }
+      let network = try Self.parseSelectedIPv4(networkMaterial)
+      let prefix = try Self.parseSelectedPrefix(prefixValue)
+      routes.append((Self.masked(network, prefix: prefix), prefix))
     }
     guard
       routes.contains(where: {
@@ -211,6 +217,7 @@ extension VendorCharonStartSnapshot {
       keyData: Data((0..<32).map { _ in UInt8.random(in: .min ... .max) }),
       routes: routes,
       requiredTargetIPv4: requiredTargetIPv4,
+      selectedTunnelEncodedIndex: selectedTunnelEncodedIndex,
       lineage: lineage
     )
   }

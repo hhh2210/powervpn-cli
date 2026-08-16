@@ -23,47 +23,57 @@ import Testing
       fixture.snapshot
     )
     #expect(failure == nil)
-    let candidate = try #require(candidates.first)
-    #expect(candidates.count == 1)
+    #expect(candidates.count == 2)
+    #expect(candidates.map(\.summary.displayName) == ["login21", "login52"])
+    #expect(Set(candidates.map(\.summary.handle)).count == 2)
+    let generation = fixture.snapshot.selectionGenerationID.uuidString.lowercased()
+    for (tunnelIndex, candidate) in candidates.enumerated() {
+      #expect(
+        candidate.summary.handle.split(separator: ":").map(String.init)
+          == ["portal", generation, "nc", "0", "tunnel", String(tunnelIndex)]
+      )
+    }
     #expect(groundTruthPSKSource.utf8.count == 16)
     #expect(groundTruthClientIDSource.utf8.count == 20)
-    #expect(candidate.summary.displayName == "login21")
     // The ground-truth shape carries PRIVATE-IP as a direct NC_RESOURCE
     // child; the official property-vip fallback (0x1000aa70c-0x1000aa894)
-    // makes it common.vip, so the candidate must resolve vip.
-    #expect(availability(of: .vip, in: candidate) == .available)
-    var encodedVIPByteCount: Int?
-    var encodedTunnelCount: Int?
-    var encodedPSKMatchesSource = false
-    var encodedSessionIDMatchesClientID = false
-    try AuthenticatedPortalSnapshotMapper.withValidatedStartSnapshot(
-      fixture.snapshot,
-      handle: candidate.summary.handle
-    ) { snapshot in
-      try snapshot.withEncodedStartMessage { root in
-        let common = try #require(xpc_dictionary_get_value(root, "common"))
-        let vip = try #require(xpc_dictionary_get_string(common, "vip"))
-        let psk = try #require(xpc_dictionary_get_string(common, "psk"))
-        let sessionID = try #require(xpc_dictionary_get_string(common, "sessionid"))
-        let tunnels = try #require(xpc_dictionary_get_value(root, "tunnels"))
-        encodedVIPByteCount = String(cString: vip).utf8.count
-        encodedTunnelCount = xpc_array_get_count(tunnels)
-        encodedPSKMatchesSource = String(cString: psk).utf8.elementsEqual(
-          groundTruthPSKSource.utf8
-        )
-        // keyid/KEY_ID transformation belongs to the helper; the mapper must
-        // preserve raw IKE/CLIENT@id bytes as common.sessionid.
-        encodedSessionIDMatchesClientID = String(cString: sessionID).utf8.elementsEqual(
-          groundTruthClientIDSource.utf8
-        )
+    // makes it common.vip, so both child items must resolve vip.
+    #expect(candidates.allSatisfy { availability(of: .vip, in: $0) == .available })
+    var encodedVIPByteCounts: [Int] = []
+    var encodedTunnelCounts: [Int] = []
+    var encodedPSKMatchesSource: [Bool] = []
+    var encodedSessionIDMatchesClientID: [Bool] = []
+    for candidate in candidates {
+      try AuthenticatedPortalSnapshotMapper.withValidatedStartSnapshot(
+        fixture.snapshot,
+        handle: candidate.summary.handle
+      ) { snapshot in
+        try snapshot.withEncodedStartMessage { root in
+          let common = try #require(xpc_dictionary_get_value(root, "common"))
+          let vip = try #require(xpc_dictionary_get_string(common, "vip"))
+          let psk = try #require(xpc_dictionary_get_string(common, "psk"))
+          let sessionID = try #require(xpc_dictionary_get_string(common, "sessionid"))
+          let tunnels = try #require(xpc_dictionary_get_value(root, "tunnels"))
+          encodedVIPByteCounts.append(String(cString: vip).utf8.count)
+          encodedTunnelCounts.append(xpc_array_get_count(tunnels))
+          encodedPSKMatchesSource.append(
+            String(cString: psk).utf8.elementsEqual(groundTruthPSKSource.utf8)
+          )
+          // keyid/KEY_ID transformation belongs to the helper; the mapper must
+          // preserve raw IKE/CLIENT@id bytes as common.sessionid.
+          encodedSessionIDMatchesClientID.append(
+            String(cString: sessionID).utf8.elementsEqual(
+              groundTruthClientIDSource.utf8
+            ))
+        }
       }
     }
-    #expect(encodedVIPByteCount == 8)
-    #expect(encodedTunnelCount == 2)
-    #expect(encodedPSKMatchesSource)
-    #expect(encodedSessionIDMatchesClientID)
-    #expect(candidate.snapshotComplete)
-    #expect(candidate.firstMissingField == nil)
+    #expect(encodedVIPByteCounts == [8, 8])
+    #expect(encodedTunnelCounts == [2, 2])
+    #expect(encodedPSKMatchesSource == [true, true])
+    #expect(encodedSessionIDMatchesClientID == [true, true])
+    #expect(candidates.allSatisfy { $0.snapshotComplete })
+    #expect(candidates.allSatisfy { $0.firstMissingField == nil })
   }
 
   @Test func wrappedIntegrationInfoStillMaps() throws {
@@ -78,8 +88,8 @@ import Testing
       fixture.snapshot
     )
     #expect(failure == nil)
-    #expect(candidates.count == 1)
-    #expect(candidates.first?.summary.displayName == "login21")
+    #expect(candidates.count == 2)
+    #expect(candidates.map(\.summary.displayName) == ["login21", "login52"])
   }
 
   @Test func foreignRootWithoutIntegrationInfoStillFailsClosed() throws {

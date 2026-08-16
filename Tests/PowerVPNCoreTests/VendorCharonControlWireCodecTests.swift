@@ -196,7 +196,8 @@ import Testing
     var context: VendorCharonNCRouteToggleContext?
     try ControlSnapshotFixture().snapshot().withEncodedStartMessage { start in
       context = VendorCharonControlWireCodec.ncRouteToggleContext(
-        copyingTunnelNameFromStartRequest: start
+        copyingTunnelNameFromStartRequest: start,
+        selectedTunnelIndex: 0
       )
     }
 
@@ -210,6 +211,50 @@ import Testing
       #expect(try string(request, "rpc") == "updown_nc")
       #expect(xpc_dictionary_get_bool(request, "updown") == enabled)
       #expect(try string(request, "tunnel-name") == "synthetic-tunnel")
+    }
+  }
+
+  @Test func ncRouteToggleContextUsesSelectedIndexAndRejectsInvalidSelection() throws {
+    try ControlSnapshotFixture().snapshot(
+      tunnelNames: ["synthetic-tunnel-first", "synthetic-tunnel-second"]
+    ).withEncodedStartMessage { start in
+      for (index, expectedName) in [
+        (0, "synthetic-tunnel-first"),
+        (1, "synthetic-tunnel-second"),
+      ] {
+        let context = try #require(
+          VendorCharonControlWireCodec.ncRouteToggleContext(
+            copyingTunnelNameFromStartRequest: start,
+            selectedTunnelIndex: index
+          )
+        )
+        let request = VendorCharonControlWireCodec.makeNCRouteToggleRequest(
+          context: context,
+          enabled: true
+        )
+        #expect(try string(request, "tunnel-name") == expectedName)
+      }
+      #expect(
+        VendorCharonControlWireCodec.ncRouteToggleContext(
+          copyingTunnelNameFromStartRequest: start,
+          selectedTunnelIndex: -1
+        ) == nil
+      )
+      #expect(
+        VendorCharonControlWireCodec.ncRouteToggleContext(
+          copyingTunnelNameFromStartRequest: start,
+          selectedTunnelIndex: 2
+        ) == nil
+      )
+
+      let tunnels = try array(start, "tunnels")
+      xpc_array_set_value(tunnels, 1, xpc_string_create("wrong-type"))
+      #expect(
+        VendorCharonControlWireCodec.ncRouteToggleContext(
+          copyingTunnelNameFromStartRequest: start,
+          selectedTunnelIndex: 1
+        ) == nil
+      )
     }
   }
 

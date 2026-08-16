@@ -56,9 +56,9 @@ enum PortalSP2Tree {
     return nil
   }
 
-  /// The installed GUI displays the first SP2 tunnel's `tunnel-name`. Like the
-  /// helper, it reads this key directly from XMLReader's element dictionary,
-  /// so only the attribute shape is accepted.
+  /// The installed GUI creates one item for each accepted SP2 tunnel and
+  /// displays that tunnel's `tunnel-name`. It reads this key directly from
+  /// XMLReader's element dictionary, so only the attribute shape is accepted.
   static func displayName(
     of tunnel: AuthenticatedPortalResourceElement
   ) throws -> String {

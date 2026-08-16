@@ -59,6 +59,41 @@ import Testing
     #expect(factory.driver.cancelCount == 0)
   }
 
+  @Test func twoTunnelSelectedSecondTargetsOnlySecondForEnableAndDisable() async throws {
+    let factory = CharonControlDriverFactory()
+    let snapshot = try ControlSnapshotFixture().snapshot(
+      tunnelNames: ["synthetic-tunnel-first", "synthetic-tunnel-second"],
+      selectedEncodedTunnelIndex: 1
+    )
+    let lease = try await activeNCRouteLease(factory, snapshot: snapshot)
+    #expect(factory.driver.observedStartTunnelCounts == [2])
+
+    let enableTask = Task {
+      await lease.setSelectedNCEnabled(
+        true,
+        timeoutMilliseconds: 500,
+        peerGenerationValidator: { true }
+      )
+    }
+    #expect(await waitForControl { factory.driver.submitCount == 2 })
+    #expect(factory.driver.observations[1].tunnelName == "synthetic-tunnel-second")
+    factory.driver.emitReplyDictionary(ncRouteReply(success: true), at: 1)
+    #expect((await enableTask.value).outcome == .transportAcknowledged)
+
+    let disableTask = Task {
+      await lease.setSelectedNCEnabled(
+        false,
+        timeoutMilliseconds: 500,
+        peerGenerationValidator: { true }
+      )
+    }
+    #expect(await waitForControl { factory.driver.submitCount == 3 })
+    #expect(factory.driver.observations[2].tunnelName == "synthetic-tunnel-second")
+    factory.driver.emitReplyDictionary(ncRouteReply(success: true), at: 2)
+    #expect((await disableTask.value).outcome == .transportAcknowledged)
+    try await stopNCRouteLease(lease, factory: factory, replyIndex: 3)
+  }
+
   @Test func malformedAndDuplicateRouteRepliesDoNotAcknowledgeOrBlockStop() async throws {
     let factory = CharonControlDriverFactory()
     let lease = try await activeNCRouteLease(factory)
@@ -266,9 +301,19 @@ private final class RouteToggleValidationGate: @unchecked Sendable {
 private func activeNCRouteLease(
   _ factory: CharonControlDriverFactory
 ) async throws -> VendorCharonControlLease {
+  try await activeNCRouteLease(
+    factory,
+    snapshot: ControlSnapshotFixture().snapshot()
+  )
+}
+
+private func activeNCRouteLease(
+  _ factory: CharonControlDriverFactory,
+  snapshot: VendorCharonStartSnapshot
+) async throws -> VendorCharonControlLease {
   let task = Task {
     await controlTransport(factory).start(
-      snapshot: try ControlSnapshotFixture().snapshot(),
+      snapshot: snapshot,
       timeoutMilliseconds: 500,
       peerGenerationValidator: { true }
     )

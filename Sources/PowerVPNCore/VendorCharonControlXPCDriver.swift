@@ -129,14 +129,16 @@ enum VendorCharonControlWireCodec {
   }
 
   static func ncRouteToggleContext(
-    copyingTunnelNameFromStartRequest request: xpc_object_t
+    copyingTunnelNameFromStartRequest request: xpc_object_t,
+    selectedTunnelIndex: Int
   ) -> VendorCharonNCRouteToggleContext? {
     guard xpc_get_type(request) == XPC_TYPE_DICTIONARY,
       let tunnels = xpc_dictionary_get_value(request, "tunnels"),
       xpc_get_type(tunnels) == XPC_TYPE_ARRAY,
-      xpc_array_get_count(tunnels) == 1
+      selectedTunnelIndex >= 0,
+      selectedTunnelIndex < xpc_array_get_count(tunnels)
     else { return nil }
-    let tunnel = xpc_array_get_value(tunnels, 0)
+    let tunnel = xpc_array_get_value(tunnels, selectedTunnelIndex)
     guard xpc_get_type(tunnel) == XPC_TYPE_DICTIONARY,
       let tunnelName = xpc_dictionary_get_string(tunnel, "tunnel-name")
     else { return nil }

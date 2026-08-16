@@ -69,11 +69,72 @@ import Testing
     }
     #expect(!bodyCalled)
 
-    let unknown = handle.replacingOccurrences(of: ":nc:0", with: ":nc:1")
+    let unknown = handle.replacingOccurrences(
+      of: ":nc:0:tunnel:0",
+      with: ":nc:1:tunnel:0"
+    )
     #expect(throws: AuthenticatedPortalValidatedSnapshotError.resourceNotFound) {
       try AuthenticatedPortalSnapshotMapper.withValidatedStartSnapshot(
         fixture.snapshot,
         handle: unknown
+      ) { _ in bodyCalled = true }
+    }
+    #expect(!bodyCalled)
+  }
+
+  @Test func strictHandleGrammarAndFilteredTunnelFailBeforeBody() throws {
+    let fixture = try authenticatedSnapshot(resourceXML: completeValidatedSP2XML)
+    defer { fixture.erase() }
+    let handle = try resourceHandle(in: fixture.snapshot)
+    let components = handle.split(separator: ":").map(String.init)
+    var bodyCalled = false
+
+    let invalidHandles = [
+      components.prefix(4).joined(separator: ":"),
+      replacingHandleComponent(components, at: 3, with: "00"),
+      replacingHandleComponent(components, at: 5, with: "00"),
+    ]
+    for invalidHandle in invalidHandles {
+      #expect(throws: AuthenticatedPortalValidatedSnapshotError.invalidResourceHandle) {
+        try AuthenticatedPortalSnapshotMapper.withValidatedStartSnapshot(
+          fixture.snapshot,
+          handle: invalidHandle
+        ) { _ in bodyCalled = true }
+      }
+    }
+
+    for (index, value) in [(3, "1"), (5, "1")] {
+      #expect(throws: AuthenticatedPortalValidatedSnapshotError.resourceNotFound) {
+        try AuthenticatedPortalSnapshotMapper.withValidatedStartSnapshot(
+          fixture.snapshot,
+          handle: replacingHandleComponent(components, at: index, with: value)
+        ) { _ in bodyCalled = true }
+      }
+    }
+    #expect(!bodyCalled)
+
+    let filtered = try authenticatedSnapshot(
+      resourceXML: filteredFirstCompleteSecondSP2XML
+    )
+    defer { filtered.erase() }
+    let acceptedHandle = try resourceHandle(in: filtered.snapshot)
+    var acceptedEncodedIndex: Int?
+    try AuthenticatedPortalSnapshotMapper.withValidatedStartSnapshot(
+      filtered.snapshot,
+      handle: acceptedHandle
+    ) { snapshot in
+      acceptedEncodedIndex = snapshot.selectedTunnelEncodedIndex
+      #expect(snapshot.tunnelCount == 1)
+    }
+    #expect(acceptedEncodedIndex == 0)
+    let filteredHandle = acceptedHandle.replacingOccurrences(
+      of: ":tunnel:1",
+      with: ":tunnel:0"
+    )
+    #expect(throws: AuthenticatedPortalValidatedSnapshotError.resourceNotFound) {
+      try AuthenticatedPortalSnapshotMapper.withValidatedStartSnapshot(
+        filtered.snapshot,
+        handle: filteredHandle
       ) { _ in bodyCalled = true }
     }
     #expect(!bodyCalled)
@@ -152,6 +213,16 @@ private func resourceHandle(in snapshot: AuthenticatedPortalSnapshot) throws -> 
   try #require(AuthenticatedPortalSnapshotMapper.map(snapshot).first).summary.handle
 }
 
+private func replacingHandleComponent(
+  _ components: [String],
+  at index: Int,
+  with replacement: String
+) -> String {
+  var copy = components
+  copy[index] = replacement
+  return copy.joined(separator: ":")
+}
+
 private let completeValidatedSP2XML = """
   <ROOT><INTERGRATION_INFO><VERSION major="2"/><RESOURCE_LIST>
     <NC_RESOURCE status="1" mapid="resource-map"><TUNNEL tunnel-name="Campus NC"
@@ -168,5 +239,27 @@ private let completeValidatedSP2XML = """
         </EXTENSIONS>
       </IKE>
     </TUNNEL></NC_RESOURCE>
+  </RESOURCE_LIST></INTERGRATION_INFO></ROOT>
+  """
+
+private let filteredFirstCompleteSecondSP2XML = """
+  <ROOT><INTERGRATION_INFO><VERSION major="2"/><RESOURCE_LIST>
+    <NC_RESOURCE mapid="resource-map">
+      <IKE><CLIENT id="helper-session-material"/><SERVER port="500"/>
+        <ISAKMP-SA><PROPOSAL><TRANSFORMS>
+          <TRANSFORM enc="null" hash="null" life-time="3600"/>
+        </TRANSFORMS></PROPOSAL></ISAKMP-SA>
+        <IPSEC-SA><PROPOSAL><TRANSFORMS>
+          <TRANSFORM enc="aes256" hash="sha256" life-time="1800"/>
+        </TRANSFORMS></PROPOSAL></IPSEC-SA><PSK key="psk-material"/>
+        <EXTENSIONS><PRIVATE-IP addr="10.10.10.4"/></EXTENSIONS>
+      </IKE>
+      <TUNNEL tunnel-name="filtered" status="0"/>
+      <TUNNEL tunnel-name="accepted" authority="7" status="9" negotiate-mode="3">
+        <IKE family="4"><EXTENSIONS>
+          <SECURED-ROUTES name="direct"><ROUTE addr="10.1.2.3/24"/></SECURED-ROUTES>
+        </EXTENSIONS></IKE>
+      </TUNNEL>
+    </NC_RESOURCE>
   </RESOURCE_LIST></INTERGRATION_INFO></ROOT>
   """

@@ -34,8 +34,8 @@ import Testing
   @Test func helperChildTextShapeDoesNotMasqueradeAsAttribute() throws {
     let fixture = try authenticatedSnapshot(
       resourceXML: """
-        <ROOT><INTERGRATION_INFO><VERSION major="2"/><RESOURCE_LIST><NC_RESOURCE>
-          <TUNNEL tunnel-name="Campus NC"><IKE><CLIENT>
+        <ROOT><INTERGRATION_INFO><VERSION major="2"/><RESOURCE_LIST>
+          <NC_RESOURCE status="1"><TUNNEL tunnel-name="Campus NC"><IKE><CLIENT>
             <id>child-only-session</id>
           </CLIENT></IKE></TUNNEL>
         </NC_RESOURCE></RESOURCE_LIST></INTERGRATION_INFO></ROOT>

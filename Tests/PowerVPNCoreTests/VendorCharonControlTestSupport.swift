@@ -38,7 +38,10 @@ struct ControlSnapshotFixture {
   let session = ControlTextMaterial("synthetic-session")
   let gateway = ControlTextMaterial("synthetic-gateway")
 
-  func snapshot() throws -> VendorCharonStartSnapshot {
+  func snapshot(
+    tunnelNames: [String] = ["synthetic-tunnel"],
+    selectedEncodedTunnelIndex: Int? = nil
+  ) throws -> VendorCharonStartSnapshot {
     let candidate = VendorCharonStartCandidate(
       lineage: lineage,
       common: VendorCharonStartCommonCandidate(
@@ -52,21 +55,31 @@ struct ControlSnapshotFixture {
         ikeLifetime: integer(3_600),
         ipsecLifetime: integer(1_800)
       ),
-      tunnels: [
+      tunnels: tunnelNames.map { tunnelName in
         VendorCharonStartTunnelCandidate(
           authority: integer(1),
           status: integer(2),
-          tunnelName: text("synthetic-tunnel"),
+          tunnelName: text(tunnelName),
           family: integer(4),
           resourceFlag: integer(0),
           name: text(""),
           routes: [],
           mapID: text("synthetic-map")
         )
-      ]
+      }
     )
     guard let snapshot = VendorCharonStartValidator.validate(candidate).snapshot else {
       throw ControlTestError.missingSnapshot
+    }
+    if let selectedEncodedTunnelIndex {
+      guard
+        let selected = snapshot.selectingTunnel(
+          atEncodedIndex: selectedEncodedTunnelIndex
+        )
+      else {
+        throw ControlTestError.missingSnapshot
+      }
+      return selected
     }
     return snapshot
   }
@@ -109,6 +122,7 @@ final class ScriptedCharonControlDriver: @unchecked Sendable,
   private var connectionHandler: (@Sendable (VendorCharonControlConnectionEvent) -> Void)?
   private var replyHandlers: [@Sendable (VendorCharonControlReplyEvent) -> Void] = []
   private var envelopes: [ControlEnvelopeObservation] = []
+  private var startTunnelCounts: [Int] = []
   private var cancels = 0
   private var sessionValid = true
 
@@ -129,6 +143,7 @@ final class ScriptedCharonControlDriver: @unchecked Sendable,
     let operation = xpc_dictionary_get_string(request, "rpc").map(String.init(cString:))
     let common = try? dictionary(request, "common")
     let gateway = common.flatMap { try? string($0, "gateway") }
+    let startTunnelCount = (try? array(request, "tunnels")).map(xpc_array_get_count)
     let startShape: Bool
     if operation == "start_connection" {
       startShape =
@@ -158,6 +173,9 @@ final class ScriptedCharonControlDriver: @unchecked Sendable,
     let tunnelName =
       ncRouteToggleShape ? try? string(request, "tunnel-name") : nil
     lock.withLock {
+      if operation == "start_connection", let startTunnelCount {
+        startTunnelCounts.append(startTunnelCount)
+      }
       envelopes.append(
         ControlEnvelopeObservation(
           operation: operation,
@@ -180,6 +198,7 @@ final class ScriptedCharonControlDriver: @unchecked Sendable,
   var submitCount: Int { lock.withLock { replyHandlers.count } }
   var cancelCount: Int { lock.withLock { cancels } }
   var observations: [ControlEnvelopeObservation] { lock.withLock { envelopes } }
+  var observedStartTunnelCounts: [Int] { lock.withLock { startTunnelCounts } }
 
   func emitReply(_ event: VendorCharonControlReplyEvent, at index: Int) {
     let handler = lock.withLock {

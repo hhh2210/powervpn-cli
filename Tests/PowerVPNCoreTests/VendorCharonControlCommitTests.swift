@@ -105,6 +105,29 @@ import Testing
     #expect(factory.callCount == 0)
     #expect(factory.driver.submitCount == 0)
   }
+
+  @Test func unboundMultiTunnelFailsBeforeAuthorizationCommitAndSubmission() async throws {
+    let factory = CharonControlDriverFactory()
+    let trace = ControlCommitTrace()
+    let snapshot = try ControlSnapshotFixture().snapshot(
+      tunnelNames: ["synthetic-tunnel-first", "synthetic-tunnel-second"]
+    )
+
+    let pending = try controlTransport(factory).beginStart(
+      snapshot: snapshot,
+      timeoutMilliseconds: 500,
+      peerGenerationValidator: { true },
+      commitStartAuthorization: { trace.record() }
+    )
+    let result = await pending.result()
+
+    #expect(result.receipt.outcome == .snapshotEncodingFailed)
+    #expect(result.receipt.encodingError == .incompleteSnapshot(.tunnelName))
+    #expect(!result.receipt.requestSent)
+    #expect(trace.count == 0)
+    #expect(factory.callCount == 0)
+    #expect(factory.driver.submitCount == 0)
+  }
 }
 
 private final class ControlCommitTrace: @unchecked Sendable {

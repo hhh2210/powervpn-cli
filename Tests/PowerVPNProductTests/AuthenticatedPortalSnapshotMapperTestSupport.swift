@@ -21,7 +21,7 @@ func sources(
 func resourceXML(displayName: String, sessionID: String) -> String {
   """
   <ROOT><INTERGRATION_INFO><VERSION major="2"/><RESOURCE_LIST><NC_RESOURCE>
-    <TUNNEL tunnel-name="\(displayName)"><IKE><CLIENT id="\(sessionID)"/></IKE></TUNNEL>
+    <TUNNEL tunnel-name="\(displayName)" status="1"><IKE><CLIENT id="\(sessionID)"/></IKE></TUNNEL>
   </NC_RESOURCE></RESOURCE_LIST></INTERGRATION_INFO></ROOT>
   """
 }
