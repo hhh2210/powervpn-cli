@@ -17,6 +17,7 @@ protocol ProxyTunnelLeasing: Sendable {
 
 struct ProxyTunnelOpenFailure: Equatable, Sendable {
   let failure: ProductM2ConnectOutcome?
+  var firstBadEvent: ProductM2BadEvent? = nil
   let helperMutationRequested: Bool
   let serverContactRequested: Bool
   let cleanupVerified: Bool
@@ -50,6 +51,7 @@ func openProductProxyTunnel(
     return .failed(
       ProxyTunnelOpenFailure(
         failure: report.failure,
+        firstBadEvent: report.firstBadEvent,
         helperMutationRequested: report.helperMutationRequested,
         serverContactRequested: report.serverContactRequested,
         cleanupVerified: report.cleanupVerified

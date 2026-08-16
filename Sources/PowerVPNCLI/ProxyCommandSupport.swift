@@ -68,13 +68,21 @@ private func openFailureExecution(_ failure: ProxyTunnelOpenFailure) -> ProxyExe
     )
   }
   return .failure(
-    token: "tunnel_open_failed",
+    token: tunnelOpenFailureToken(failure),
     exitCode: failure.helperMutationRequested ? 70 : 69,
     runtimeInvoked: true,
     helperMutationRequested: failure.helperMutationRequested,
     serverContactRequested: failure.serverContactRequested,
     cleanupVerified: failure.cleanupVerified
   )
+}
+
+private func tunnelOpenFailureToken(_ failure: ProxyTunnelOpenFailure) -> String {
+  var token = "tunnel_open_failed:\(failure.failure?.rawValue ?? "unclassified")"
+  if let firstBadEvent = failure.firstBadEvent {
+    token += ":first_bad=\(firstBadEvent.rawValue)"
+  }
+  return token
 }
 
 private func runOpenedLease(

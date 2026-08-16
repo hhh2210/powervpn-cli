@@ -162,12 +162,14 @@ func proxyFailedOpen(
   mutated: Bool,
   contacted: Bool = false,
   cleanupVerified: Bool,
-  failure: ProductM2ConnectOutcome? = nil
+  failure: ProductM2ConnectOutcome? = nil,
+  firstBadEvent: ProductM2BadEvent? = nil
 ) -> ProxyTunnelOpenOperation {
   { _, _ in
     .failed(
       ProxyTunnelOpenFailure(
         failure: failure,
+        firstBadEvent: firstBadEvent,
         helperMutationRequested: mutated,
         serverContactRequested: contacted,
         cleanupVerified: cleanupVerified

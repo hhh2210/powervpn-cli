@@ -135,6 +135,26 @@ import Testing
     }
   }
 
+  @Test func serveOpenFailureUsesTheSameClosedDiagnosticToken() async throws {
+    let result = try await runProxyServeCommand(
+      proxyServeArguments,
+      authorizationAvailabilityFailure: { nil },
+      runtime: proxyFailedOpen(
+        mutated: false,
+        cleanupVerified: false,
+        failure: .generationFenceRejected,
+        firstBadEvent: .generationFenceRejected
+      )
+    )
+
+    let token =
+      "tunnel_open_failed:generation_fence_rejected:first_bad=generation_fence_rejected"
+    #expect(result.exitCode == 69)
+    #expect(result.standardError == "\(token)\n")
+    #expect(result.standardOutput.contains("\"outcome\":\"\(token)\""))
+    assertTargetFree(result)
+  }
+
   @Test func serveProviderFailureJSONIsClosedAndDoesNotRequestApproval() async throws {
     let trace = M2CommandTrace()
     let result = try await runProxyServeCommand(

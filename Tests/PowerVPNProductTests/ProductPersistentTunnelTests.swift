@@ -139,10 +139,14 @@ import Testing
     }
     #expect(report.outcome == .rejected)
     #expect(report.failure == .startRejected)
+    #expect(report.firstBadEvent == .startControlRejected)
     #expect(report.state == .stopped)
     #expect(!report.opened)
     #expect(!report.helperMutationRequested)
     #expect(report.serverContactRequested)
+    let encoded = try #require(
+      String(bytes: JSONEncoder().encode(report), encoding: .utf8))
+    #expect(!encoded.contains("firstBadEvent"))
   }
   @Test func proxyAdapterPreservesTypedPersistentOpenFailure() async throws {
     let trace = ProductM2TestTrace()
@@ -169,6 +173,7 @@ import Testing
       return
     }
     #expect(failure.failure == .startRejected)
+    #expect(failure.firstBadEvent == .startControlRejected)
     #expect(!failure.helperMutationRequested)
     #expect(failure.serverContactRequested)
   }

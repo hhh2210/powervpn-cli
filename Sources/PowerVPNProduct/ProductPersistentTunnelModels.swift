@@ -16,6 +16,7 @@ package enum ProductPersistentTunnelOpenOutcome: String, Encodable, Equatable, S
 package struct ProductPersistentTunnelOpenReport: Encodable, Equatable, Sendable {
   package let outcome: ProductPersistentTunnelOpenOutcome
   package let failure: ProductM2ConnectOutcome?
+  package var firstBadEvent: ProductM2BadEvent? = nil
   package let state: ProductPersistentTunnelState
   package let helperMutationRequested: Bool
   package let serverContactRequested: Bool
@@ -37,6 +38,26 @@ package struct ProductPersistentTunnelOpenReport: Encodable, Equatable, Sendable
   /// Schema-11 network-proof source mirrored from the underlying M2
   /// execution; nil — omitted from JSON — when not applicable.
   package var networkProofSource: ProductM2NetworkProofSource? = nil
+
+  private enum CodingKeys: String, CodingKey {
+    case outcome
+    case failure
+    case state
+    case helperMutationRequested
+    case serverContactRequested
+    case authorizationClose
+    case authorizationOwnedMaterialErased
+    case cleanupVerified
+    case cleanupCaptureState
+    case cleanupCaptureRetryReason
+    case cleanupCaptureAttemptCount
+    case containsSecrets
+    case activeCaptureState
+    case activeCaptureChangeAxes
+    case activeCaptureIncompleteReason
+    case stopInvalidityClass
+    case networkProofSource
+  }
 
   package var opened: Bool {
     outcome == .opened && state == .active

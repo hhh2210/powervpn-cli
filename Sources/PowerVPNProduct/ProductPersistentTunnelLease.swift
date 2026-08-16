@@ -68,6 +68,7 @@ actor ProductPersistentTunnelSession {
       let report = ProductPersistentTunnelOpenReport(
         outcome: .rejected,
         failure: failure.outcome,
+        firstBadEvent: failure.firstBadEvent,
         state: .stopped,
         helperMutationRequested: failure.helperMutationRequested,
         serverContactRequested: failure.serverContactRequested,

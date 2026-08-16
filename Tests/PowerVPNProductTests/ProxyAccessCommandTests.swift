@@ -103,20 +103,36 @@ import Testing
     }
   }
 
-  @Test func truthfulOpenFailureClassificationUsesMutationBoolean() async throws {
-    let noMutation = try await runProxySSHCommand(
+  @Test func truthfulOpenFailureIncludesClosedFailureDiagnostics() async throws {
+    let generationFence = try await runProxySSHCommand(
       proxySSHArguments,
       authorizationAvailabilityFailure: { nil },
-      runtime: proxyFailedOpen(mutated: false, cleanupVerified: false)
+      runtime: proxyFailedOpen(
+        mutated: false,
+        cleanupVerified: false,
+        failure: .generationFenceRejected,
+        firstBadEvent: .generationFenceRejected
+      )
     )
-    #expect(noMutation.exitCode == 69)
+    #expect(generationFence.exitCode == 69)
+    #expect(
+      generationFence.standardError
+        == "tunnel_open_failed:generation_fence_rejected:first_bad=generation_fence_rejected\n")
 
-    let cleanedMutation = try await runProxySSHCommand(
+    let routeActivation = try await runProxySSHCommand(
       proxySSHArguments,
       authorizationAvailabilityFailure: { nil },
-      runtime: proxyFailedOpen(mutated: true, cleanupVerified: true)
+      runtime: proxyFailedOpen(
+        mutated: true,
+        cleanupVerified: true,
+        failure: .routeActivationRejected,
+        firstBadEvent: .routeActivationRejected
+      )
     )
-    #expect(cleanedMutation.exitCode == 70)
+    #expect(routeActivation.exitCode == 70)
+    #expect(
+      routeActivation.standardError
+        == "tunnel_open_failed:route_activation_rejected:first_bad=route_activation_rejected\n")
 
     let uncleanMutation = try await runProxySSHCommand(
       proxySSHArguments,
@@ -124,6 +140,7 @@ import Testing
       runtime: proxyFailedOpen(mutated: true, cleanupVerified: false)
     )
     #expect(uncleanMutation.exitCode == 74)
+    #expect(uncleanMutation.standardError == "cleanup_unproven\n")
   }
 
   @Test func earlySignalNeverOpensRuntimeOrSpawnsChild() async throws {
