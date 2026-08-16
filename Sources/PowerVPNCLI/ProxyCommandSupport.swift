@@ -82,6 +82,19 @@ private func tunnelOpenFailureToken(_ failure: ProxyTunnelOpenFailure) -> String
   if let firstBadEvent = failure.firstBadEvent {
     token += ":first_bad=\(firstBadEvent.rawValue)"
   }
+  if let selectionFailureClass = failure.selectionFailureClass {
+    token += ":selection=\(selectionFailureClass.rawValue)"
+  }
+  if let catalogFailure = failure.resourceCatalogFailure {
+    token +=
+      ":catalog=\(catalogFailure.stage.rawValue).\(catalogFailure.failureClass.rawValue)"
+    if let resourceOrdinal = catalogFailure.resourceOrdinal {
+      token += ":ordinal=\(resourceOrdinal)"
+    }
+    if let fieldPath = catalogFailure.fieldPath {
+      token += ":field_path=\(fieldPath)"
+    }
+  }
   return token
 }
 

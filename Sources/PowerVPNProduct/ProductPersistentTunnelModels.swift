@@ -17,6 +17,10 @@ package struct ProductPersistentTunnelOpenReport: Encodable, Equatable, Sendable
   package let outcome: ProductPersistentTunnelOpenOutcome
   package let failure: ProductM2ConnectOutcome?
   package var firstBadEvent: ProductM2BadEvent? = nil
+  /// Package-only catalog diagnostics mirrored from the underlying M2 report.
+  /// Deliberately excluded from `CodingKeys` to preserve the open-report schema.
+  package var selectionFailureClass: ProductM2SelectionFailureClass? = nil
+  package var resourceCatalogFailure: ProductResourceCatalogFailure? = nil
   package let state: ProductPersistentTunnelState
   package let helperMutationRequested: Bool
   package let serverContactRequested: Bool

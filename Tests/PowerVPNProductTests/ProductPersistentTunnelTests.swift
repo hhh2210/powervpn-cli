@@ -346,6 +346,56 @@ import Testing
     #expect(trace.count("verify") == 2)
   }
 
+  @Test func persistentOpenMirrorsCatalogDiagnosticsWithoutChangingJSON() async throws {
+    let sentinel = "server-catalog-value-must-not-escape"
+    let xml = m2ResourceXML(["server-display-must-not-escape"])
+      .replacingOccurrences(of: "port=\"500\"", with: "port=\"\(sentinel)\"")
+    let fixture = try authenticatedSnapshot(resourceXML: xml)
+    defer { fixture.erase() }
+    let runtime = ProductPersistentTunnelRuntime(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: ProductM2TestTrace()
+      )
+    )
+
+    let result = await runtime.open(
+      request: ProductM2ConnectRequest(
+        resourceDisplayName: "Campus NC",
+        sshTarget: .thu21
+      ),
+      startupBudget: m2TestBudget()
+    )
+    guard case .failed(let report) = result else {
+      Issue.record("catalog mapping failure returned a live lease")
+      return
+    }
+
+    #expect(report.failure == .resourceCatalogRejected)
+    #expect(report.selectionFailureClass == .catalogMapping)
+    #expect(
+      report.resourceCatalogFailure
+        == ProductResourceCatalogFailure(
+          stage: .resource,
+          failureClass: .integerInvalid,
+          resourceOrdinal: 1,
+          fieldPath: "common.ike_port"
+        ))
+    var reportWithoutPackageDiagnostics = report
+    reportWithoutPackageDiagnostics.selectionFailureClass = nil
+    reportWithoutPackageDiagnostics.resourceCatalogFailure = nil
+    let encoded = try JSONEncoder().encode(report)
+    let encodedWithoutPackageDiagnostics = try JSONEncoder().encode(
+      reportWithoutPackageDiagnostics
+    )
+    #expect(encoded == encodedWithoutPackageDiagnostics)
+    let json = try #require(String(data: encoded, encoding: .utf8))
+    #expect(!json.contains("selectionFailureClass"))
+    #expect(!json.contains("resourceCatalogFailure"))
+    #expect(!json.contains(sentinel))
+    #expect(!json.contains("server-display-must-not-escape"))
+  }
+
   @Test func persistentOpenFailurePropagatesCleanupRecapture() async throws {
     let trace = ProductM2TestTrace()
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))

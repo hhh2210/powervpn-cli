@@ -18,6 +18,8 @@ protocol ProxyTunnelLeasing: Sendable {
 struct ProxyTunnelOpenFailure: Equatable, Sendable {
   let failure: ProductM2ConnectOutcome?
   var firstBadEvent: ProductM2BadEvent? = nil
+  var selectionFailureClass: ProductM2SelectionFailureClass? = nil
+  var resourceCatalogFailure: ProductResourceCatalogFailure? = nil
   let helperMutationRequested: Bool
   let serverContactRequested: Bool
   let cleanupVerified: Bool
@@ -52,6 +54,8 @@ func openProductProxyTunnel(
       ProxyTunnelOpenFailure(
         failure: report.failure,
         firstBadEvent: report.firstBadEvent,
+        selectionFailureClass: report.selectionFailureClass,
+        resourceCatalogFailure: report.resourceCatalogFailure,
         helperMutationRequested: report.helperMutationRequested,
         serverContactRequested: report.serverContactRequested,
         cleanupVerified: report.cleanupVerified

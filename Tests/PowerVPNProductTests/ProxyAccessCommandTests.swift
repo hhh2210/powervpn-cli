@@ -143,6 +143,71 @@ import Testing
     #expect(uncleanMutation.standardError == "cleanup_unproven\n")
   }
 
+  @Test func catalogMappingFailureIncludesClosedCatalogDiagnostics() async throws {
+    let sentinel = "server-catalog-value-must-not-escape"
+    let xml = m2ResourceXML(["server-display-must-not-escape"])
+      .replacingOccurrences(of: "port=\"500\"", with: "port=\"\(sentinel)\"")
+    let fixture = try authenticatedSnapshot(resourceXML: xml)
+    defer { fixture.erase() }
+    let runtime = ProductPersistentTunnelRuntime(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: ProductM2TestTrace()
+      )
+    )
+    let child = ProxyTestChildRunner()
+
+    let result = try await runProxySSHCommand(
+      proxySSHArguments,
+      authorizationAvailabilityFailure: { nil },
+      childRunner: child,
+      runtime: { request, budget in
+        await openProductProxyTunnel(runtime: runtime, request: request, budget: budget)
+      }
+    )
+
+    #expect(result.exitCode == 69)
+    #expect(
+      result.standardError
+        == "tunnel_open_failed:resource_catalog_rejected"
+        + ":first_bad=resource_catalog_rejected"
+        + ":selection=catalog_mapping"
+        + ":catalog=resource.integer_invalid"
+        + ":ordinal=1:field_path=common.ike_port\n")
+    #expect(!result.standardError.contains(sentinel))
+    #expect(!result.standardError.contains("server-display-must-not-escape"))
+    #expect(child.invocationCount == 0)
+  }
+
+  @Test func emptyCatalogHasSelectionTokenWithoutMappingDetails() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML([]))
+    defer { fixture.erase() }
+    let runtime = ProductPersistentTunnelRuntime(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: ProductM2TestTrace()
+      )
+    )
+    let child = ProxyTestChildRunner()
+
+    let result = try await runProxySSHCommand(
+      proxySSHArguments,
+      authorizationAvailabilityFailure: { nil },
+      childRunner: child,
+      runtime: { request, budget in
+        await openProductProxyTunnel(runtime: runtime, request: request, budget: budget)
+      }
+    )
+
+    #expect(result.exitCode == 69)
+    #expect(
+      result.standardError
+        == "tunnel_open_failed:resource_catalog_rejected"
+        + ":first_bad=resource_catalog_rejected"
+        + ":selection=catalog_empty\n")
+    #expect(child.invocationCount == 0)
+  }
+
   @Test func earlySignalNeverOpensRuntimeOrSpawnsChild() async throws {
     let monitor = M2ManualSignalMonitor(emitOnStart: 2)
     let trace = M2CommandTrace()

@@ -69,6 +69,8 @@ actor ProductPersistentTunnelSession {
         outcome: .rejected,
         failure: failure.outcome,
         firstBadEvent: failure.firstBadEvent,
+        selectionFailureClass: failure.selectionFailureClass,
+        resourceCatalogFailure: failure.resourceCatalogFailure,
         state: .stopped,
         helperMutationRequested: failure.helperMutationRequested,
         serverContactRequested: failure.serverContactRequested,
