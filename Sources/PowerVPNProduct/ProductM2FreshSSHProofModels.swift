@@ -1,5 +1,16 @@
 import Foundation
 
+public enum ProductM2SSHFailureClass: String, Encodable, Equatable, Sendable {
+  case targetUnreachable = "target_unreachable"
+  case transportRefused = "transport_refused"
+  case hostKeyRejected = "host_key_rejected"
+  case authRejected = "auth_rejected"
+  case configError = "config_error"
+  case remoteCommandRejected = "remote_command_rejected"
+  case outputInvalid = "output_invalid"
+  case unclassified
+}
+
 public struct ProductM2FreshSSHProofEvidence: Encodable, Equatable, Sendable {
   public let target: ProductM2SSHTarget
   public let outcome: ProductM2SSHProofOutcome
@@ -13,6 +24,7 @@ public struct ProductM2FreshSSHProofEvidence: Encodable, Equatable, Sendable {
   public let standardErrorWithinLimit: Bool
   public let timedOut: Bool
   public let cancelled: Bool
+  public let failureClass: ProductM2SSHFailureClass?
   public let automaticRetryCount = 0
   public let containsChallenge = false
   public let containsRawOutput = false
@@ -28,7 +40,8 @@ public struct ProductM2FreshSSHProofEvidence: Encodable, Equatable, Sendable {
     standardOutputWithinLimit: Bool,
     standardErrorWithinLimit: Bool,
     timedOut: Bool,
-    cancelled: Bool
+    cancelled: Bool,
+    failureClass: ProductM2SSHFailureClass?
   ) {
     self.target = target
     self.outcome = outcome
@@ -42,6 +55,7 @@ public struct ProductM2FreshSSHProofEvidence: Encodable, Equatable, Sendable {
     self.standardErrorWithinLimit = standardErrorWithinLimit
     self.timedOut = timedOut
     self.cancelled = cancelled
+    self.failureClass = outcome == .rejected ? (failureClass ?? .unclassified) : nil
   }
 
   package static func timedOut(target: ProductM2SSHTarget) -> Self {
@@ -55,7 +69,8 @@ public struct ProductM2FreshSSHProofEvidence: Encodable, Equatable, Sendable {
       standardOutputWithinLimit: true,
       standardErrorWithinLimit: true,
       timedOut: true,
-      cancelled: false
+      cancelled: false,
+      failureClass: nil
     )
   }
 }
@@ -65,32 +80,32 @@ package struct ProductM2FreshSSHProcessResult: Sendable {
   package let processReaped: Bool
   package let exitStatus: Int32?
   package let standardOutput: Data
-  package let standardError: Data
   package let standardOutputWithinLimit: Bool
   package let standardErrorWithinLimit: Bool
   package let timedOut: Bool
   package let cancelled: Bool
+  package let failureClass: ProductM2SSHFailureClass?
 
   package init(
     processStarted: Bool,
     processReaped: Bool = true,
     exitStatus: Int32?,
     standardOutput: Data = Data(),
-    standardError: Data = Data(),
     standardOutputWithinLimit: Bool = true,
     standardErrorWithinLimit: Bool = true,
     timedOut: Bool = false,
-    cancelled: Bool = false
+    cancelled: Bool = false,
+    failureClass: ProductM2SSHFailureClass? = nil
   ) {
     self.processStarted = processStarted
     self.processReaped = processReaped
     self.exitStatus = exitStatus
     self.standardOutput = standardOutput
-    self.standardError = standardError
     self.standardOutputWithinLimit = standardOutputWithinLimit
     self.standardErrorWithinLimit = standardErrorWithinLimit
     self.timedOut = timedOut
     self.cancelled = cancelled
+    self.failureClass = failureClass
   }
 }
 
@@ -116,6 +131,16 @@ package enum ProductM2FreshSSHProofAssessment {
     } else {
       outcome = .rejected
     }
+    let failureClass: ProductM2SSHFailureClass?
+    if outcome != .rejected {
+      failureClass = nil
+    } else if !result.standardOutputWithinLimit || !result.standardErrorWithinLimit
+      || (result.exitStatus == 0 && !challengeMatched)
+    {
+      failureClass = .outputInvalid
+    } else {
+      failureClass = result.failureClass ?? .unclassified
+    }
     return ProductM2FreshSSHProofEvidence(
       target: target,
       outcome: outcome,
@@ -126,7 +151,8 @@ package enum ProductM2FreshSSHProofAssessment {
       standardOutputWithinLimit: result.standardOutputWithinLimit,
       standardErrorWithinLimit: result.standardErrorWithinLimit,
       timedOut: result.timedOut,
-      cancelled: result.cancelled
+      cancelled: result.cancelled,
+      failureClass: failureClass
     )
   }
 }

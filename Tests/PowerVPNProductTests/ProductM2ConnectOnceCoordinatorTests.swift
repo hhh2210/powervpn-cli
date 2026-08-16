@@ -348,7 +348,7 @@ import Testing
     #expect(stop.unexpectedEventSignature == nil)
   }
 
-  @Test func startWireDiagnosticsFlowToSchemaTwelveReportWithoutValues() async throws {
+  @Test func startWireDiagnosticsFlowToSchemaThirteenReportWithoutValues() async throws {
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
     defer { fixture.erase() }
     let trace = ProductM2TestTrace()
@@ -368,7 +368,7 @@ import Testing
       ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
     )
 
-    #expect(report.schemaVersion == 12)
+    #expect(report.schemaVersion == 13)
     #expect(
       report.startEventSignatures == [
         "1:connection:get_tun_name_success:bool,namev4:string",
@@ -401,7 +401,7 @@ import Testing
     #expect(json.contains("\"containsSecrets\":false"))
     #expect(json.contains("\"snapshotSerialized\":false"))
     #expect(json.contains("\"authorizationOwnedMaterialErased\":true"))
-    #expect(json.contains("\"schemaVersion\":12"))
+    #expect(json.contains("\"schemaVersion\":13"))
     #expect(json.contains("\"routeActivationOutcome\":\"transport_acknowledged\""))
     #expect(json.contains("\"routeActivationAcknowledged\":true"))
     #expect(json.contains("\"routeDeactivationOutcome\":\"transport_acknowledged\""))

@@ -334,7 +334,7 @@ public struct ProductM2ConnectRequest: Equatable, Sendable {
 }
 
 public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
-  public let schemaVersion = 12
+  public let schemaVersion = 13
   public let outcome: ProductM2ConnectOutcome
   public let finalState: ProductM2ConnectionState
   public let lastGoodState: ProductM2ConnectionState

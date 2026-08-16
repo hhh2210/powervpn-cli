@@ -17,6 +17,7 @@ final class BoundedCommandExecution: @unchecked Sendable {
   private var started = false
   private var terminated = false
   private var exitStatus: Int32?
+  private var exitedNormally = false
   private var overrideOutcome: BoundedCommandOutcome?
   private var terminationRequested = false
   private var killRequested = false
@@ -37,7 +38,10 @@ final class BoundedCommandExecution: @unchecked Sendable {
       self?.receive(handle.availableData, from: .stderr)
     }
     process.terminationHandler = { [weak self] process in
-      self?.processTerminated(status: process.terminationStatus)
+      self?.processTerminated(
+        status: process.terminationStatus,
+        exitedNormally: process.terminationReason == .exit
+      )
     }
     do {
       try process.run()
@@ -135,10 +139,11 @@ final class BoundedCommandExecution: @unchecked Sendable {
     if exceeded?.terminate == true { terminateRunningProcess() }
   }
 
-  private func processTerminated(status: Int32) {
+  private func processTerminated(status: Int32, exitedNormally: Bool) {
     let publication = lock.withLock { () -> Publication? in
       terminated = true
       exitStatus = status
+      self.exitedNormally = exitedNormally
       return publicationIfReady()
     }
     publication?.resume()
@@ -201,18 +206,24 @@ final class BoundedCommandExecution: @unchecked Sendable {
     timer?.cancel()
     timer = nil
     let outcome = overrideOutcome ?? .exited
-    let exposeOutput = outcome == .exited && exitStatus == 0
+    let exposeOutput = outcome == .exited && exitStatus == 0 && exitedNormally
+    let retainFailureStandardError =
+      outcome == .exited && exitedNormally && exitStatus != 0
+      && request.failureOutputPolicy == .retainStandardErrorOnNonzeroExit
     let result = BoundedCommandResult(
       outcome: outcome,
       started: started,
       exitStatus: exitStatus,
+      exitedNormally: exitedNormally,
       stdout: exposeOutput ? stdout : Data(),
       stderr: exposeOutput ? stderr : Data(),
       terminationRequested: terminationRequested,
       killRequested: killRequested,
-      reaped: true
+      reaped: true,
+      retainedFailureStandardError: retainFailureStandardError ? stderr : Data()
     )
     stdout.removeAll(keepingCapacity: false)
+    if !stderr.isEmpty { stderr.resetBytes(in: stderr.indices) }
     stderr.removeAll(keepingCapacity: false)
     completed = result
     let value = continuation

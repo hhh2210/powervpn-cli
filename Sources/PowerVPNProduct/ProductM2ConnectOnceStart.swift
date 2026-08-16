@@ -281,6 +281,7 @@ extension ProductPersistentTunnelCoordinator {
       && evidence.exitStatusZero && evidence.challengeMatched
       && evidence.standardOutputWithinLimit && evidence.standardErrorWithinLimit
       && !evidence.timedOut && !evidence.cancelled
+      && evidence.failureClass == nil
     guard !consistent else { return evidence }
     return ProductM2FreshSSHProofEvidence(
       target: evidence.target,
@@ -292,7 +293,8 @@ extension ProductPersistentTunnelCoordinator {
       standardOutputWithinLimit: evidence.standardOutputWithinLimit,
       standardErrorWithinLimit: evidence.standardErrorWithinLimit,
       timedOut: evidence.timedOut,
-      cancelled: evidence.cancelled
+      cancelled: evidence.cancelled,
+      failureClass: .unclassified
     )
   }
 }

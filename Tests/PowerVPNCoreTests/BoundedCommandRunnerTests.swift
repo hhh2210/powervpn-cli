@@ -13,6 +13,7 @@ import Testing
       #expect(result.started)
       #expect(result.exitStatus == 0)
       #expect(result.reaped)
+      #expect(result.exitedNormally)
     }
   }
 
@@ -38,7 +39,8 @@ import Testing
       request(
         "/usr/bin/awk",
         arguments: [program],
-        stderrLimit: 512
+        stderrLimit: 512,
+        failureOutputPolicy: .retainStandardErrorOnNonzeroExit
       )
     )
     #expect(result.outcome == .stderrLimitExceeded)
@@ -46,6 +48,9 @@ import Testing
     #expect(result.stdout.isEmpty)
     #expect(result.stderr.isEmpty)
     #expect(result.reaped)
+    var failureOutputExposed = false
+    result.consumeRetainedFailureStandardError { _ in failureOutputExposed = true }
+    #expect(!failureOutputExposed)
   }
 
   @Test func unboundedProducerIsStoppedByCapBeforeTimeout() async {
@@ -71,6 +76,7 @@ import Testing
     #expect(result.terminationRequested)
     #expect(result.stdout.isEmpty)
     #expect(result.stderr.isEmpty)
+    #expect(!result.exitedNormally)
     #expect(result.reaped)
   }
 
@@ -86,6 +92,7 @@ import Testing
     #expect(result.outcome == .cancelled)
     #expect(result.started)
     #expect(result.terminationRequested)
+    #expect(!result.exitedNormally)
     #expect(result.reaped)
   }
 
@@ -107,6 +114,72 @@ import Testing
     #expect(failed.stdout.isEmpty)
     #expect(failed.stderr.isEmpty)
     #expect(!String(describing: failed).contains(marker))
+  }
+
+  @Test func explicitFailureStderrIsPrivateAndConsumedExactlyOnce() async {
+    let marker = "retained-failure-canary"
+    let failed = await BoundedCommandRunner().run(
+      request(
+        "/bin/ls",
+        arguments: ["/definitely-missing-\(marker)"],
+        failureOutputPolicy: .retainStandardErrorOnNonzeroExit
+      )
+    )
+    #expect(failed.outcome == .exited)
+    #expect(failed.exitStatus != 0)
+    #expect(failed.exitedNormally)
+    #expect(failed.stdout.isEmpty)
+    #expect(failed.stderr.isEmpty)
+
+    var consumed = ""
+    failed.consumeRetainedFailureStandardError { bytes in
+      consumed = String(decoding: bytes.bindMemory(to: UInt8.self), as: UTF8.self)
+    }
+    #expect(consumed.contains(marker))
+
+    var consumedTwice = false
+    failed.consumeRetainedFailureStandardError { _ in consumedTwice = true }
+    #expect(!consumedTwice)
+    #expect(!String(describing: failed).contains(marker))
+  }
+
+  @Test func timeoutAndCancellationDiscardRetainedFailureStderr() async {
+    let marker = "terminal-failure-canary"
+    let program =
+      "BEGIN { print \"\(marker)\" > \"/dev/stderr\"; "
+      + "fflush(\"/dev/stderr\"); while (1) {} }"
+    let timedOut = await BoundedCommandRunner().run(
+      request(
+        "/usr/bin/awk",
+        arguments: [program],
+        timeout: 10,
+        failureOutputPolicy: .retainStandardErrorOnNonzeroExit
+      )
+    )
+    #expect(timedOut.outcome == .timedOut)
+    #expect(!timedOut.exitedNormally)
+    var timeoutExposed = false
+    timedOut.consumeRetainedFailureStandardError { _ in timeoutExposed = true }
+    #expect(!timeoutExposed)
+
+    let task = Task {
+      await BoundedCommandRunner().run(
+        request(
+          "/usr/bin/awk",
+          arguments: [program],
+          timeout: 5_000,
+          failureOutputPolicy: .retainStandardErrorOnNonzeroExit
+        )
+      )
+    }
+    try? await Task.sleep(for: .milliseconds(10))
+    task.cancel()
+    let cancelled = await task.value
+    #expect(cancelled.outcome == .cancelled)
+    #expect(!cancelled.exitedNormally)
+    var cancellationExposed = false
+    cancelled.consumeRetainedFailureStandardError { _ in cancellationExposed = true }
+    #expect(!cancellationExposed)
   }
 
   @Test func environmentIsClosedAndSSHAuthSocketIsExplicit() async {
@@ -162,7 +235,8 @@ private func request(
   timeout: Int = 1_000,
   stdoutLimit: Int = 1_024,
   stderrLimit: Int = 1_024,
-  environment: [String: String] = [:]
+  environment: [String: String] = [:],
+  failureOutputPolicy: BoundedCommandFailureOutputPolicy = .discard
 ) -> BoundedCommandRequest {
   BoundedCommandRequest(
     executable: executable,
@@ -170,6 +244,7 @@ private func request(
     timeoutMilliseconds: timeout,
     stdoutLimitBytes: stdoutLimit,
     stderrLimitBytes: stderrLimit,
-    environment: environment
+    environment: environment,
+    failureOutputPolicy: failureOutputPolicy
   )
 }

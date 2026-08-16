@@ -22,6 +22,7 @@ import Testing
     )
     let evidence = await prover.prove(.thu52, timeoutMilliseconds: 15_000)
     #expect(evidence.outcome == .proven)
+    #expect(evidence.failureClass == nil)
     #expect(await trace.count == 1)
     #expect(await trace.targets == [.thu52])
   }
@@ -40,6 +41,7 @@ import Testing
     let evidence = await prover.prove(.thu21, timeoutMilliseconds: 15_000)
     #expect(evidence.outcome == .rejected)
     #expect(evidence.automaticRetryCount == 0)
+    #expect(evidence.failureClass == .unclassified)
     #expect(await trace.count == 1)
   }
 
@@ -60,6 +62,7 @@ import Testing
       ).prove(.thu21, timeoutMilliseconds: 15_000)
     }
     let evidence = await task.value
+    #expect(evidence.failureClass == nil)
     #expect(evidence.outcome == .cancelled)
     #expect(await trace.count == 0)
   }
@@ -76,6 +79,7 @@ import Testing
     )
     let evidence = await prover.prove(.thu21, timeoutMilliseconds: 15_000)
     #expect(evidence.outcome == .rejected)
+    #expect(evidence.failureClass == .unclassified)
     #expect(!evidence.processStarted)
     #expect(!evidence.challengeMatched)
     #expect(!evidence.freshTransportForced)
@@ -89,6 +93,7 @@ import Testing
       sshAuthSocket: "relative-agent-socket"
     ).prove(.thu21, timeoutMilliseconds: 15_000)
     #expect(evidence.outcome == .rejected)
+    #expect(evidence.failureClass == .configError)
     #expect(!evidence.processStarted)
     #expect(!evidence.processReaped)
   }

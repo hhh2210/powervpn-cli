@@ -135,7 +135,8 @@ func m2SSHEvidence(
     standardOutputWithinLimit: proven,
     standardErrorWithinLimit: proven,
     timedOut: outcome == .timedOut,
-    cancelled: outcome == .cancelled
+    cancelled: outcome == .cancelled,
+    failureClass: outcome == .rejected ? .unclassified : nil
   )
 }
 
