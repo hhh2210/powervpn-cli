@@ -138,11 +138,8 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
 
   private func cancel() {
     queue.async { [self] in
-      if phase == .closed {
-        _ = cancelDriver()
-      } else {
-        finish(.cancelled)
-      }
+      guard phase != .closed else { return }
+      finish(.cancelled)
     }
   }
 
@@ -293,8 +290,10 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
     timer = nil
     validation?.cancel()
     validation = nil
+    let submittedLocalCompletion =
+      stopRequestSent && (outcome == .timeout || outcome == .cancelled)
     let cancelled: Bool
-    if outcome == .transportAcknowledged {
+    if outcome == .transportAcknowledged || submittedLocalCompletion {
       armPostStopDrain()
       cancelled = false
     } else {
@@ -332,10 +331,6 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
   }
 
   private func cancelDriver() -> Bool {
-    if let drain = postStopDrain {
-      postStopDrain = nil
-      return drain.cancelNow()
-    }
     guard !cancelIssued, let driver else { return false }
     cancelIssued = true
     self.driver = nil

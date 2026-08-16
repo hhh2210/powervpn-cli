@@ -292,37 +292,6 @@ final class ManualConnectionDrainScheduler: @unchecked Sendable {
   var isArmed: Bool { lock.withLock { expiration != nil } }
   var cancellationCount: Int { lock.withLock { cancellations } }
 }
-final class BlockingConnectionDrainScheduler: @unchecked Sendable {
-  private let lock = NSLock()
-  private let releaseGate = DispatchSemaphore(value: 0)
-  private var expiration: (@Sendable () -> Void)?
-  private var entered = false
-  private var cancellations = 0
-
-  func schedule(
-    queue _: DispatchQueue,
-    expiration: @escaping @Sendable () -> Void
-  ) -> @Sendable () -> Void {
-    lock.withLock {
-      self.expiration = expiration
-      entered = true
-    }
-    releaseGate.wait()
-    return { [self] in
-      lock.withLock {
-        self.expiration = nil
-        cancellations += 1
-      }
-    }
-  }
-
-  func release() {
-    releaseGate.signal()
-  }
-
-  var hasEntered: Bool { lock.withLock { entered } }
-  var cancellationCount: Int { lock.withLock { cancellations } }
-}
 
 func controlTransport(
   _ factory: CharonControlDriverFactory

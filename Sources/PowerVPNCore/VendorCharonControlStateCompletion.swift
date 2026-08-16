@@ -93,14 +93,15 @@ extension VendorCharonControlState {
     timer = nil
     cancelPeerGenerationValidation()
     currentValidator = nil
-    let finishingAttempt = currentStopAttempt
     currentStopAttempt = nil
     let acknowledged = outcome == .transportAcknowledged
+    let submittedLocalCompletion =
+      requestSent && (outcome == .timeout || outcome == .cancelled)
     let cancelled: Bool
     if retainConnection {
       cancelled = false
-    } else if acknowledged {
-      armPostStopDrain(attempt: finishingAttempt)
+    } else if acknowledged || submittedLocalCompletion {
+      armPostStopDrain()
       cancelled = false
     } else {
       cancelled = cancelDriver()
@@ -129,7 +130,7 @@ extension VendorCharonControlState {
     await withCheckedContinuation { continuation in
       queue.async { [self] in
         let leaseClosed = phase != allowedPhase
-        let cancelled = leaseClosed && postStopDrain != nil && cancelDriver()
+        let cancelled = false
         continuation.resume(
           returning: makeUnsentStopReceipt(
             leaseClosed ? .leaseClosed : outcome,
@@ -191,7 +192,7 @@ extension VendorCharonControlState {
     )
   }
 
-  private func armPostStopDrain(attempt: StopAttempt?) {
+  private func armPostStopDrain() {
     guard postStopDrain == nil, let current = driver else { return }
     driver = nil
     let drain = VendorCharonControlConnectionDrain(
@@ -199,18 +200,10 @@ extension VendorCharonControlState {
       scheduler: postStopDrainScheduler
     )
     postStopDrain = drain
-    postStopDrainAttempt = attempt
     drain.arm(on: queue)
   }
 
   func cancelDriver() -> Bool {
-    if let drain = postStopDrain {
-      postStopDrain = nil
-      postStopDrainAttempt = nil
-      let cancelled = drain.cancelNow()
-      cancelIssued = cancelIssued || cancelled
-      return cancelled
-    }
     guard !cancelIssued, let current = driver else { return false }
     cancelIssued = true
     driver = nil

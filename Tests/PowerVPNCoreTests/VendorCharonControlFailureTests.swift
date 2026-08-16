@@ -140,10 +140,10 @@ import Testing
     }
   }
 
-  @Test func stopTimeoutClosesLeaseAndCancelsSameDriverOnce() async throws {
+  @Test func submittedStopTimeoutTransfersDriverToDrain() async throws {
     let factory = CharonControlDriverFactory()
-    let start = try await acknowledgedStart(factory)
-    let lease = try #require(start.lease)
+    let scheduler = ManualConnectionDrainScheduler()
+    let lease = try await activeFailureLease(factory, drainScheduler: scheduler.schedule)
 
     let task = Task { await lease.stop(timeoutMilliseconds: 10) }
     #expect(await waitForControl { factory.driver.submitCount == 2 })
@@ -154,21 +154,26 @@ import Testing
     #expect(stop.helperMayHaveMutated)
     #expect(stop.replyUnavailableObserved)
     #expect(stop.completionSource == .timeout)
-    #expect(stop.connectionCancelRequested)
+    #expect(!stop.connectionCancelRequested)
     #expect(!stop.connectionRetained)
+    #expect(scheduler.isArmed)
     #expect(factory.driver.submitCount == 2)
-    #expect(factory.driver.cancelCount == 1)
+    #expect(factory.driver.cancelCount == 0)
 
     let repeated = await lease.stop(timeoutMilliseconds: 500)
     #expect(repeated.outcome == .leaseClosed)
     #expect(!repeated.requestSent)
-    #expect(factory.driver.cancelCount == 1)
+    #expect(!repeated.connectionCancelRequested)
+    #expect(scheduler.isArmed)
+    #expect(factory.driver.cancelCount == 0)
+    scheduler.expire()
+    #expect(await waitForControl { factory.driver.cancelCount == 1 })
   }
 
-  @Test func stopCancellationAfterSubmissionClosesLeaseAndCancelsOnce() async throws {
+  @Test func submittedStopCallerCancellationTransfersDriverToDrain() async throws {
     let factory = CharonControlDriverFactory()
-    let start = try await acknowledgedStart(factory)
-    let lease = try #require(start.lease)
+    let scheduler = ManualConnectionDrainScheduler()
+    let lease = try await activeFailureLease(factory, drainScheduler: scheduler.schedule)
     let task = Task { await lease.stop(timeoutMilliseconds: 500) }
     #expect(await waitForControl { factory.driver.submitCount == 2 })
     task.cancel()
@@ -177,12 +182,51 @@ import Testing
     #expect(receipt.outcome == .cancelled)
     #expect(receipt.requestSent)
     #expect(receipt.helperMayHaveMutated)
-    #expect(receipt.connectionCancelRequested)
+    #expect(receipt.completionSource == .callerCancel)
+    #expect(!receipt.connectionCancelRequested)
     #expect(!receipt.connectionRetained)
-    #expect(factory.driver.cancelCount == 1)
+    #expect(scheduler.isArmed)
+    #expect(factory.driver.cancelCount == 0)
     factory.driver.emitReply(.emptyAcknowledgement, at: 1)
     await Task.yield()
+    #expect(factory.driver.cancelCount == 0)
+    scheduler.expire()
+    #expect(await waitForControl { factory.driver.cancelCount == 1 })
+  }
+
+  @Test func unsentStopFailureDoesNotArmDrain() async throws {
+    let factory = CharonControlDriverFactory()
+    let scheduler = ManualConnectionDrainScheduler()
+    let lease = try await activeFailureLease(factory, drainScheduler: scheduler.schedule)
+    factory.driver.rejectFutureSubmissions()
+
+    let receipt = await lease.stop(timeoutMilliseconds: 500)
+
+    #expect(receipt.outcome == .connectionInvalid)
+    #expect(!receipt.requestSent)
+    #expect(receipt.connectionCancelRequested)
+    #expect(!scheduler.isArmed)
     #expect(factory.driver.cancelCount == 1)
+  }
+
+  @Test func timeoutDoesNotMasqueradeAsAcknowledgement() async throws {
+    let factory = CharonControlDriverFactory()
+    let scheduler = ManualConnectionDrainScheduler()
+    let lease = try await activeFailureLease(factory, drainScheduler: scheduler.schedule)
+
+    let receipt = await lease.stop(timeoutMilliseconds: 10)
+
+    #expect(receipt.outcome == .timeout)
+    #expect(receipt.completionSource == .timeout)
+    #expect(receipt.requestSent)
+    #expect(!receipt.emptyReplyObserved)
+    #expect(!receipt.peerGenerationValidated)
+    #expect(!receipt.transportAcknowledged)
+    #expect(!receipt.connectionCancelRequested)
+    #expect(scheduler.isArmed)
+    #expect(factory.driver.cancelCount == 0)
+    scheduler.expire()
+    #expect(await waitForControl { factory.driver.cancelCount == 1 })
   }
 
   @Test func invalidatedSessionBeforeStopCannotSubmit() async throws {
@@ -205,21 +249,24 @@ import Testing
     #expect(factory.driver.cancelCount == 1)
   }
 
-  @Test func invalidationAfterStopSubmissionCannotAcknowledge() async throws {
+  @Test func realConnectionTerminalStillCancels() async throws {
     let factory = CharonControlDriverFactory()
-    let start = try await acknowledgedStart(factory)
-    let lease = try #require(start.lease)
+    let scheduler = ManualConnectionDrainScheduler()
+    let lease = try await activeFailureLease(factory, drainScheduler: scheduler.schedule)
     let task = Task { await lease.stop(timeoutMilliseconds: 500) }
     #expect(await waitForControl { factory.driver.submitCount == 2 })
 
-    factory.driver.invalidateSession()
+    factory.driver.emitConnection(.connectionInvalid)
     let receipt = await task.value
 
     #expect(receipt.outcome == .connectionInvalid)
+    #expect(receipt.completionSource == .connectionTerminal)
     #expect(receipt.requestSent)
     #expect(!receipt.emptyReplyObserved)
     #expect(!receipt.peerGenerationValidated)
     #expect(!receipt.transportAcknowledged)
+    #expect(receipt.connectionCancelRequested)
+    #expect(!scheduler.isArmed)
     #expect(factory.driver.submitCount == 2)
     #expect(factory.driver.cancelCount == 1)
   }
@@ -242,6 +289,24 @@ import Testing
     #expect(!stop.requestSent)
     #expect(factory.driver.submitCount == 1)
     #expect(factory.driver.cancelCount == 1)
+  }
+
+  private func activeFailureLease(
+    _ factory: CharonControlDriverFactory,
+    drainScheduler: @escaping VendorCharonConnectionDrainScheduler
+  ) async throws -> VendorCharonControlLease {
+    let state = VendorCharonControlState(
+      snapshot: try ControlSnapshotFixture().snapshot(),
+      driverFactory: factory.make,
+      postStopDrainScheduler: drainScheduler
+    )
+    try state.beginStartSynchronously(
+      timeoutMilliseconds: 500,
+      peerGenerationValidator: { true },
+      commitStartAuthorization: {}
+    )
+    factory.driver.emitReply(.emptyAcknowledgement, at: 0)
+    return try #require((await state.awaitStartResult()).lease)
   }
 
   private func startTask(

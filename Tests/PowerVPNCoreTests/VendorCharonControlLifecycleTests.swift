@@ -1,3 +1,4 @@
+import Dispatch
 import Testing
 @preconcurrency import XPC
 
@@ -109,9 +110,9 @@ import Testing
     let repeated = await lease.stop(timeoutMilliseconds: 500)
     #expect(repeated.outcome == .leaseClosed)
     #expect(!repeated.requestSent)
-    #expect(repeated.connectionCancelRequested)
+    #expect(!repeated.connectionCancelRequested)
     #expect(factory.driver.submitCount == 2)
-    #expect(factory.driver.cancelCount == 1)
+    #expect(factory.driver.cancelCount == 0)
   }
 
   @Test func replyUnavailableThenOrdinaryStartAcknowledgementRetainsLease() async throws {
@@ -334,7 +335,7 @@ import Testing
     withExtendedLifetime(lease) {}
   }
 
-  @Test func leaseDeinitCancelsAcknowledgedStopDrainImmediately() async throws {
+  @Test func acknowledgedStopLeaseDeinitKeepsArmedDrain() async throws {
     let factory = CharonControlDriverFactory()
     let scheduler = ManualConnectionDrainScheduler()
     var lease: VendorCharonControlLease? = try await activeLease(
@@ -348,24 +349,62 @@ import Testing
 
     lease = nil
 
+    await Task.yield()
+    #expect(scheduler.isArmed)
+    #expect(scheduler.cancellationCount == 0)
+    #expect(factory.driver.cancelCount == 0)
+    scheduler.expire()
     #expect(await waitForControl { factory.driver.cancelCount == 1 })
     #expect(scheduler.cancellationCount == 1)
   }
-  @Test func cancellationSignalAfterAcknowledgementCancelsDrainImmediately() async throws {
+  @Test func callerCancellationAfterAcknowledgedStopDoesNotCollapseDrain() async throws {
     let factory = CharonControlDriverFactory()
-    let scheduler = BlockingConnectionDrainScheduler()
-    let lease = try await activeLease(factory, drainScheduler: scheduler.schedule)
+    let scheduler = ManualConnectionDrainScheduler()
+    let release = DispatchSemaphore(value: 0)
+    let lease = try await activeLease(
+      factory,
+      drainScheduler: { queue, expiration in
+        let cancelExpiration = scheduler.schedule(queue: queue, expiration: expiration)
+        release.wait()
+        return cancelExpiration
+      }
+    )
     let task = Task { await lease.stop(timeoutMilliseconds: 500) }
     #expect(await waitForControl { factory.driver.submitCount == 2 })
 
     factory.driver.emitReply(.emptyAcknowledgement, at: 1)
-    #expect(await waitForControl { scheduler.hasEntered })
+    #expect(await waitForControl { scheduler.isArmed })
     task.cancel()
-    scheduler.release()
+    release.signal()
     let receipt = await task.value
 
     #expect(receipt.outcome == .transportAcknowledged)
     #expect(!receipt.connectionCancelRequested)
+    await Task.yield()
+    #expect(scheduler.isArmed)
+    #expect(scheduler.cancellationCount == 0)
+    #expect(factory.driver.cancelCount == 0)
+    scheduler.expire()
+    #expect(await waitForControl { factory.driver.cancelCount == 1 })
+    #expect(scheduler.cancellationCount == 1)
+  }
+
+  @Test func drainExpiryIsExactlyOnceAcrossOwnerReleaseRaces() async throws {
+    let factory = CharonControlDriverFactory()
+    let scheduler = ManualConnectionDrainScheduler()
+    var lease: VendorCharonControlLease? = try await activeLease(
+      factory,
+      drainScheduler: scheduler.schedule
+    )
+    _ = await acknowledgedStop(try #require(lease), factory: factory)
+
+    lease = nil
+    await Task.yield()
+    #expect(scheduler.isArmed)
+    #expect(factory.driver.cancelCount == 0)
+    scheduler.expire()
+    scheduler.expire()
+
     #expect(await waitForControl { factory.driver.cancelCount == 1 })
     #expect(scheduler.cancellationCount == 1)
   }

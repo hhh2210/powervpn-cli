@@ -32,13 +32,12 @@ extension VendorCharonControlState {
       await withCheckedContinuation { continuation in
         queue.async { [self] in
           guard phase == allowedPhase, stopContinuation == nil else {
-            let cancelled = postStopDrain != nil && cancelDriver()
             continuation.resume(
               returning: makeUnsentStopReceipt(
                 .leaseClosed,
                 connectionRetained:
                   allowedPhase == .active && (phase == .active || phase == .stopping),
-                cancelRequested: cancelled
+                cancelRequested: false
               ))
             return
           }
@@ -60,12 +59,9 @@ extension VendorCharonControlState {
     } onCancel: {
       attempt.cancel()
       self.queue.async { [self] in
-        if currentStopAttempt === attempt {
-          completionSource = .callerCancel
-          if phase == .stopping { finishStop(.cancelled, retainConnection: false) }
-        } else if postStopDrainAttempt === attempt {
-          _ = cancelDriver()
-        }
+        guard currentStopAttempt === attempt else { return }
+        completionSource = .callerCancel
+        if phase == .stopping { finishStop(.cancelled, retainConnection: false) }
       }
     }
   }

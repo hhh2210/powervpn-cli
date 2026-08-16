@@ -115,6 +115,63 @@ import Testing
     #expect(result.provisionalStopCapability == nil)
   }
 
+  @Test func acknowledgedProvisionalStopCapabilityDeinitKeepsArmedDrain() async throws {
+    let factory = CharonControlDriverFactory()
+    let scheduler = ManualConnectionDrainScheduler()
+    var capability: VendorCharonProvisionalStopCapability? =
+      try await cancelledStartCapability(factory, drainScheduler: scheduler.schedule)
+    let receipt = await acknowledgedProvisionalStop(
+      try #require(capability),
+      factory: factory
+    )
+    #expect(receipt.outcome == .transportAcknowledged)
+    #expect(!receipt.connectionCancelRequested)
+    #expect(scheduler.isArmed)
+    #expect(factory.driver.cancelCount == 0)
+
+    capability = nil
+
+    await Task.yield()
+    #expect(scheduler.isArmed)
+    #expect(scheduler.cancellationCount == 0)
+    #expect(factory.driver.cancelCount == 0)
+    scheduler.expire()
+    #expect(await waitForControl { factory.driver.cancelCount == 1 })
+    #expect(scheduler.cancellationCount == 1)
+  }
+
+  private func acknowledgedProvisionalStop(
+    _ capability: VendorCharonProvisionalStopCapability,
+    factory: CharonControlDriverFactory
+  ) async -> VendorCharonControlReceipt {
+    let task = Task { await capability.stop(timeoutMilliseconds: 500) }
+    #expect(await waitForControl { factory.driver.submitCount == 2 })
+    factory.driver.emitReply(.emptyAcknowledgement, at: 1)
+    return await task.value
+  }
+
+  private func cancelledStartCapability(
+    _ factory: CharonControlDriverFactory,
+    drainScheduler: @escaping VendorCharonConnectionDrainScheduler
+  ) async throws -> VendorCharonProvisionalStopCapability {
+    let state = VendorCharonControlState(
+      snapshot: try ControlSnapshotFixture().snapshot(),
+      driverFactory: factory.make,
+      postStopDrainScheduler: drainScheduler
+    )
+    try state.beginStartSynchronously(
+      timeoutMilliseconds: 500,
+      peerGenerationValidator: { true },
+      commitStartAuthorization: {}
+    )
+    let task = Task { await state.awaitStartResult() }
+    #expect(await waitForControl { factory.driver.submitCount == 1 })
+    task.cancel()
+    let result = await task.value
+    #expect(result.receipt.outcome == .cancelled)
+    return try #require(result.provisionalStopCapability)
+  }
+
   private func expectExactlyOneSameSessionStop(
     _ result: VendorCharonStartControlResult,
     factory: CharonControlDriverFactory

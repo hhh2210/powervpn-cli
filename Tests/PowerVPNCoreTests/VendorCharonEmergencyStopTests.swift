@@ -305,6 +305,33 @@ import Testing
     }
   }
 
+  @Test func submittedEmergencyStopTimeoutTransfersDriverToDrain() async {
+    let factory = EmergencyConnectionDriverFactory()
+    let scheduler = ManualConnectionDrainScheduler()
+    let task = emergencyStopTask(
+      factory,
+      timeoutMilliseconds: 100,
+      drainScheduler: scheduler.schedule
+    )
+    #expect(await waitForControl { factory.driver.probeCount == 1 })
+    factory.driver.emitProbeReply(.emptyAcknowledgement)
+    factory.driver.emitProbeBusiness()
+    #expect(await waitForControl { factory.driver.stopCount == 1 })
+
+    let receipt = await task.value
+
+    #expect(receipt.outcome == .timeout)
+    #expect(receipt.requestSent)
+    #expect(receipt.peerGenerationValidated)
+    #expect(!receipt.emptyReplyObserved)
+    #expect(!receipt.transportAcknowledged)
+    #expect(!receipt.connectionCancelRequested)
+    #expect(scheduler.isArmed)
+    #expect(factory.driver.cancelCount == 0)
+    scheduler.expire()
+    #expect(await waitForControl { factory.driver.cancelCount == 1 })
+  }
+
   @Test func cancellationDuringProbeNeverSendsStop() async {
     let factory = EmergencyConnectionDriverFactory()
     let task = emergencyStopTask(factory)
@@ -321,9 +348,10 @@ import Testing
     #expect(factory.driver.stopCount == 0)
   }
 
-  @Test func cancellationAfterStopSubmissionIsTruthfulAndLateReplyIsIgnored() async {
+  @Test func emergencyCancellationAfterStopSubmissionTransfersDriverToDrain() async {
     let factory = EmergencyConnectionDriverFactory()
-    let task = emergencyStopTask(factory)
+    let scheduler = ManualConnectionDrainScheduler()
+    let task = emergencyStopTask(factory, drainScheduler: scheduler.schedule)
     #expect(await waitForControl { factory.driver.probeCount == 1 })
     factory.driver.emitProbeReply(.emptyAcknowledgement)
     factory.driver.emitProbeBusiness()
@@ -334,11 +362,15 @@ import Testing
     #expect(receipt.outcome == .cancelled)
     #expect(receipt.requestSent)
     #expect(receipt.peerGenerationValidated)
-    #expect(factory.driver.cancelCount == 1)
+    #expect(!receipt.connectionCancelRequested)
+    #expect(scheduler.isArmed)
+    #expect(factory.driver.cancelCount == 0)
     factory.driver.emitStopReply(.emptyAcknowledgement)
     await Task.yield()
     #expect(factory.driver.stopCount == 1)
-    #expect(factory.driver.cancelCount == 1)
+    #expect(factory.driver.cancelCount == 0)
+    scheduler.expire()
+    #expect(await waitForControl { factory.driver.cancelCount == 1 })
   }
 
 }

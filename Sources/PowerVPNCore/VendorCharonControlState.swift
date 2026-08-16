@@ -38,7 +38,6 @@ final class VendorCharonControlState: @unchecked Sendable {
   var completedStartResult: VendorCharonStartControlResult?
   var stopContinuation: CheckedContinuation<VendorCharonControlReceipt, Never>?
   var currentStopAttempt: StopAttempt?
-  var postStopDrainAttempt: StopAttempt?
   var stopStatusAtSubmission: VendorCharonStatusClassification?
   var currentValidator: (@Sendable () async -> Bool)?
   var validation: VendorCharonAsyncValidation?
@@ -133,12 +132,14 @@ final class VendorCharonControlState: @unchecked Sendable {
     queue.async { [self] in
       guard phase == .active || phase == .togglingNC || postStopDrain != nil else { return }
       completionSource = .callerCancel
-      if phase == .active { finishStatusWait(.leaseClosed) }
-      if phase == .togglingNC, let attempt = activeNCRouteToggleAttempt {
-        finishNCRouteToggle(.leaseClosed, retainConnection: false, attempt: attempt)
-      } else {
+      if postStopDrain != nil {
+        phase = .closed
+      } else if phase == .active {
+        finishStatusWait(.leaseClosed)
         _ = cancelDriver()
         phase = .closed
+      } else if phase == .togglingNC, let attempt = activeNCRouteToggleAttempt {
+        finishNCRouteToggle(.leaseClosed, retainConnection: false, attempt: attempt)
       }
       stopContext = nil
       ncRouteToggleContext = nil
@@ -149,9 +150,12 @@ final class VendorCharonControlState: @unchecked Sendable {
   func abandonProvisionalStop() {
     queue.async { [self] in
       guard phase == .provisional || postStopDrain != nil else { return }
-      _ = cancelDriver()
+      if postStopDrain == nil {
+        _ = cancelDriver()
+      }
       phase = .closed
       stopContext = nil
+      ncRouteToggleContext = nil
     }
   }
 
