@@ -134,6 +134,7 @@ func productM2TestDependencies(
   controlRuntimePreflightAccepted: Bool = true,
   cancelDuringAcquire: Bool = false,
   cancelDuringSSH: Bool = false,
+  cancelDuringActiveCapture: Bool = false,
   generationObservationHonorsCancellation: Bool = false,
   beginAuthorizationOverride:
     (@Sendable (ProductM2AuthorizationBudget) -> ProductM2AuthorizationAttempt)? = nil,
@@ -206,6 +207,9 @@ func productM2TestDependencies(
         activeOverride: activeCaptureOutcome
       )
       onCaptureBaseline(selectedRoutes, result.baseline, deadline)
+      if cancelDuringActiveCapture, trace.count("baseline") >= 3 {
+        withUnsafeCurrentTask { $0?.cancel() }
+      }
       return result
     },
     baselineStable: { _, _ in

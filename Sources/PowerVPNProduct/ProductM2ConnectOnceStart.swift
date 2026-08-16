@@ -80,15 +80,15 @@ extension ProductPersistentTunnelCoordinator {
         &execution, baseline, coldGeneration, authorizationLease, selection,
         mutationLease, start, budget)
     }
-
-    await proveVendorStatusAndCaptureDiagnostics(
-      &execution,
-      baseline: baseline,
-      selectedRoutes: selection.selectedRoutes,
-      controlLease: start.lease,
-      budget: budget
-    )
-    guard execution.firstBadEvent == nil else {
+    guard
+      await proveStartupNetwork(
+        &execution,
+        baseline: baseline,
+        selectedRoutes: selection.selectedRoutes,
+        controlLease: start.lease,
+        budget: budget
+      )
+    else {
       return await finishStartFailure(
         &execution, baseline, coldGeneration, authorizationLease, selection,
         mutationLease, start, budget)
@@ -130,10 +130,27 @@ extension ProductPersistentTunnelCoordinator {
       ))
   }
 
-  private func proveVendorStatusAndCaptureDiagnostics(
+  private func proveStartupNetwork(
     _ execution: inout ProductM2Execution,
     baseline: ProductM2NetworkBaseline,
     selectedRoutes: VendorCharonSelectedRouteMatcher,
+    controlLease: ProductM2ControlLease?,
+    budget: ProductM2AbsoluteBudget
+  ) async -> Bool {
+    await proveVendorStatus(&execution, controlLease: controlLease, budget: budget)
+    guard execution.firstBadEvent == nil else { return false }
+    guard captureActiveDiagnosticsBeforeOpen else { return true }
+    await captureActiveNetworkDiagnostics(
+      &execution,
+      baseline: baseline,
+      selectedRoutes: selectedRoutes,
+      deadline: budget.work
+    )
+    return !applyWorkAbortIfNeeded(&execution, budget: budget)
+  }
+
+  private func proveVendorStatus(
+    _ execution: inout ProductM2Execution,
     controlLease: ProductM2ControlLease?,
     budget: ProductM2AbsoluteBudget
   ) async {
@@ -157,23 +174,28 @@ extension ProductPersistentTunnelCoordinator {
       execution.fail(.vendorStatusUnproven, event: .vendorStatusUnproven, state: .failed)
       return
     }
+  }
 
-    // Schema 11: the active capture is diagnostic only. A complete capture
-    // still feeds the host-side assessment (recorded, non-fatal); an
-    // incomplete capture records its classification and the run proceeds to
-    // the fresh SSH proof, which alone decides the network effect.
+  /// Records the host-side active-network assessment without deciding the
+  /// connect-once outcome. The caller owns deadline/cancellation policy so the
+  /// persistent open path can remain fail-closed while post-SSH diagnostics
+  /// cannot overwrite the decisive proof or suppress cleanup.
+  func captureActiveNetworkDiagnostics(
+    _ execution: inout ProductM2Execution,
+    baseline: ProductM2NetworkBaseline,
+    selectedRoutes: VendorCharonSelectedRouteMatcher,
+    deadline: ProductM2StageDeadline
+  ) async {
     let capture = await dependencies.captureNetworkBaseline(
       execution.networkWindow,
       selectedRoutes,
-      budget.work
+      deadline
     )
     execution.activeCaptureState = capture.state
     execution.activeCaptureChangeAxes = capture.changeAxes.isEmpty ? nil : capture.changeAxes
     execution.activeCaptureIncompleteReason = capture.incompleteReason
-    if applyWorkAbortIfNeeded(&execution, budget: budget) { return }
     guard let active = capture.baseline else { return }
-    let evidence = dependencies.assessActiveConnection(baseline, active)
-    execution.activeNetworkEvidence = evidence
+    execution.activeNetworkEvidence = dependencies.assessActiveConnection(baseline, active)
   }
 
   func proveFreshSSH(

@@ -240,6 +240,37 @@ import Testing
     #expect(trace.count("verify") == 1)
   }
 
+  @Test func cancellationDuringActiveCaptureCannotOverwriteSSHOrCleanup() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+    let coordinator = ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        cancelDuringActiveCapture: true
+      ))
+
+    let report = await Task {
+      await coordinator.run(
+        ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+      )
+    }.value
+
+    #expect(report.outcome == .connectedAndCleanedUp)
+    #expect(report.firstBadEvent == nil)
+    #expect(report.sshProof == .proven)
+    #expect(report.networkProofSource == .sshBanner)
+    #expect(report.cleanupPath == .sameLeaseStop)
+    #expect(report.cleanupVerified)
+    let events = trace.events
+    #expect(m2EventIndex("ssh", in: events) < (events.lastIndex(of: "baseline") ?? 0))
+    #expect((events.lastIndex(of: "baseline") ?? .max) < m2EventIndex("stop", in: events))
+    #expect(trace.count("stop") == 1)
+    #expect(trace.count("logout") == 1)
+    #expect(trace.count("verify") == 1)
+  }
+
   @Test(arguments: [ProductM2AuthorizationCloseOutcome.timedOut, .alreadyClosed])
   func nonAcceptedPortalLogoutMakesCleanupUnproven(
     _ logout: ProductM2AuthorizationCloseOutcome

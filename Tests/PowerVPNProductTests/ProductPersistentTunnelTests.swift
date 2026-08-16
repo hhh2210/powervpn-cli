@@ -32,6 +32,14 @@ import Testing
     #expect(trace.count("logout") == 0)
     #expect(trace.count("erase_authorization") == 1)
     #expect(trace.count("ssh") == 0)
+    #expect(
+      m2EventIndex("status_wait", in: trace.events)
+        < m2EventIndex("active_assessment", in: trace.events)
+    )
+    #expect(
+      m2EventIndex("active_assessment", in: trace.events)
+        < m2EventIndex("erase_authorization", in: trace.events)
+    )
     let encodedOpenReport = try #require(
       String(bytes: try JSONEncoder().encode(openReport), encoding: .utf8)
     )
@@ -208,6 +216,42 @@ import Testing
     #expect(!encoded.contains("thu21"))
     #expect(!encoded.contains("com.leadsec"))
     #expect((await lease.shutdown(budget: .start())).cleanupVerified)
+  }
+
+  @Test func persistentOpenKeepsActiveCaptureDeadlineGate() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let clock = ProductM2ManualClock()
+    let budget = ProductM2AbsoluteBudget.start(clock: clock.clock)
+    let trace = ProductM2TestTrace(
+      baselines: [ProductM2NetworkBaseline(), ProductM2NetworkBaseline()]
+    )
+    let runtime = ProductPersistentTunnelRuntime(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        onCaptureBaseline: { selectedRoutes, result, _ in
+          if selectedRoutes != nil, result == nil {
+            clock.set(milliseconds: 65_000)
+          }
+        }
+      )
+    )
+
+    let result = await runtime.open(
+      request: ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21),
+      startupBudget: budget
+    )
+    guard case .failed(let report) = result else {
+      Issue.record("persistent open ignored the active-capture deadline")
+      return
+    }
+
+    #expect(report.failure == .deadlineExceeded)
+    #expect(report.activeCaptureState == .measuredIncomplete)
+    #expect(report.cleanupVerified)
+    #expect(trace.count("ssh") == 0)
+    #expect(trace.count("stop") == 1)
   }
 
 }

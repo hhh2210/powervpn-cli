@@ -66,7 +66,7 @@ import Testing
     #expect(trace.count("ssh") == 0)
   }
 
-  @Test func expiredNilActiveCaptureReportsDeadlineInsteadOfActiveNetworkFailure() async throws {
+  @Test func expiredActiveCaptureCannotOverwriteSSHProofOrCleanup() async throws {
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
     defer { fixture.erase() }
     let clock = ProductM2ManualClock()
@@ -89,11 +89,16 @@ import Testing
       budget: budget
     )
 
-    #expect(report.outcome == .deadlineExceeded)
-    #expect(report.firstBadEvent == .deadlineExceeded)
-    #expect(report.firstBadEvent != .activeNetworkUnproven)
+    #expect(report.outcome == .connectedAndCleanedUp)
+    #expect(report.firstBadEvent == nil)
+    #expect(report.sshProof == .proven)
+    #expect(report.networkProofSource == .sshBanner)
+    #expect(report.activeCaptureState == .measuredIncomplete)
     #expect(report.finalState == .disconnected)
     #expect(report.cleanupVerified)
+    let events = trace.events
+    #expect(m2EventIndex("ssh", in: events) < (events.lastIndex(of: "baseline") ?? 0))
+    #expect(m2EventIndex("ssh", in: events) < m2EventIndex("stop", in: events))
   }
 
   @Test func startAndSSHReceiveOnlyTheRemainingWorkBudget() async throws {

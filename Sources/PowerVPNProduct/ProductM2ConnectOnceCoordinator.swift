@@ -12,12 +12,21 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
     _ request: ProductM2ConnectRequest,
     budget: ProductM2AbsoluteBudget
   ) async -> ProductM2ConnectReport {
-    let coordinator = ProductPersistentTunnelCoordinator(dependencies: dependencies)
+    let coordinator = ProductPersistentTunnelCoordinator(
+      dependencies: dependencies,
+      captureActiveDiagnosticsBeforeOpen: false
+    )
     switch await coordinator.openSession(request, startupBudget: budget) {
     case .failed(let report):
       return report
     case .active(var assets):
       await coordinator.proveFreshSSH(&assets.execution, budget: budget)
+      await coordinator.captureActiveNetworkDiagnostics(
+        &assets.execution,
+        baseline: assets.baseline,
+        selectedRoutes: assets.selectedRoutes,
+        deadline: budget.work
+      )
       let cleanup = await coordinator.shutdown(
         assets,
         deadlines: ProductM2CleanupDeadlines(budget)

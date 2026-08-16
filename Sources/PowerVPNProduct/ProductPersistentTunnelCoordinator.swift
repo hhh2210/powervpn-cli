@@ -1,5 +1,14 @@
 package struct ProductPersistentTunnelCoordinator: Sendable {
   let dependencies: ProductM2ConnectOnceDependencies
+  let captureActiveDiagnosticsBeforeOpen: Bool
+
+  init(
+    dependencies: ProductM2ConnectOnceDependencies,
+    captureActiveDiagnosticsBeforeOpen: Bool = true
+  ) {
+    self.dependencies = dependencies
+    self.captureActiveDiagnosticsBeforeOpen = captureActiveDiagnosticsBeforeOpen
+  }
 }
 
 package actor ProductPersistentTunnelRuntime {

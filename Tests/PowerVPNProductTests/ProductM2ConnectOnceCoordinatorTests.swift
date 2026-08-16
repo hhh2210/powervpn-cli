@@ -72,9 +72,9 @@ import Testing
     #expect(m2EventIndex("acquire", in: events) < m2EventIndex("baseline_stable", in: events))
     #expect(m2EventIndex("baseline_stable", in: events) < m2EventIndex("begin_start", in: events))
     #expect(m2EventIndex("begin_start", in: events) < m2EventIndex("status_wait", in: events))
-    #expect(m2EventIndex("status_wait", in: events) < m2EventIndex("active_assessment", in: events))
-    #expect(m2EventIndex("active_assessment", in: events) < m2EventIndex("ssh", in: events))
-    #expect(m2EventIndex("ssh", in: events) < m2EventIndex("stop", in: events))
+    #expect(m2EventIndex("status_wait", in: events) < m2EventIndex("ssh", in: events))
+    #expect(m2EventIndex("ssh", in: events) < m2EventIndex("active_assessment", in: events))
+    #expect(m2EventIndex("active_assessment", in: events) < m2EventIndex("stop", in: events))
     #expect(m2EventIndex("stop", in: events) < m2EventIndex("logout", in: events))
     #expect(m2EventIndex("logout", in: events) < m2EventIndex("verify", in: events))
   }

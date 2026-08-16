@@ -290,6 +290,10 @@ import Testing
     #expect(report.activeNetworkEvidence == .unavailable)
     #expect(report.networkProofSource == ProductM2NetworkProofSource.none)
     #expect(trace.count("ssh") == 1)
+    #expect(
+      m2EventIndex("ssh", in: trace.events)
+        < (trace.events.lastIndex(of: "baseline") ?? 0)
+    )
     #expect(report.cleanupVerified)
   }
 
