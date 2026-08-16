@@ -7,7 +7,7 @@ import Testing
   @Test func safeFixtureUsesOneFixedBoundedProcessSnapshotAndFixedPaths() async {
     let paths = PreflightPathTrace([
       InstalledBoundedVendorXPCPreflightChecker.dnsRecoveryPath: .absent,
-      InstalledBoundedVendorXPCPreflightChecker.vendorLogPath: .absent,
+      InstalledBoundedVendorXPCPreflightChecker.vendorLogPath: .regularFile(size: 0),
     ])
     let runner = PreflightCommandRunner([success(preflightPS("/usr/bin/other"))])
     let evidence = await checker(runner: runner, paths: paths).check(
@@ -92,6 +92,114 @@ import Testing
     #expect(!oversized.vendorLogRotationSafe)
   }
 
+  @Test func vendorLogMetadataGateIsExactAndFailsBeforeXPCSubmission() async throws {
+    let root0600 = InstalledBoundedVendorXPCPreflightChecker.classifyPathMetadata(
+      mode: mode_t(S_IFREG | 0o600),
+      size: 0,
+      ownerUID: 0,
+      ownerGID: 0
+    )
+    #expect(root0600 == .regularFile(size: 0))
+    #expect(
+      InstalledBoundedVendorXPCPreflightChecker.classifyPathMetadata(
+        mode: mode_t(S_IFDIR | 0o600), size: 0, ownerUID: 0, ownerGID: 0
+      ) == .unsupported)
+    #expect(
+      InstalledBoundedVendorXPCPreflightChecker.classifyPathMetadata(
+        mode: mode_t(S_IFREG | 0o600), size: -1, ownerUID: 0, ownerGID: 0
+      ) == .unsupported)
+    let accepted = await checker(
+      runner: PreflightCommandRunner([success(preflightPS("/usr/bin/other"))]),
+      paths: PreflightPathTrace([
+        InstalledBoundedVendorXPCPreflightChecker.dnsRecoveryPath: .absent,
+        InstalledBoundedVendorXPCPreflightChecker.vendorLogPath: root0600,
+      ])
+    ).check(generation: preflightColdGeneration)
+    #expect(accepted.safeToProbe)
+
+    let rejectedObservations = [
+      InstalledBoundedVendorXPCPreflightChecker.classifyPathMetadata(
+        mode: mode_t(S_IFREG | 0o644),
+        size: 0,
+        ownerUID: 0,
+        ownerGID: 0
+      ),
+      InstalledBoundedVendorXPCPreflightChecker.classifyPathMetadata(
+        mode: mode_t(S_IFREG | 0o600),
+        size: 0,
+        ownerUID: 501,
+        ownerGID: 0
+      ),
+      InstalledBoundedVendorXPCPreflightChecker.classifyPathMetadata(
+        mode: mode_t(S_IFREG | 0o600),
+        size: 0,
+        ownerUID: 0,
+        ownerGID: 20
+      ),
+      VendorXPCPreflightPathObservation.absent,
+      .unavailable,
+      .unsupported,
+    ]
+    #expect(rejectedObservations[0] == .unsafePermissions)
+    #expect(rejectedObservations[1] == .unsafeOwnership)
+    #expect(rejectedObservations[2] == .unsafeOwnership)
+
+    for observation in rejectedObservations {
+      let installedChecker = checker(
+        runner: PreflightCommandRunner([success(preflightPS("/usr/bin/other"))]),
+        paths: PreflightPathTrace([
+          InstalledBoundedVendorXPCPreflightChecker.dnsRecoveryPath: .absent,
+          InstalledBoundedVendorXPCPreflightChecker.vendorLogPath: observation,
+        ])
+      )
+      let transport = ProbeTransport(
+        evidence: VendorXPCGetVersionEvidence(
+          outcome: .accepted,
+          connectionCancelRequested: true
+        ),
+        peerPID: 400
+      )
+      let result = await VendorXPCReachabilityProbe(
+        transport: transport,
+        generationObserver: ProbeGenerationObserver([preflightColdGeneration]),
+        preflightChecker: installedChecker
+      ).probe(timeoutMilliseconds: 500)
+
+      #expect(result.status == .preflightBlocked)
+      #expect(!result.probePerformed)
+      #expect(await transport.callCount == 0)
+    }
+  }
+
+  @Test func rejectedMetadataAndReportEncodingRemainValueFree() async throws {
+    let observation = InstalledBoundedVendorXPCPreflightChecker.classifyPathMetadata(
+      mode: mode_t(S_IFREG | 0o644),
+      size: 9_876,
+      ownerUID: 501,
+      ownerGID: 20
+    )
+    #expect(observation == .unsafeOwnership)
+    #expect(String(describing: observation) == "unsafeOwnership")
+
+    let evidence = await checker(
+      runner: PreflightCommandRunner([success(preflightPS("/usr/bin/other"))]),
+      paths: PreflightPathTrace([
+        InstalledBoundedVendorXPCPreflightChecker.dnsRecoveryPath: .absent,
+        InstalledBoundedVendorXPCPreflightChecker.vendorLogPath: observation,
+      ])
+    ).check(generation: preflightColdGeneration)
+    let encoded = String(
+      decoding: try JSONEncoder().encode(evidence),
+      as: UTF8.self
+    )
+
+    #expect(!evidence.vendorLogRotationSafe)
+    #expect(!evidence.safeToProbe)
+    for forbidden in ["/var/log/vsgvpn.log", "0644", "420", "501", "9876"] {
+      #expect(!encoded.contains(forbidden))
+    }
+  }
+
   @Test func timeoutOversizeAndMalformedOutputCollapseWithoutRawValues() async {
     let marker = "sensitive-preflight-output"
     let results = [
@@ -118,7 +226,7 @@ private func checker(
   guiApplicationRunning: Bool = false,
   paths: PreflightPathTrace = PreflightPathTrace([
     InstalledBoundedVendorXPCPreflightChecker.dnsRecoveryPath: .absent,
-    InstalledBoundedVendorXPCPreflightChecker.vendorLogPath: .absent,
+    InstalledBoundedVendorXPCPreflightChecker.vendorLogPath: .regularFile(size: 0),
   ])
 ) -> InstalledBoundedVendorXPCPreflightChecker {
   InstalledBoundedVendorXPCPreflightChecker(

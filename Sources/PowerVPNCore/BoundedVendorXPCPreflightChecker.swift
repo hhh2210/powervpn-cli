@@ -20,6 +20,8 @@ extension BoundedVendorXPCPreflightChecking {
 package enum VendorXPCPreflightPathObservation: Equatable, Sendable {
   case absent
   case regularFile(size: UInt64)
+  case unsafeOwnership
+  case unsafePermissions
   case unsupported
   case unavailable
 }
@@ -71,9 +73,10 @@ package struct InstalledBoundedVendorXPCPreflightChecker:
     let dnsRecoveryAbsent = inspectPath(Self.dnsRecoveryPath) == .absent
     let logSafe: Bool
     switch inspectPath(Self.vendorLogPath) {
-    case .absent: logSafe = true
-    case .regularFile(let size): logSafe = size <= Self.vendorLogRotationThreshold
-    case .unsupported, .unavailable: logSafe = false
+    case .regularFile(let size):
+      logSafe = size <= Self.vendorLogRotationThreshold
+    case .absent, .unsafeOwnership, .unsafePermissions, .unsupported, .unavailable:
+      logSafe = false
     }
     return VendorXPCPreflightEvidence(
       guiProcessAbsent: guiAbsent && !guiApplicationRunning(),
@@ -111,10 +114,30 @@ package struct InstalledBoundedVendorXPCPreflightChecker:
     if result == -1 {
       return errno == ENOENT ? .absent : .unavailable
     }
-    guard metadata.st_mode & S_IFMT == S_IFREG, metadata.st_size >= 0 else {
+    return classifyPathMetadata(
+      mode: metadata.st_mode,
+      size: metadata.st_size,
+      ownerUID: metadata.st_uid,
+      ownerGID: metadata.st_gid
+    )
+  }
+
+  package static func classifyPathMetadata(
+    mode: mode_t,
+    size: off_t,
+    ownerUID: uid_t,
+    ownerGID: gid_t
+  ) -> VendorXPCPreflightPathObservation {
+    guard mode & S_IFMT == S_IFREG, size >= 0 else {
       return .unsupported
     }
-    return .regularFile(size: UInt64(metadata.st_size))
+    guard ownerUID == 0, ownerGID == 0 else {
+      return .unsafeOwnership
+    }
+    guard mode & mode_t(0o7777) == mode_t(0o600) else {
+      return .unsafePermissions
+    }
+    return .regularFile(size: UInt64(size))
   }
 }
 
