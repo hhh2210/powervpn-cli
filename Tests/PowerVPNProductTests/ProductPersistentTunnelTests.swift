@@ -28,6 +28,7 @@ import Testing
     #expect(openReport.serverContactRequested)
     #expect(openReport.authorizationClose == .notRequired)
     #expect(openReport.authorizationOwnedMaterialErased)
+    #expect(openReport.networkProofSource == .hostEvidence)
     #expect(trace.count("logout") == 0)
     #expect(trace.count("erase_authorization") == 1)
     #expect(trace.count("ssh") == 0)
@@ -164,7 +165,7 @@ import Testing
     #expect(failure.serverContactRequested)
   }
 
-  @Test func openReportSurfacesActiveCaptureClassificationValueFree() async throws {
+  @Test func openSurfacesIncompleteCaptureAsDiagnosticsAndStillOpens() async throws {
     let trace = ProductM2TestTrace()
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
     defer { fixture.erase() }
@@ -185,25 +186,28 @@ import Testing
       request: ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21),
       startupBudget: m2TestBudget()
     )
-    guard case .failed(let report) = result else {
-      Issue.record("incomplete active capture opened the tunnel")
+    guard case .opened(let lease, let report) = result else {
+      Issue.record("incomplete active capture blocked the tunnel open")
       return
     }
 
-    #expect(report.failure == .activeNetworkUnproven)
+    #expect(report.opened)
     #expect(report.activeCaptureState == .changedDuringCapture)
     #expect(report.activeCaptureChangeAxes == [.helperGeneration])
     #expect(report.activeCaptureIncompleteReason == nil)
     #expect(report.stopInvalidityClass == nil)
+    #expect(report.networkProofSource == ProductM2NetworkProofSource.none)
     let encoded = try #require(
       String(bytes: JSONEncoder().encode(report), encoding: .utf8))
     #expect(encoded.contains("\"activeCaptureState\":\"changed_during_capture\""))
     #expect(encoded.contains("\"activeCaptureChangeAxes\":[\"helper_generation\"]"))
+    #expect(encoded.contains("\"networkProofSource\":\"none\""))
     #expect(!encoded.contains("activeCaptureIncompleteReason"))
     #expect(!encoded.contains("stopInvalidityClass"))
     #expect(!encoded.contains("Campus NC"))
     #expect(!encoded.contains("thu21"))
     #expect(!encoded.contains("com.leadsec"))
+    #expect((await lease.shutdown(budget: .start())).cleanupVerified)
   }
 
 }

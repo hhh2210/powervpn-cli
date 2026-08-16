@@ -81,7 +81,7 @@ extension ProductPersistentTunnelCoordinator {
         mutationLease, start, budget)
     }
 
-    await proveVendorStatusAndActiveNetwork(
+    await proveVendorStatusAndCaptureDiagnostics(
       &execution,
       baseline: baseline,
       selectedRoutes: selection.selectedRoutes,
@@ -130,7 +130,7 @@ extension ProductPersistentTunnelCoordinator {
       ))
   }
 
-  private func proveVendorStatusAndActiveNetwork(
+  private func proveVendorStatusAndCaptureDiagnostics(
     _ execution: inout ProductM2Execution,
     baseline: ProductM2NetworkBaseline,
     selectedRoutes: VendorCharonSelectedRouteMatcher,
@@ -158,6 +158,10 @@ extension ProductPersistentTunnelCoordinator {
       return
     }
 
+    // Schema 11: the active capture is diagnostic only. A complete capture
+    // still feeds the host-side assessment (recorded, non-fatal); an
+    // incomplete capture records its classification and the run proceeds to
+    // the fresh SSH proof, which alone decides the network effect.
     let capture = await dependencies.captureNetworkBaseline(
       execution.networkWindow,
       selectedRoutes,
@@ -166,18 +170,10 @@ extension ProductPersistentTunnelCoordinator {
     execution.activeCaptureState = capture.state
     execution.activeCaptureChangeAxes = capture.changeAxes.isEmpty ? nil : capture.changeAxes
     execution.activeCaptureIncompleteReason = capture.incompleteReason
-    guard let active = capture.baseline else {
-      if !applyWorkAbortIfNeeded(&execution, budget: budget) {
-        execution.fail(.activeNetworkUnproven, event: .activeNetworkUnproven, state: .failed)
-      }
-      return
-    }
     if applyWorkAbortIfNeeded(&execution, budget: budget) { return }
+    guard let active = capture.baseline else { return }
     let evidence = dependencies.assessActiveConnection(baseline, active)
     execution.activeNetworkEvidence = evidence
-    if !evidence.connectionProven {
-      execution.fail(.activeNetworkUnproven, event: .activeNetworkUnproven, state: .failed)
-    }
   }
 
   func proveFreshSSH(

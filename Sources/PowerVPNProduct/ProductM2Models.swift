@@ -32,6 +32,9 @@ public enum ProductM2ConnectOutcome: String, Encodable, Equatable, Sendable {
   case startSnapshotRejected = "start_snapshot_rejected"
   case startRejected = "start_rejected"
   case vendorStatusUnproven = "vendor_status_unproven"
+  /// Pre-schema-11 host-evidence gate: the active capture failed completeness.
+  /// Since schema 11 the capture is diagnostic-only and the fresh SSH proof
+  /// decides (`sshProofRejected`); no live path emits this outcome.
   case activeNetworkUnproven = "active_network_unproven"
   case sshProofRejected = "ssh_proof_rejected"
   case deadlineExceeded = "deadline_exceeded"
@@ -121,6 +124,18 @@ public enum ProductM2SSHProofOutcome: String, Encodable, Equatable, Sendable {
   case rejected
   case timedOut = "timed_out"
   case cancelled
+}
+
+/// Which evidence channel proved the tunnel's network effect (schema 11).
+/// `ssh_banner`: a fresh SSH banner through the tunnel proved it — the
+/// decisive channel since schema 11. `host_evidence`: the host-side active
+/// capture assessment proved it while no SSH proof had been attempted
+/// (persistent open reports, work-aborted connect-once runs). `none`: the
+/// proof stage ran and nothing proved the network effect.
+public enum ProductM2NetworkProofSource: String, Encodable, Equatable, Sendable {
+  case sshBanner = "ssh_banner"
+  case hostEvidence = "host_evidence"
+  case none
 }
 
 /// Closed-set classification of the active-network capture stage, mapped from
@@ -316,7 +331,7 @@ public struct ProductM2ConnectRequest: Equatable, Sendable {
 }
 
 public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
-  public let schemaVersion = 10
+  public let schemaVersion = 11
   public let outcome: ProductM2ConnectOutcome
   public let finalState: ProductM2ConnectionState
   public let lastGoodState: ProductM2ConnectionState
@@ -347,6 +362,9 @@ public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
   public var activeCaptureIncompleteReason: ProductM2ActiveCaptureIncompleteReason? = nil
   public let sshProof: ProductM2SSHProofOutcome
   public let sshProofEvidence: ProductM2FreshSSHProofEvidence?
+  /// Which channel proved the tunnel's network effect (schema 11). Nil —
+  /// omitted from JSON — when the run never reached the network-proof stage.
+  public var networkProofSource: ProductM2NetworkProofSource? = nil
   public let cleanupPath: ProductM2CleanupPath
   public let stopOutcome: ProductM2ControlOutcome
   /// Read-only classification of a `connection_invalid` stop via one bounded

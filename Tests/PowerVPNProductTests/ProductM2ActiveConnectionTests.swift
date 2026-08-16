@@ -30,6 +30,7 @@ import Testing
     #expect(report.vendorStatusEvidence.outcome == .timeout)
     #expect(!report.vendorStatusEvidence.connectedProven)
     #expect(!report.activeNetworkEvidence.selectedResourcePathProven)
+    #expect(report.networkProofSource == ProductM2NetworkProofSource.none)
     #expect(trace.count("baseline") == 2)
     #expect(trace.count("active_assessment") == 0)
     #expect(trace.count("ssh") == 0)
@@ -64,7 +65,7 @@ import Testing
     #expect(trace.count("ssh") == 0)
   }
 
-  @Test func ineffectiveSelectedRouteBindingNeverRunsSSH() async throws {
+  @Test func ineffectiveSelectedRouteBindingIsDiagnosticAndSSHStillDecides() async throws {
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
     defer { fixture.erase() }
     let trace = ProductM2TestTrace()
@@ -93,16 +94,18 @@ import Testing
       ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
     )
 
-    #expect(report.outcome == .activeNetworkUnproven)
-    #expect(report.firstBadEvent == .activeNetworkUnproven)
+    #expect(report.outcome == .connectedAndCleanedUp)
+    #expect(report.firstBadEvent == nil)
     #expect(report.vendorStatusEvidence.connectedProven)
     #expect(report.activeNetworkEvidence.selectedRouteBindingDeltaCount == 1)
     #expect(!report.activeNetworkEvidence.effectiveSelectedRouteBindingIntroduced)
     #expect(report.activeNetworkEvidence.selectedResourcePathProven)
     #expect(!report.activeNetworkEvidence.connectionProven)
+    #expect(report.sshProof == .proven)
+    #expect(report.networkProofSource == .sshBanner)
     #expect(trace.count("baseline") == 3)
     #expect(trace.count("active_assessment") == 1)
-    #expect(trace.count("ssh") == 0)
+    #expect(trace.count("ssh") == 1)
     #expect(trace.count("stop") == 1)
     #expect(report.cleanupVerified)
   }
@@ -126,6 +129,7 @@ import Testing
     #expect(report.firstBadEvent == .vendorStatusUnproven)
     #expect(report.lastGoodState == .connecting)
     #expect(report.sshProof == .proven)
+    #expect(report.networkProofSource == .sshBanner)
     #expect(report.vendorStatusEvidence.outcome == .disconnected)
     #expect(report.vendorStatusEvidence.latestClassification == .disconnected)
     #expect(!report.vendorStatusEvidence.connectedProven)
@@ -191,7 +195,7 @@ import Testing
     #expect(commandFailed.incompleteReason == .subobservationFailed)
   }
 
-  @Test func helperChangedCaptureReportsAxisInsteadOfAllFalseOnly() async throws {
+  @Test func helperChangedCaptureIsDiagnosticWhenSSHProvesNetwork() async throws {
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
     defer { fixture.erase() }
     let trace = ProductM2TestTrace()
@@ -212,14 +216,16 @@ import Testing
       ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
     )
 
-    #expect(report.outcome == .activeNetworkUnproven)
-    #expect(report.firstBadEvent == .activeNetworkUnproven)
+    #expect(report.outcome == .connectedAndCleanedUp)
+    #expect(report.firstBadEvent == nil)
     #expect(report.activeNetworkEvidence == .unavailable)
     #expect(report.activeCaptureState == .changedDuringCapture)
     #expect(report.activeCaptureChangeAxes == [.helperGeneration])
     #expect(report.activeCaptureIncompleteReason == nil)
+    #expect(report.sshProof == .proven)
+    #expect(report.networkProofSource == .sshBanner)
     #expect(trace.count("active_assessment") == 0)
-    #expect(trace.count("ssh") == 0)
+    #expect(trace.count("ssh") == 1)
     #expect(trace.count("stop") == 1)
     #expect(report.cleanupVerified)
   }
@@ -244,11 +250,47 @@ import Testing
       ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
     )
 
-    #expect(report.outcome == .activeNetworkUnproven)
+    #expect(report.outcome == .connectedAndCleanedUp)
+    #expect(report.firstBadEvent == nil)
     #expect(report.activeNetworkEvidence == .unavailable)
     #expect(report.activeCaptureState == .measuredIncomplete)
     #expect(report.activeCaptureChangeAxes == nil)
     #expect(report.activeCaptureIncompleteReason == .vendorProcessesInconsistent)
+    #expect(report.sshProof == .proven)
+    #expect(report.networkProofSource == .sshBanner)
+  }
+
+  @Test func sshFailureReportsBothProofStateAndCaptureClassification() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+    let capture = ProductM2ActiveCaptureOutcome(
+      snapshot: m2CaptureSnapshotFixture(
+        helperGeneration: m2RunningGeneration,
+        vendorProcesses: m2VendorProcessesFixture()
+      ))
+
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        sshProof: .rejected,
+        activeCaptureOutcome: capture
+      )
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(report.outcome == .sshProofRejected)
+    #expect(report.firstBadEvent == .sshProofRejected)
+    #expect(report.sshProof == .rejected)
+    #expect(report.sshProofEvidence?.outcome == .rejected)
+    #expect(report.activeCaptureState == .measuredIncomplete)
+    #expect(report.activeCaptureIncompleteReason == .vendorProcessesInconsistent)
+    #expect(report.activeNetworkEvidence == .unavailable)
+    #expect(report.networkProofSource == ProductM2NetworkProofSource.none)
+    #expect(trace.count("ssh") == 1)
+    #expect(report.cleanupVerified)
   }
 
   @Test func measuredCompleteCaptureKeepsExistingSuccessShape() async throws {
@@ -275,6 +317,8 @@ import Testing
     #expect(report.activeCaptureState == .measuredComplete)
     #expect(report.activeCaptureChangeAxes == nil)
     #expect(report.activeCaptureIncompleteReason == nil)
+    #expect(report.sshProof == .proven)
+    #expect(report.networkProofSource == .sshBanner)
   }
 
   @Test func vendorStatusFailureBeforeCaptureReportsNotAttempted() async throws {
@@ -303,6 +347,7 @@ import Testing
     #expect(report.activeCaptureChangeAxes == nil)
     #expect(report.activeCaptureIncompleteReason == nil)
     #expect(report.stopInvalidityClass == nil)
+    #expect(report.networkProofSource == ProductM2NetworkProofSource.none)
   }
 
   @Test func classificationFieldsAreOmittedWhenNilAndStayValueFree() async throws {
@@ -325,6 +370,8 @@ import Testing
     ).run(
       ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
     )
+    #expect(report.outcome == .connectedAndCleanedUp)
+    #expect(report.networkProofSource == .sshBanner)
     let successFixture = try authenticatedSnapshot(
       resourceXML: m2ResourceXML(["Campus NC"]))
     defer { successFixture.erase() }
@@ -339,10 +386,34 @@ import Testing
     let encodedSuccess = try #require(
       String(bytes: JSONEncoder().encode(success), encoding: .utf8))
     #expect(encodedSuccess.contains("\"activeCaptureState\":\"measured_complete\""))
+    #expect(encodedSuccess.contains("\"networkProofSource\":\"ssh_banner\""))
     #expect(!encodedSuccess.contains("activeCaptureChangeAxes"))
     #expect(!encodedSuccess.contains("activeCaptureIncompleteReason"))
     #expect(!encodedSuccess.contains("stopInvalidityClass"))
     #expect(!encodedSuccess.contains("com.leadsec"))
     #expect(!encodedSuccess.contains("aaaa"))
+
+    let startFailureFixture = try authenticatedSnapshot(
+      resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { startFailureFixture.erase() }
+    let startFailure = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: startFailureFixture.snapshot,
+        trace: ProductM2TestTrace(),
+        plan: .preSubmissionFailure
+      )
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+    #expect(startFailure.outcome == .startRejected)
+    #expect(startFailure.networkProofSource == nil)
+    let encodedStartFailure = try #require(
+      String(bytes: JSONEncoder().encode(startFailure), encoding: .utf8))
+    #expect(!encodedStartFailure.contains("networkProofSource"))
+    #expect(!encodedStartFailure.contains("activeCaptureState"))
+    let described = String(describing: report)
+    #expect(described.contains("sshBanner"))
+    #expect(!described.contains("com.leadsec"))
+    #expect(!described.contains("aaaa"))
   }
 }

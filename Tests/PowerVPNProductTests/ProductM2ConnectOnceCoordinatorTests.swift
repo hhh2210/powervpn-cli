@@ -55,6 +55,7 @@ import Testing
     #expect(report.vendorStatusEvidence.connectedProven)
     #expect(report.activeNetworkEvidence.connectionProven)
     #expect(report.sshProof == .proven)
+    #expect(report.networkProofSource == .sshBanner)
     #expect(report.cleanupPath == .sameLeaseStop)
     #expect(report.stopOutcome == .transportAcknowledged)
     #expect(report.authorizationClose == .accepted)
@@ -302,7 +303,7 @@ import Testing
       ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
     )
 
-    #expect(report.schemaVersion == 10)
+    #expect(report.schemaVersion == 11)
     #expect(
       report.startEventSignatures == [
         "1:connection:get_tun_name_success:bool,namev4:string",

@@ -34,6 +34,19 @@ package struct ProductM2Execution {
   var serverContactRequested = false
   var helperMutationRequested = false
 
+  /// Which channel proved the tunnel's network effect. Nil until the run
+  /// reaches the network-proof stage (`activeCaptureState` set); `.sshBanner`
+  /// once a fresh SSH banner proves it; `.hostEvidence` only while the
+  /// host-side assessment proved it and no SSH proof has been attempted.
+  var networkProofSource: ProductM2NetworkProofSource? {
+    guard activeCaptureState != nil else { return nil }
+    if sshProof == .proven { return .sshBanner }
+    if sshProof == .notAttempted, activeNetworkEvidence.connectionProven {
+      return .hostEvidence
+    }
+    return ProductM2NetworkProofSource.none
+  }
+
   mutating func fail(
     _ outcome: ProductM2ConnectOutcome,
     event: ProductM2BadEvent,
@@ -174,6 +187,7 @@ package struct ProductM2Execution {
       activeCaptureIncompleteReason: activeCaptureIncompleteReason,
       sshProof: sshProof,
       sshProofEvidence: sshProofEvidence,
+      networkProofSource: networkProofSource,
       cleanupPath: cleanupPath,
       stopOutcome: stopOutcome,
       stopInvalidityClass: stopInvalidityClass,

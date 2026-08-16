@@ -60,7 +60,8 @@ actor ProductPersistentTunnelSession {
         activeCaptureState: assets.execution.activeCaptureState,
         activeCaptureChangeAxes: assets.execution.activeCaptureChangeAxes,
         activeCaptureIncompleteReason: assets.execution.activeCaptureIncompleteReason,
-        stopInvalidityClass: assets.execution.stopInvalidityClass
+        stopInvalidityClass: assets.execution.stopInvalidityClass,
+        networkProofSource: assets.execution.networkProofSource
       )
       return .opened(ProductPersistentTunnelLease(session: self), report)
     case .failed(let failure):
@@ -76,7 +77,8 @@ actor ProductPersistentTunnelSession {
         activeCaptureState: failure.activeCaptureState,
         activeCaptureChangeAxes: failure.activeCaptureChangeAxes,
         activeCaptureIncompleteReason: failure.activeCaptureIncompleteReason,
-        stopInvalidityClass: failure.stopInvalidityClass
+        stopInvalidityClass: failure.stopInvalidityClass,
+        networkProofSource: failure.networkProofSource
       )
       storage = .stopped(
         ProductPersistentTunnelShutdownReport(

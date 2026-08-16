@@ -29,6 +29,9 @@ package struct ProductPersistentTunnelOpenReport: Encodable, Equatable, Sendable
   package var activeCaptureChangeAxes: [ProductM2ActiveCaptureChangeAxis]? = nil
   package var activeCaptureIncompleteReason: ProductM2ActiveCaptureIncompleteReason? = nil
   package var stopInvalidityClass: ProductM2StopInvalidityClass? = nil
+  /// Schema-11 network-proof source mirrored from the underlying M2
+  /// execution; nil — omitted from JSON — when not applicable.
+  package var networkProofSource: ProductM2NetworkProofSource? = nil
 
   package var opened: Bool {
     outcome == .opened && state == .active

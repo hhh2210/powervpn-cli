@@ -146,8 +146,8 @@ public struct ProductM2ActiveNetworkEvidence: Encodable, Equatable, Sendable {
 }
 
 /// One active-network baseline capture plus its value-free diagnostic
-/// classification. Purely additive reporting: gates keep keying off
-/// `baseline == nil` exactly as before.
+/// classification. Schema 11: purely diagnostic — no gate keys off this
+/// outcome; the fresh SSH proof decides the network effect.
 package struct ProductM2ActiveCaptureOutcome: Equatable, Sendable {
   package let baseline: ProductM2NetworkBaseline?
   package let state: ProductM2ActiveCaptureState
