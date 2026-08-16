@@ -180,13 +180,15 @@ func m2Receipt(
   statusAtSubmission: ProductM2VendorStatusClassification? = nil,
   startEventSignatures: [String]? = nil,
   startReplySignatures: [String]? = nil,
-  unexpectedEventSignature: [String]? = nil
+  unexpectedEventSignature: [String]? = nil,
+  completionSource: ProductM2ControlCompletionSource = .submission
 ) -> ProductM2ControlReceipt {
   ProductM2ControlReceipt(
     outcome: outcome,
     requestSent: requestSent,
     transportAcknowledged: outcome == .transportAcknowledged,
     peerGenerationValidated: outcome == .transportAcknowledged,
+    completionSource: completionSource,
     statusEventCount: statusEventCount,
     statusAtSubmission: statusAtSubmission,
     startEventSignatures: startEventSignatures,

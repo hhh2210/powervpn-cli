@@ -122,12 +122,16 @@ func productM2TestControl(
   unexpectedEventSignature: [String]? = nil,
   routeActivationOutcome: ProductM2ControlOutcome = .transportAcknowledged,
   routeDeactivationOutcome: ProductM2ControlOutcome = .transportAcknowledged,
+  routeActivationCompletionSource: ProductM2ControlCompletionSource = .submission,
+  statusEventCountOperation: (@Sendable () -> Int)? = nil,
   onBeginStart: @escaping @Sendable (Int) -> Void = { _ in },
   onAwaitStart: @escaping @Sendable () -> Void = {},
   onStop: @escaping @Sendable (Int) -> Void = { _ in },
   onEmergencyStop: @escaping @Sendable (Int) -> Void = { _ in }
 ) -> ProductM2ControlAdapter {
-  ProductM2ControlAdapter(
+  let currentStatusEventCount: @Sendable () -> Int =
+    statusEventCountOperation ?? { plan.statusEvidence.statusEventCount }
+  return ProductM2ControlAdapter(
     beginStart: { _, timeoutMilliseconds, validator in
       trace.record("begin_start")
       onBeginStart(timeoutMilliseconds)
@@ -171,6 +175,7 @@ func productM2TestControl(
               trace.record("status_wait")
               return plan.statusEvidence
             },
+            statusEventCountOperation: currentStatusEventCount,
             routeToggleOperation: { enabled, _, validator in
               trace.record(enabled ? "route_enable" : "route_disable")
               let configured = enabled ? routeActivationOutcome : routeDeactivationOutcome
@@ -179,7 +184,8 @@ func productM2TestControl(
               return m2Receipt(
                 configured == .transportAcknowledged && !accepted
                   ? .peerGenerationMismatch : configured,
-                requestSent: true
+                requestSent: true,
+                completionSource: enabled ? routeActivationCompletionSource : .submission
               )
             }
           ) : nil

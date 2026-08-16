@@ -144,6 +144,8 @@ extension ProductPersistentTunnelCoordinator {
   ) async -> Bool {
     await proveVendorStatus(&execution, controlLease: controlLease, budget: budget)
     guard execution.firstBadEvent == nil else { return false }
+    await awaitVendorStatusQuiescence(controlLease: controlLease, budget: budget)
+    guard execution.firstBadEvent == nil else { return false }
     await activateSelectedNCRoutes(
       &execution,
       controlLease: controlLease,
@@ -185,6 +187,41 @@ extension ProductPersistentTunnelCoordinator {
     guard status.connectedProven else {
       execution.fail(.vendorStatusUnproven, event: .vendorStatusUnproven, state: .failed)
       return
+    }
+  }
+
+  private func awaitVendorStatusQuiescence(
+    controlLease: ProductM2ControlLease?,
+    budget: ProductM2AbsoluteBudget
+  ) async {
+    let quietWindowMilliseconds = 400
+    let pollIntervalMilliseconds = 25
+    guard let controlLease,
+      let waitCapMilliseconds = budget.work.remainingMilliseconds(cappedAt: 800)
+    else { return }
+
+    let clock = ContinuousClock()
+    let startedAt = clock.now
+    let hardDeadline = startedAt.advanced(by: .milliseconds(waitCapMilliseconds))
+    var quietDeadline = startedAt.advanced(by: .milliseconds(quietWindowMilliseconds))
+    var statusEventCount = controlLease.statusEventCount
+
+    while !Task.isCancelled {
+      let now = clock.now
+      if now >= quietDeadline || now >= hardDeadline { return }
+      guard budget.work.hasRemaining else { return }
+      let pollDeadline = now.advanced(by: .milliseconds(pollIntervalMilliseconds))
+      let nextDeadline = min(min(pollDeadline, quietDeadline), hardDeadline)
+      do {
+        try await clock.sleep(until: nextDeadline)
+      } catch {
+        return
+      }
+      let currentStatusEventCount = controlLease.statusEventCount
+      if currentStatusEventCount != statusEventCount {
+        statusEventCount = currentStatusEventCount
+        quietDeadline = clock.now.advanced(by: .milliseconds(quietWindowMilliseconds))
+      }
     }
   }
 

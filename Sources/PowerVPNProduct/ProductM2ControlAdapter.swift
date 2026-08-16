@@ -94,6 +94,7 @@ extension ProductM2ControlCompletionSource {
 package struct ProductM2ControlLease: Sendable {
   private let stopOperation: @Sendable (Int) async -> ProductM2ControlReceipt
   private let statusOperation: @Sendable (Int) async -> ProductM2VendorStatusEvidence
+  private let statusEventCountOperation: @Sendable () -> Int
   private let routeToggleOperation:
     @Sendable (Bool, Int, @escaping @Sendable () async -> Bool) async
       -> ProductM2ControlReceipt
@@ -101,6 +102,7 @@ package struct ProductM2ControlLease: Sendable {
   init(
     stopOperation: @escaping @Sendable (Int) async -> ProductM2ControlReceipt,
     statusOperation: @escaping @Sendable (Int) async -> ProductM2VendorStatusEvidence,
+    statusEventCountOperation: @escaping @Sendable () -> Int = { 0 },
     routeToggleOperation:
       @escaping @Sendable (
         Bool,
@@ -110,6 +112,7 @@ package struct ProductM2ControlLease: Sendable {
   ) {
     self.stopOperation = stopOperation
     self.statusOperation = statusOperation
+    self.statusEventCountOperation = statusEventCountOperation
     self.routeToggleOperation = routeToggleOperation
   }
 
@@ -121,6 +124,10 @@ package struct ProductM2ControlLease: Sendable {
     timeoutMilliseconds: Int
   ) async -> ProductM2VendorStatusEvidence {
     await statusOperation(timeoutMilliseconds)
+  }
+
+  package var statusEventCount: Int {
+    statusEventCountOperation()
   }
 
   package func setSelectedNCEnabled(
@@ -195,6 +202,9 @@ package struct ProductM2ControlAdapter: Sendable {
                   await lease.waitForConnectedStatus(
                     timeoutMilliseconds: timeoutMilliseconds
                   ))
+              },
+              statusEventCountOperation: {
+                lease.observation.statusEventCount
               },
               routeToggleOperation: { enabled, timeoutMilliseconds, validator in
                 ProductM2ControlReceipt(
