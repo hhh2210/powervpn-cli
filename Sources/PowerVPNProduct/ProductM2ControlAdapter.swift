@@ -6,6 +6,8 @@ package struct ProductM2ControlReceipt: Equatable, Sendable {
   package let requestSent: Bool
   package let transportAcknowledged: Bool
   package let peerGenerationValidated: Bool
+  package let replyUnavailableObserved: Bool
+  package let completionSource: ProductM2ControlCompletionSource
   package let statusEventCount: Int
   package let statusAtSubmission: ProductM2VendorStatusClassification?
   package let startEventSignatures: [String]?
@@ -17,6 +19,8 @@ package struct ProductM2ControlReceipt: Equatable, Sendable {
     requestSent = receipt.requestSent
     transportAcknowledged = receipt.transportAcknowledged
     peerGenerationValidated = receipt.peerGenerationValidated
+    replyUnavailableObserved = receipt.replyUnavailableObserved
+    completionSource = ProductM2ControlCompletionSource(receipt.completionSource)
     statusEventCount = receipt.statusEventCount
     statusAtSubmission = receipt.statusAtSubmission.map(
       ProductM2VendorStatusClassification.init)
@@ -38,6 +42,8 @@ package struct ProductM2ControlReceipt: Equatable, Sendable {
     requestSent: Bool,
     transportAcknowledged: Bool,
     peerGenerationValidated: Bool,
+    replyUnavailableObserved: Bool = false,
+    completionSource: ProductM2ControlCompletionSource = .submission,
     statusEventCount: Int = 0,
     statusAtSubmission: ProductM2VendorStatusClassification? = nil,
     startEventSignatures: [String]? = nil,
@@ -48,6 +54,8 @@ package struct ProductM2ControlReceipt: Equatable, Sendable {
     self.requestSent = requestSent
     self.transportAcknowledged = transportAcknowledged
     self.peerGenerationValidated = peerGenerationValidated
+    self.replyUnavailableObserved = replyUnavailableObserved
+    self.completionSource = completionSource
     self.statusEventCount = statusEventCount
     self.statusAtSubmission = statusAtSubmission
     self.startEventSignatures = startEventSignatures
@@ -66,6 +74,20 @@ package struct ProductM2ControlReceipt: Equatable, Sendable {
       statusEventCount: 0,
       statusAtSubmission: nil
     )
+  }
+}
+
+extension ProductM2ControlCompletionSource {
+  fileprivate init(_ source: VendorCharonControlCompletionSource) {
+    switch source {
+    case .submission: self = .submission
+    case .ordinaryConnection: self = .ordinaryConnection
+    case .replyDictionary: self = .replyDictionary
+    case .replyUnavailableThenOrdinary: self = .replyUnavailableThenOrdinary
+    case .connectionTerminal: self = .connectionTerminal
+    case .timeout: self = .timeout
+    case .callerCancel: self = .callerCancel
+    }
   }
 }
 

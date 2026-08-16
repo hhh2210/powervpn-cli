@@ -26,8 +26,7 @@ enum VendorCharonControlReplyEvent: Equatable, Sendable {
   )
   case emptyAcknowledgement
   case ncRouteToggleAcknowledgement(success: Bool)
-  case connectionInterrupted
-  case connectionInvalid
+  case replyUnavailable
   case peerCodeSigningRequirement
   case unexpectedXPCError
   case unexpectedPayload
@@ -85,8 +84,8 @@ final class SystemVendorCharonControlConnectionDriver: @unchecked Sendable,
           } ?? event
         )
       },
-      failureHandler: { outcome in
-        replyHandler(Self.replyEvent(outcome))
+      failureHandler: { failure in
+        replyHandler(Self.replyEvent(failure))
       }
     )
   }
@@ -104,12 +103,12 @@ final class SystemVendorCharonControlConnectionDriver: @unchecked Sendable,
   }
 
   private static func replyEvent(
-    _ outcome: VendorCharonControlOutcome
+    _ failure: VendorXPCSessionReplyFailure
   ) -> VendorCharonControlReplyEvent {
-    switch outcome {
+    switch failure {
+    case .replyUnavailable: return .replyUnavailable
     case .peerCodeSigningRequirement: return .peerCodeSigningRequirement
-    case .connectionInvalid: return .connectionInvalid
-    default: return .unexpectedXPCError
+    case .unexpectedXPCError: return .unexpectedXPCError
     }
   }
 }
@@ -236,8 +235,11 @@ enum VendorCharonControlWireCodec {
   }
 
   static func replyEvent(_ object: xpc_object_t) -> VendorCharonControlReplyEvent {
-    if object === XPC_ERROR_CONNECTION_INTERRUPTED { return .connectionInterrupted }
-    if object === XPC_ERROR_CONNECTION_INVALID { return .connectionInvalid }
+    if object === XPC_ERROR_CONNECTION_INTERRUPTED
+      || object === XPC_ERROR_CONNECTION_INVALID
+    {
+      return .replyUnavailable
+    }
     if #available(macOS 15.0, *), object === XPC_ERROR_PEER_CODE_SIGNING_REQUIREMENT {
       return .peerCodeSigningRequirement
     }

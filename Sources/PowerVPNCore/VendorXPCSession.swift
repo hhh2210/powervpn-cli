@@ -6,6 +6,11 @@ enum VendorXPCSessionSubmission: Equatable, Sendable {
   case submitted
   case rejected(VendorCharonControlOutcome)
 }
+enum VendorXPCSessionReplyFailure: Equatable, Sendable {
+  case replyUnavailable
+  case peerCodeSigningRequirement
+  case unexpectedXPCError
+}
 
 package enum VendorXPCSessionPreflightStatus: Equatable, Sendable {
   case accepted
@@ -30,8 +35,8 @@ package enum VendorXPCSessionContract {
     }
   }
 
-  static var replyFailureOutcome: VendorCharonControlOutcome {
-    VendorXPCSession.outcome(PowerVPNXPCSessionStatusReplyFailed)
+  static var replyFailureEvent: VendorXPCSessionReplyFailure {
+    VendorXPCSession.replyFailure(PowerVPNXPCSessionStatusReplyFailed)
   }
 }
 
@@ -40,6 +45,7 @@ package enum VendorXPCSessionContract {
 final class VendorXPCSession: @unchecked Sendable {
   typealias IncomingDecoder = @Sendable (xpc_object_t) -> Void
   typealias CancellationHandler = @Sendable (VendorCharonControlOutcome) -> Void
+  typealias ReplyFailureHandler = @Sendable (VendorXPCSessionReplyFailure) -> Void
 
   private var session: OpaquePointer?
   private let creationOutcome: VendorCharonControlOutcome
@@ -70,7 +76,7 @@ final class VendorXPCSession: @unchecked Sendable {
   func send(
     _ request: xpc_object_t,
     replyDecoder: @escaping IncomingDecoder,
-    failureHandler: @escaping CancellationHandler
+    failureHandler: @escaping ReplyFailureHandler
   ) -> VendorXPCSessionSubmission {
     guard let session else { return .rejected(creationOutcome) }
     let submitted = power_vpn_xpc_session_send(
@@ -78,7 +84,7 @@ final class VendorXPCSession: @unchecked Sendable {
       request
     ) { status, reply in
       guard status == PowerVPNXPCSessionStatusOK, let reply else {
-        failureHandler(Self.outcome(status))
+        failureHandler(Self.replyFailure(status))
         return
       }
       replyDecoder(reply)
@@ -93,6 +99,19 @@ final class VendorXPCSession: @unchecked Sendable {
     power_vpn_xpc_session_release(session)
   }
 
+  static func replyFailure(
+    _ status: PowerVPNXPCSessionStatus
+  ) -> VendorXPCSessionReplyFailure {
+    switch status {
+    case PowerVPNXPCSessionStatusReplyFailed:
+      return .replyUnavailable
+    case PowerVPNXPCSessionStatusRequirementFailed:
+      return .peerCodeSigningRequirement
+    default:
+      return .unexpectedXPCError
+    }
+  }
+
   static func outcome(
     _ status: PowerVPNXPCSessionStatus
   ) -> VendorCharonControlOutcome {
@@ -102,11 +121,12 @@ final class VendorXPCSession: @unchecked Sendable {
     case PowerVPNXPCSessionStatusRequirementFailed:
       return .peerCodeSigningRequirement
     case PowerVPNXPCSessionStatusCancelled,
-      PowerVPNXPCSessionStatusReplyFailed,
       PowerVPNXPCSessionStatusUnsupportedOS,
       PowerVPNXPCSessionStatusCreateFailed,
       PowerVPNXPCSessionStatusActivationFailed:
       return .connectionInvalid
+    case PowerVPNXPCSessionStatusReplyFailed:
+      return .unexpectedXPCError
     default:
       return .unexpectedXPCError
     }

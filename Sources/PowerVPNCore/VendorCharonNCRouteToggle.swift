@@ -44,7 +44,11 @@ extension VendorCharonControlState {
     } onCancel: {
       guard let identity = attempt.cancel() else { return }
       self.queue.async { [weak self] in
-        self?.finishNCRouteToggle(
+        guard let self, phase == .togglingNC, activeNCRouteToggleAttempt == identity else {
+          return
+        }
+        completionSource = .callerCancel
+        finishNCRouteToggle(
           .cancelled,
           retainConnection: true,
           attempt: identity
@@ -113,6 +117,8 @@ extension VendorCharonControlState {
     ncRouteToggleContinuation = continuation
     ncRouteToggleValidator = peerGenerationValidator
     ncRouteToggleAcknowledgementObserved = false
+    replyUnavailableObserved = false
+    completionSource = .submission
     requestSent = false
     emptyReplyObserved = false
     updateObservation { replySignatures = [] }
@@ -165,15 +171,22 @@ extension VendorCharonControlState {
     case .decodedDictionary:
       return
     case .ncRouteToggleAcknowledgement(let success):
-      handleNCRouteToggleAcknowledgement(success, attempt: attempt)
+      handleNCRouteToggleAcknowledgement(
+        success,
+        attempt: attempt,
+        source: .replyDictionary
+      )
+    case .replyUnavailable:
+      replyUnavailableObserved = true
     case .emptyAcknowledgement, .unexpectedPayload:
+      completionSource = .replyDictionary
       finishNCRouteToggle(
         .unexpectedReplyPayload,
         retainConnection: true,
         attempt: attempt
       )
-    case .connectionInterrupted, .connectionInvalid, .peerCodeSigningRequirement,
-      .unexpectedXPCError:
+    case .peerCodeSigningRequirement, .unexpectedXPCError:
+      completionSource = .replyDictionary
       finishNCRouteToggle(
         ncRouteToggleTerminalOutcome(event),
         retainConnection: false,
@@ -207,7 +220,8 @@ extension VendorCharonControlState {
 
   func handleNCRouteToggleAcknowledgement(
     _ success: Bool,
-    attempt: UInt64
+    attempt: UInt64,
+    source: VendorCharonControlCompletionSource
   ) {
     guard phase == .togglingNC,
       activeNCRouteToggleAttempt == attempt,
@@ -215,6 +229,7 @@ extension VendorCharonControlState {
     else {
       return
     }
+    completionSource = source
     ncRouteToggleAcknowledgementObserved = true
     guard success else {
       finishNCRouteToggle(
@@ -249,8 +264,8 @@ extension VendorCharonControlState {
     _ event: VendorCharonControlReplyEvent
   ) -> VendorCharonControlOutcome {
     switch event {
-    case .connectionInterrupted: return .connectionInterrupted
-    case .connectionInvalid: return .connectionInvalid
+    case .replyUnavailable:
+      preconditionFailure("reply-unavailable is non-terminal")
     case .peerCodeSigningRequirement: return .peerCodeSigningRequirement
     case .unexpectedXPCError: return .unexpectedXPCError
     default: preconditionFailure("non-terminal NC route-toggle event")
@@ -276,7 +291,9 @@ extension VendorCharonControlState {
     let timer = DispatchSource.makeTimerSource(queue: queue)
     timer.schedule(deadline: .now() + .milliseconds(milliseconds))
     timer.setEventHandler { [weak self] in
-      self?.finishNCRouteToggle(
+      guard let self else { return }
+      completionSource = .timeout
+      finishNCRouteToggle(
         .timeout,
         retainConnection: true,
         attempt: attempt

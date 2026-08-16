@@ -16,6 +16,8 @@ package struct ProductM2Execution {
   var startEventSignatures: [String]?
   var startReplySignatures: [String]?
   var unexpectedEventSignature: [String]?
+  var startReplyUnavailableObserved = false
+  var startCompletionSource = ProductM2ControlCompletionSource.submission
   var vendorStatusEvidence = ProductM2VendorStatusEvidence.notAttempted
   var routeActivation = ProductM2ControlReceipt.unsent(.notAttempted)
   var activeNetworkEvidence = ProductM2ActiveNetworkEvidence.unavailable
@@ -26,6 +28,8 @@ package struct ProductM2Execution {
   var sshProofEvidence: ProductM2FreshSSHProofEvidence?
   var cleanupPath: ProductM2CleanupPath = .notRequired
   var stopOutcome: ProductM2ControlOutcome = .notAttempted
+  var stopReplyUnavailableObserved = false
+  var stopCompletionSource = ProductM2ControlCompletionSource.submission
   var routeDeactivation = ProductM2ControlReceipt.unsent(.notAttempted)
   var stopInvalidityClass: ProductM2StopInvalidityClass? = nil
   var emergencyStopOutcome: ProductM2ControlOutcome = .notAttempted
@@ -107,6 +111,8 @@ package struct ProductM2Execution {
   mutating func apply(_ cleanup: ProductM2CleanupResult) {
     cleanupPath = cleanup.path
     stopOutcome = cleanup.stop.outcome
+    stopReplyUnavailableObserved = cleanup.stop.replyUnavailableObserved
+    stopCompletionSource = cleanup.stop.completionSource
     routeDeactivation = cleanup.routeDeactivation
     stopInvalidityClass = cleanup.stopInvalidityClass
     emergencyStopOutcome = cleanup.emergencyStop.outcome
@@ -190,11 +196,15 @@ package struct ProductM2Execution {
       startEventSignatures: startEventSignatures,
       startReplySignatures: startReplySignatures,
       unexpectedEventSignature: unexpectedEventSignature,
+      startReplyUnavailableObserved: startReplyUnavailableObserved,
+      startCompletionSource: startCompletionSource,
       vendorStatusEvidence: vendorStatusEvidence,
       routeActivationOutcome: routeActivation.outcome,
       routeActivationRequestSent: routeActivation.requestSent,
       routeActivationAcknowledged: routeActivation.transportAcknowledged,
       routeActivationPeerGenerationValidated: routeActivation.peerGenerationValidated,
+      routeActivationReplyUnavailableObserved: routeActivation.replyUnavailableObserved,
+      routeActivationCompletionSource: routeActivation.completionSource,
       activeNetworkEvidence: activeNetworkEvidence,
       activeCaptureState: activeCaptureState,
       activeCaptureChangeAxes: activeCaptureChangeAxes,
@@ -204,10 +214,14 @@ package struct ProductM2Execution {
       networkProofSource: networkProofSource,
       cleanupPath: cleanupPath,
       stopOutcome: stopOutcome,
+      stopReplyUnavailableObserved: stopReplyUnavailableObserved,
+      stopCompletionSource: stopCompletionSource,
       routeDeactivationOutcome: routeDeactivation.outcome,
       routeDeactivationRequestSent: routeDeactivation.requestSent,
       routeDeactivationAcknowledged: routeDeactivation.transportAcknowledged,
       routeDeactivationPeerGenerationValidated: routeDeactivation.peerGenerationValidated,
+      routeDeactivationReplyUnavailableObserved: routeDeactivation.replyUnavailableObserved,
+      routeDeactivationCompletionSource: routeDeactivation.completionSource,
       stopInvalidityClass: stopInvalidityClass,
       emergencyStopOutcome: emergencyStopOutcome,
       authorizationClose: authorizationClose,

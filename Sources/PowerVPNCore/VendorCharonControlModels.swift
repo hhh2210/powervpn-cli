@@ -25,6 +25,15 @@ package enum VendorCharonControlOutcome: String, Equatable, Sendable {
   case unexpectedReplyPayload = "unexpected_reply_payload"
   case leaseClosed = "lease_closed"
 }
+package enum VendorCharonControlCompletionSource: String, Equatable, Sendable {
+  case submission
+  case ordinaryConnection = "ordinary_connection"
+  case replyDictionary = "reply_dictionary"
+  case replyUnavailableThenOrdinary = "reply_unavailable_then_ordinary"
+  case connectionTerminal = "connection_terminal"
+  case timeout
+  case callerCancel = "caller_cancel"
+}
 
 /// Value-free evidence for one bounded helper-control request.
 ///
@@ -48,6 +57,8 @@ package struct VendorCharonControlReceipt: Equatable, Sendable {
   package let replySignatures: [String]
   /// Exact key/type-only signature of the event that rejected start.
   package let unexpectedEventSignature: [String]?
+  package let replyUnavailableObserved: Bool
+  package let completionSource: VendorCharonControlCompletionSource
   package var statusAtSubmission: VendorCharonStatusClassification? = nil
   package init(
     operation: VendorCharonControlOperation,
@@ -63,6 +74,8 @@ package struct VendorCharonControlReceipt: Equatable, Sendable {
     incomingEventSignatures: [String] = [],
     replySignatures: [String] = [],
     unexpectedEventSignature: [String]? = nil,
+    replyUnavailableObserved: Bool = false,
+    completionSource: VendorCharonControlCompletionSource = .submission,
     statusAtSubmission: VendorCharonStatusClassification? = nil
   ) {
     self.operation = operation
@@ -78,6 +91,8 @@ package struct VendorCharonControlReceipt: Equatable, Sendable {
     self.incomingEventSignatures = incomingEventSignatures
     self.replySignatures = replySignatures
     self.unexpectedEventSignature = unexpectedEventSignature
+    self.replyUnavailableObserved = replyUnavailableObserved
+    self.completionSource = completionSource
     self.statusAtSubmission = statusAtSubmission
   }
 

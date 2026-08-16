@@ -99,8 +99,6 @@ import Testing
       [(
         VendorCharonControlReplyEvent, VendorCharonControlOutcome, Bool
       )] = [
-        (.connectionInterrupted, .connectionInterrupted, true),
-        (.connectionInvalid, .connectionInvalid, true),
         (.peerCodeSigningRequirement, .peerCodeSigningRequirement, true),
         (.unexpectedXPCError, .unexpectedXPCError, true),
         (.unexpectedPayload, .unexpectedReplyPayload, false),
@@ -147,10 +145,15 @@ import Testing
     let start = try await acknowledgedStart(factory)
     let lease = try #require(start.lease)
 
-    let stop = await lease.stop(timeoutMilliseconds: 5)
+    let task = Task { await lease.stop(timeoutMilliseconds: 10) }
+    #expect(await waitForControl { factory.driver.submitCount == 2 })
+    factory.driver.emitReply(.replyUnavailable, at: 1)
+    let stop = await task.value
     #expect(stop.outcome == .timeout)
     #expect(stop.requestSent)
     #expect(stop.helperMayHaveMutated)
+    #expect(stop.replyUnavailableObserved)
+    #expect(stop.completionSource == .timeout)
     #expect(stop.connectionCancelRequested)
     #expect(!stop.connectionRetained)
     #expect(factory.driver.submitCount == 2)

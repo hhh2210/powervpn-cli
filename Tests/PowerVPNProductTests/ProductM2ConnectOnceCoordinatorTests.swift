@@ -365,7 +365,7 @@ import Testing
     #expect(trace.count("ssh") == 0)
   }
 
-  @Test func controlReceiptMapsWireDiagnosticsOnlyForStartOperation() {
+  @Test func controlReceiptMapsWireDiagnosticsAndClosedCompletionEvidence() {
     let start = ProductM2ControlReceipt(
       vendorDiagnosticReceipt(operation: .startConnection)
     )
@@ -374,6 +374,8 @@ import Testing
         == ["1:connection:get_tun_name_success:bool,namev4:string"])
     #expect(start.startReplySignatures == ["2:reply:{}"])
     #expect(start.unexpectedEventSignature == ["mystery:string"])
+    #expect(start.replyUnavailableObserved)
+    #expect(start.completionSource == .connectionTerminal)
 
     let stop = ProductM2ControlReceipt(
       vendorDiagnosticReceipt(operation: .stopConnection)
@@ -381,9 +383,11 @@ import Testing
     #expect(stop.startEventSignatures == nil)
     #expect(stop.startReplySignatures == nil)
     #expect(stop.unexpectedEventSignature == nil)
+    #expect(stop.replyUnavailableObserved)
+    #expect(stop.completionSource == .connectionTerminal)
   }
 
-  @Test func startWireDiagnosticsFlowToSchemaFourteenReportWithoutValues() async throws {
+  @Test func startWireDiagnosticsFlowToSchemaFifteenReportWithoutValues() async throws {
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
     defer { fixture.erase() }
     let trace = ProductM2TestTrace()
@@ -403,7 +407,7 @@ import Testing
       ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
     )
 
-    #expect(report.schemaVersion == 14)
+    #expect(report.schemaVersion == 15)
     #expect(
       report.startEventSignatures == [
         "1:connection:get_tun_name_success:bool,namev4:string",
@@ -436,11 +440,19 @@ import Testing
     #expect(json.contains("\"containsSecrets\":false"))
     #expect(json.contains("\"snapshotSerialized\":false"))
     #expect(json.contains("\"authorizationOwnedMaterialErased\":true"))
-    #expect(json.contains("\"schemaVersion\":14"))
+    #expect(json.contains("\"schemaVersion\":15"))
     #expect(json.contains("\"routeActivationOutcome\":\"transport_acknowledged\""))
     #expect(json.contains("\"routeActivationAcknowledged\":true"))
     #expect(json.contains("\"routeDeactivationOutcome\":\"transport_acknowledged\""))
     #expect(json.contains("\"routeDeactivationAcknowledged\":true"))
+    #expect(json.contains("\"startReplyUnavailableObserved\":false"))
+    #expect(json.contains("\"startCompletionSource\":\"submission\""))
+    #expect(json.contains("\"routeActivationReplyUnavailableObserved\":false"))
+    #expect(json.contains("\"routeActivationCompletionSource\":\"submission\""))
+    #expect(json.contains("\"routeDeactivationReplyUnavailableObserved\":false"))
+    #expect(json.contains("\"routeDeactivationCompletionSource\":\"submission\""))
+    #expect(json.contains("\"stopReplyUnavailableObserved\":false"))
+    #expect(json.contains("\"stopCompletionSource\":\"submission\""))
     #expect(!json.contains("portal:"))
     #expect(!json.contains("helper-session-material"))
     #expect(!json.contains("psk-material"))
@@ -480,6 +492,8 @@ private func vendorDiagnosticReceipt(
       "1:connection:get_tun_name_success:bool,namev4:string"
     ],
     replySignatures: ["2:reply:{}"],
-    unexpectedEventSignature: ["mystery:string"]
+    unexpectedEventSignature: ["mystery:string"],
+    replyUnavailableObserved: true,
+    completionSource: .connectionTerminal
   )
 }

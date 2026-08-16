@@ -74,12 +74,27 @@ import Testing
     #expect(driver.cancelCount == 1)
   }
 
+  @Test func replyUnavailableThenOrdinaryBusinessStillAuthenticates() async {
+    let driver = ScriptedVendorXPCDriver(steps: [
+      .reply(.replyUnavailable),
+      .connection(.business(acceptedReply(), peerPID: 4)),
+    ])
+
+    let evidence = await transport(driver).getVersion(
+      timeoutMilliseconds: 500,
+      peerGenerationValidator: { $0 == 4 }
+    )
+
+    #expect(evidence.outcome == .accepted)
+    #expect(evidence.accepted)
+    #expect(evidence.replyPeerGenerationValidated)
+    #expect(driver.cancelCount == 1)
+  }
+
   @Test func classifiesErrorsFromBothDriverChannels() async {
     let cases: [(DriverStep, VendorXPCGetVersionOutcome)] = [
       (.connection(.connectionInterrupted), .connectionInterrupted),
-      (.reply(.connectionInterrupted), .connectionInterrupted),
       (.connection(.connectionInvalid), .connectionInvalid),
-      (.reply(.connectionInvalid), .connectionInvalid),
       (.connection(.peerCodeSigningRequirement), .peerCodeSigningRequirement),
       (.reply(.peerCodeSigningRequirement), .peerCodeSigningRequirement),
       (.connection(.unexpectedXPCError), .unexpectedXPCError),

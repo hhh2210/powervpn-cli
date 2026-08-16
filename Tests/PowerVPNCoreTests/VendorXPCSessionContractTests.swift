@@ -31,7 +31,7 @@ import Testing
     }
   }
 
-  @Test func richReplyFailureMapsToImmediateConnectionInvalid() {
-    #expect(VendorXPCSessionContract.replyFailureOutcome == .connectionInvalid)
+  @Test func richReplyFailureMapsToReplyUnavailable() {
+    #expect(VendorXPCSessionContract.replyFailureEvent == .replyUnavailable)
   }
 }

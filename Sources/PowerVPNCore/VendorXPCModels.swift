@@ -96,8 +96,7 @@ enum VendorXPCConnectionEvent: Equatable, Sendable {
 
 enum VendorXPCReplyCallbackEvent: Equatable, Sendable {
   case emptyAcknowledgement
-  case connectionInterrupted
-  case connectionInvalid
+  case replyUnavailable
   case peerCodeSigningRequirement
   case unexpectedXPCError
   case unexpectedPayload
@@ -164,8 +163,9 @@ enum VendorXPCWireCodec {
   }
 
   static func replyCallback(_ object: xpc_object_t) -> VendorXPCReplyCallbackEvent {
-    if object === XPC_ERROR_CONNECTION_INTERRUPTED { return .connectionInterrupted }
-    if object === XPC_ERROR_CONNECTION_INVALID { return .connectionInvalid }
+    if object === XPC_ERROR_CONNECTION_INTERRUPTED || object === XPC_ERROR_CONNECTION_INVALID {
+      return .replyUnavailable
+    }
     if #available(macOS 15.0, *), object === XPC_ERROR_PEER_CODE_SIGNING_REQUIREMENT {
       return .peerCodeSigningRequirement
     }

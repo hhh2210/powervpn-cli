@@ -95,6 +95,15 @@ public enum ProductM2ControlOutcome: String, Encodable, Equatable, Sendable {
   case helperRejected = "helper_rejected"
   case leaseClosed = "lease_closed"
 }
+public enum ProductM2ControlCompletionSource: String, Encodable, Equatable, Sendable {
+  case submission
+  case ordinaryConnection = "ordinary_connection"
+  case replyDictionary = "reply_dictionary"
+  case replyUnavailableThenOrdinary = "reply_unavailable_then_ordinary"
+  case connectionTerminal = "connection_terminal"
+  case timeout
+  case callerCancel = "caller_cancel"
+}
 
 public enum ProductM2AuthorizationAcquisitionOutcome: String, Encodable, Equatable, Sendable {
   case notRequested = "not_requested"
@@ -362,7 +371,7 @@ public struct ProductM2ConnectRequest: Equatable, Sendable {
 }
 
 public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
-  public let schemaVersion = 14
+  public let schemaVersion = 15
   public let outcome: ProductM2ConnectOutcome
   public let finalState: ProductM2ConnectionState
   public let lastGoodState: ProductM2ConnectionState
@@ -380,12 +389,16 @@ public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
   public var startReplySignatures: [String]? = nil
   /// Exact key/type signature of the event that terminally rejected start.
   public var unexpectedEventSignature: [String]? = nil
+  public var startReplyUnavailableObserved = false
+  public var startCompletionSource = ProductM2ControlCompletionSource.submission
   public let vendorStatusEvidence: ProductM2VendorStatusEvidence
   /// Value-free acknowledgement evidence for the post-connected NC route toggle.
   public var routeActivationOutcome: ProductM2ControlOutcome = .notAttempted
   public var routeActivationRequestSent = false
   public var routeActivationAcknowledged = false
   public var routeActivationPeerGenerationValidated = false
+  public var routeActivationReplyUnavailableObserved = false
+  public var routeActivationCompletionSource = ProductM2ControlCompletionSource.submission
   public let activeNetworkEvidence: ProductM2ActiveNetworkEvidence
   /// Diagnostic classification of the active-network capture stage
   /// (schema 10). Nil — omitted from JSON — when the run never reached the
@@ -403,11 +416,15 @@ public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
   public var networkProofSource: ProductM2NetworkProofSource? = nil
   public let cleanupPath: ProductM2CleanupPath
   public let stopOutcome: ProductM2ControlOutcome
+  public var stopReplyUnavailableObserved = false
+  public var stopCompletionSource = ProductM2ControlCompletionSource.submission
   /// Value-free acknowledgement evidence for the pre-stop NC route toggle.
   public var routeDeactivationOutcome: ProductM2ControlOutcome = .notAttempted
   public var routeDeactivationRequestSent = false
   public var routeDeactivationAcknowledged = false
   public var routeDeactivationPeerGenerationValidated = false
+  public var routeDeactivationReplyUnavailableObserved = false
+  public var routeDeactivationCompletionSource = ProductM2ControlCompletionSource.submission
   /// Read-only classification of a `connection_invalid` stop via one bounded
   /// post-stop generation re-observation (schema 10). Nil when the stop was
   /// not `connection_invalid`.

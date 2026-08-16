@@ -165,13 +165,16 @@ extension VendorCharonControlState {
     connectionRetained: Bool,
     cancelRequested: Bool,
     requestWasSent: Bool? = nil,
-    encodingError: VendorCharonStartEncodingError? = nil
+    encodingError: VendorCharonStartEncodingError? = nil,
+    replyUnavailableWasObserved: Bool? = nil,
+    completionSourceOverride: VendorCharonControlCompletionSource? = nil
   ) -> VendorCharonControlReceipt {
     let observation = observation
+    let sent = requestWasSent ?? requestSent
     return VendorCharonControlReceipt(
       operation: operation,
       outcome: outcome,
-      requestSent: requestWasSent ?? requestSent,
+      requestSent: sent,
       emptyReplyObserved: emptyReplyObserved,
       peerGenerationValidated: outcome == .transportAcknowledged,
       connectionRetained: connectionRetained,
@@ -182,7 +185,9 @@ extension VendorCharonControlState {
       incomingEventSignatures: observation.incomingEventSignatures,
       replySignatures: observation.replySignatures,
       unexpectedEventSignature:
-        operation == .startConnection ? startUnexpectedEventSignature : nil
+        operation == .startConnection ? startUnexpectedEventSignature : nil,
+      replyUnavailableObserved: replyUnavailableWasObserved ?? replyUnavailableObserved,
+      completionSource: completionSourceOverride ?? completionSource
     )
   }
 

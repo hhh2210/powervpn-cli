@@ -265,10 +265,8 @@ private final class VendorXPCGetVersionTransaction: @unchecked Sendable {
     switch event {
     case .emptyAcknowledgement:
       emptyReplyAcknowledgementObserved = true
-    case .connectionInterrupted:
-      finishFailure(.connectionInterrupted)
-    case .connectionInvalid:
-      finishFailure(.connectionInvalid)
+    case .replyUnavailable:
+      break
     case .peerCodeSigningRequirement:
       finishFailure(.peerCodeSigningRequirement)
     case .unexpectedXPCError:

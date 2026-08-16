@@ -114,6 +114,53 @@ import Testing
     #expect(factory.driver.cancelCount == 1)
   }
 
+  @Test func replyUnavailableThenOrdinaryStartAcknowledgementRetainsLease() async throws {
+    let factory = CharonControlDriverFactory()
+    let task = Task {
+      await controlTransport(factory).start(
+        snapshot: try ControlSnapshotFixture().snapshot(),
+        timeoutMilliseconds: 500,
+        peerGenerationValidator: { true }
+      )
+    }
+    #expect(await waitForControl { factory.driver.submitCount == 1 })
+
+    factory.driver.emitReply(.replyUnavailable, at: 0)
+    factory.driver.emitConnectionDictionary(xpc_dictionary_create(nil, nil, 0))
+    let start = try await task.value
+
+    #expect(start.receipt.outcome == .transportAcknowledged)
+    #expect(start.receipt.replyUnavailableObserved)
+    #expect(start.receipt.completionSource == .replyUnavailableThenOrdinary)
+    #expect(start.receipt.connectionRetained)
+    #expect(!start.receipt.connectionCancelRequested)
+    #expect(factory.driver.cancelCount == 0)
+    withExtendedLifetime(start.lease) {}
+  }
+
+  @Test func replyUnavailableThenOrdinaryStopAcknowledgementUsesBoundedDrain()
+    async throws
+  {
+    let factory = CharonControlDriverFactory()
+    let scheduler = ManualConnectionDrainScheduler()
+    let lease = try await activeLease(factory, drainScheduler: scheduler.schedule)
+    let task = Task { await lease.stop(timeoutMilliseconds: 500) }
+    #expect(await waitForControl { factory.driver.submitCount == 2 })
+
+    factory.driver.emitReply(.replyUnavailable, at: 1)
+    factory.driver.emitConnectionDictionary(xpc_dictionary_create(nil, nil, 0))
+    let receipt = await task.value
+
+    #expect(receipt.outcome == .transportAcknowledged)
+    #expect(receipt.replyUnavailableObserved)
+    #expect(receipt.completionSource == .replyUnavailableThenOrdinary)
+    #expect(!receipt.connectionRetained)
+    #expect(!receipt.connectionCancelRequested)
+    #expect(scheduler.isArmed)
+    #expect(factory.driver.cancelCount == 0)
+    withExtendedLifetime(lease) {}
+  }
+
   @Test func connectionTailAcknowledgesStartWithoutReplyAndKeepsLeaseUsable()
     async throws
   {

@@ -99,12 +99,12 @@ import Testing
       ) == .connectionInterrupted)
     #expect(
       VendorXPCWireCodec.replyCallback(XPC_ERROR_CONNECTION_INTERRUPTED)
-        == .connectionInterrupted)
+        == .replyUnavailable)
     #expect(
       VendorXPCWireCodec.connectionEvent(XPC_ERROR_CONNECTION_INVALID, peerPID: 0)
         == .connectionInvalid)
     #expect(
-      VendorXPCWireCodec.replyCallback(XPC_ERROR_CONNECTION_INVALID) == .connectionInvalid)
+      VendorXPCWireCodec.replyCallback(XPC_ERROR_CONNECTION_INVALID) == .replyUnavailable)
     #expect(
       VendorXPCWireCodec.connectionEvent(XPC_ERROR_TERMINATION_IMMINENT, peerPID: 0)
         == .unexpectedXPCError)

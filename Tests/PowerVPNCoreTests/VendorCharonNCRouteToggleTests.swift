@@ -143,6 +143,8 @@ import Testing
     #expect(!toggle.transportAcknowledged)
     #expect(!toggle.connectionRetained)
     #expect(toggle.connectionCancelRequested)
+    #expect(!toggle.replyUnavailableObserved)
+    #expect(toggle.completionSource == .connectionTerminal)
     let stop = await lease.stop(timeoutMilliseconds: 500)
     #expect(stop.outcome == .leaseClosed)
     #expect(!stop.requestSent)
@@ -294,6 +296,9 @@ import Testing
     #expect(receipt.peerGenerationValidated)
     #expect(receipt.connectionRetained)
     #expect(receipt.incomingEventSignatures == ["1:connection:updown_nc_success:bool"])
+    factory.driver.emitReply(.replyUnavailable, at: 1)
+    try await Task.sleep(for: .milliseconds(20))
+    #expect(factory.driver.cancelCount == 0)
     factory.driver.emitConnectionDictionary(ncRouteReply(success: true))
     try await stopNCRouteLease(lease, factory: factory, replyIndex: 2)
   }
@@ -322,12 +327,19 @@ import Testing
   @Test func ordinaryAcknowledgementsStayFIFOAcrossTimedOutAttempt() async throws {
     let factory = CharonControlDriverFactory()
     let lease = try await activeNCRouteLease(factory)
-    let first = await lease.setSelectedNCEnabled(
-      true,
-      timeoutMilliseconds: 10,
-      peerGenerationValidator: { true }
-    )
+    let firstTask = Task {
+      await lease.setSelectedNCEnabled(
+        true,
+        timeoutMilliseconds: 10,
+        peerGenerationValidator: { true }
+      )
+    }
+    #expect(await waitForControl { factory.driver.submitCount == 2 })
+    factory.driver.emitReply(.replyUnavailable, at: 1)
+    let first = await firstTask.value
     #expect(first.outcome == .timeout)
+    #expect(first.replyUnavailableObserved)
+    #expect(first.completionSource == .timeout)
 
     let validation = RouteToggleValidationGate()
     let secondTask = Task {
@@ -338,6 +350,9 @@ import Testing
       )
     }
     #expect(await waitForControl { factory.driver.submitCount == 3 })
+    factory.driver.emitReply(.replyUnavailable, at: 1)
+    try await Task.sleep(for: .milliseconds(20))
+    #expect(!validation.entered)
 
     factory.driver.emitConnectionDictionary(ncRouteReply(success: true))
     try await Task.sleep(for: .milliseconds(20))
@@ -349,6 +364,8 @@ import Testing
     let second = await secondTask.value
     #expect(second.outcome == .transportAcknowledged)
     #expect(second.connectionRetained)
+    #expect(!second.replyUnavailableObserved)
+    #expect(second.completionSource == .ordinaryConnection)
     try await stopNCRouteLease(lease, factory: factory, replyIndex: 3)
   }
 
@@ -378,6 +395,81 @@ import Testing
     factory.driver.emitConnectionDictionary(ncRouteReply(success: true))
     #expect((await disableTask.value).outcome == .transportAcknowledged)
     try await stopNCRouteLease(lease, factory: factory, replyIndex: 3)
+  }
+
+  @Test func replyUnavailableThenOrdinaryRouteAcknowledgesAndRetainsLease() async throws {
+    let factory = CharonControlDriverFactory()
+    let lease = try await activeNCRouteLease(factory)
+    let task = Task {
+      await lease.setSelectedNCEnabled(
+        true,
+        timeoutMilliseconds: 500,
+        peerGenerationValidator: { true }
+      )
+    }
+    #expect(await waitForControl { factory.driver.submitCount == 2 })
+
+    factory.driver.emitReply(.replyUnavailable, at: 1)
+    factory.driver.emitConnectionDictionary(ncRouteReply(success: true))
+    let receipt = await task.value
+
+    #expect(receipt.outcome == .transportAcknowledged)
+    #expect(receipt.peerGenerationValidated)
+    #expect(receipt.replyUnavailableObserved)
+    #expect(receipt.completionSource == .replyUnavailableThenOrdinary)
+    #expect(receipt.connectionRetained)
+    #expect(factory.driver.cancelCount == 0)
+    try await stopNCRouteLease(lease, factory: factory, replyIndex: 2)
+  }
+
+  @Test func replyUnavailableDuringHeldRouteValidatorDoesNotOverrideResult() async throws {
+    let factory = CharonControlDriverFactory()
+    let lease = try await activeNCRouteLease(factory)
+    let validation = RouteToggleValidationGate()
+    let task = Task {
+      await lease.setSelectedNCEnabled(
+        true,
+        timeoutMilliseconds: 500,
+        peerGenerationValidator: { await validation.wait() }
+      )
+    }
+    #expect(await waitForControl { factory.driver.submitCount == 2 })
+    factory.driver.emitConnectionDictionary(ncRouteReply(success: true))
+    #expect(await waitForControl { validation.entered })
+
+    factory.driver.emitReply(.replyUnavailable, at: 1)
+    try await Task.sleep(for: .milliseconds(20))
+    #expect(factory.driver.cancelCount == 0)
+    validation.release()
+    let receipt = await task.value
+
+    #expect(receipt.outcome == .transportAcknowledged)
+    #expect(receipt.replyUnavailableObserved)
+    #expect(receipt.completionSource == .ordinaryConnection)
+    #expect(receipt.connectionRetained)
+    try await stopNCRouteLease(lease, factory: factory, replyIndex: 2)
+  }
+
+  @Test func replyUnavailableThenRouteTimeoutRetainsLeaseForStop() async throws {
+    let factory = CharonControlDriverFactory()
+    let lease = try await activeNCRouteLease(factory)
+    let task = Task {
+      await lease.setSelectedNCEnabled(
+        true,
+        timeoutMilliseconds: 10,
+        peerGenerationValidator: { true }
+      )
+    }
+    #expect(await waitForControl { factory.driver.submitCount == 2 })
+    factory.driver.emitReply(.replyUnavailable, at: 1)
+    let receipt = await task.value
+
+    #expect(receipt.outcome == .timeout)
+    #expect(receipt.replyUnavailableObserved)
+    #expect(receipt.completionSource == .timeout)
+    #expect(receipt.connectionRetained)
+    #expect(factory.driver.cancelCount == 0)
+    try await stopNCRouteLease(lease, factory: factory, replyIndex: 2)
   }
 
   @Test func malformedOrdinaryConnectionAcknowledgementFailsClosed() async throws {

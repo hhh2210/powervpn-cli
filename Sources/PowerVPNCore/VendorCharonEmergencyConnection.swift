@@ -60,8 +60,8 @@ final class SystemVendorCharonEmergencyConnectionDriver: @unchecked Sendable,
       replyDecoder: { [probeReplyHandler] object in
         probeReplyHandler(VendorXPCWireCodec.replyCallback(object))
       },
-      failureHandler: { [probeReplyHandler] outcome in
-        probeReplyHandler(Self.probeReplyEvent(outcome))
+      failureHandler: { [probeReplyHandler] failure in
+        probeReplyHandler(Self.probeReplyEvent(failure))
       }
     )
   }
@@ -76,8 +76,8 @@ final class SystemVendorCharonEmergencyConnectionDriver: @unchecked Sendable,
       replyDecoder: { object in
         replyHandler(VendorCharonControlWireCodec.replyEvent(object))
       },
-      failureHandler: { outcome in
-        replyHandler(Self.stopReplyEvent(outcome))
+      failureHandler: { failure in
+        replyHandler(Self.stopReplyEvent(failure))
       }
     )
     guard submission == .submitted else { return submission }
@@ -134,22 +134,22 @@ final class SystemVendorCharonEmergencyConnectionDriver: @unchecked Sendable,
   }
 
   private static func probeReplyEvent(
-    _ outcome: VendorCharonControlOutcome
+    _ failure: VendorXPCSessionReplyFailure
   ) -> VendorXPCReplyCallbackEvent {
-    switch outcome {
+    switch failure {
+    case .replyUnavailable: return .replyUnavailable
     case .peerCodeSigningRequirement: return .peerCodeSigningRequirement
-    case .connectionInvalid: return .connectionInvalid
-    default: return .unexpectedXPCError
+    case .unexpectedXPCError: return .unexpectedXPCError
     }
   }
 
   private static func stopReplyEvent(
-    _ outcome: VendorCharonControlOutcome
+    _ failure: VendorXPCSessionReplyFailure
   ) -> VendorCharonControlReplyEvent {
-    switch outcome {
+    switch failure {
+    case .replyUnavailable: return .replyUnavailable
     case .peerCodeSigningRequirement: return .peerCodeSigningRequirement
-    case .connectionInvalid: return .connectionInvalid
-    default: return .unexpectedXPCError
+    case .unexpectedXPCError: return .unexpectedXPCError
     }
   }
 }

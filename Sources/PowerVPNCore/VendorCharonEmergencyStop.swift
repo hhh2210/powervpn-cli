@@ -78,6 +78,7 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
   private var emptyStopReplyObserved = false
   private var probeBusinessValidated = false
   private var probeEmptyReplyObserved = false
+  private var probeReplyUnavailableObserved = false
   private var peerGenerationValidated = false
   private var statusEventCount = 0
   private var dispatcherTailEventCount = 0
@@ -209,8 +210,9 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
     case .emptyAcknowledgement:
       probeEmptyReplyObserved = true
       beginStopIfProbeComplete()
-    case .connectionInterrupted: finish(.connectionInterrupted)
-    case .connectionInvalid: finish(.connectionInvalid)
+    case .replyUnavailable:
+      probeReplyUnavailableObserved = true
+      beginStopIfProbeComplete()
     case .peerCodeSigningRequirement: finish(.peerCodeSigningRequirement)
     case .unexpectedXPCError: finish(.unexpectedXPCError)
     case .unexpectedPayload: finish(.unexpectedReplyPayload)
@@ -220,7 +222,7 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
   private func beginStopIfProbeComplete() {
     guard phase == .probing,
       probeBusinessValidated,
-      probeEmptyReplyObserved,
+      probeEmptyReplyObserved || probeReplyUnavailableObserved,
       peerGenerationValidated,
       let driver
     else { return }
@@ -247,8 +249,8 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
       finish(.unexpectedReplyPayload)
     case .emptyAcknowledgement:
       acknowledgeStopTransport()
-    case .connectionInterrupted: finish(.connectionInterrupted)
-    case .connectionInvalid: finish(.connectionInvalid)
+    case .replyUnavailable:
+      break
     case .peerCodeSigningRequirement: finish(.peerCodeSigningRequirement)
     case .unexpectedXPCError: finish(.unexpectedXPCError)
     case .unexpectedPayload: finish(.unexpectedReplyPayload)

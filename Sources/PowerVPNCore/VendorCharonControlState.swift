@@ -54,6 +54,8 @@ final class VendorCharonControlState: @unchecked Sendable {
   var ncRouteToggleOrdinaryAcknowledgementHead = 0
   var requestSent = false
   var emptyReplyObserved = false
+  var replyUnavailableObserved = false
+  var completionSource = VendorCharonControlCompletionSource.submission
   var statusEvents = 0
   var latestStatus: VendorCharonStatusSignal?
   var latestTerminalStatus: VendorCharonStatusClassification?
@@ -130,6 +132,7 @@ final class VendorCharonControlState: @unchecked Sendable {
   func abandon() {
     queue.async { [self] in
       guard phase == .active || phase == .togglingNC || postStopDrain != nil else { return }
+      completionSource = .callerCancel
       if phase == .active { finishStatusWait(.leaseClosed) }
       if phase == .togglingNC, let attempt = activeNCRouteToggleAttempt {
         finishNCRouteToggle(.leaseClosed, retainConnection: false, attempt: attempt)
@@ -154,7 +157,10 @@ final class VendorCharonControlState: @unchecked Sendable {
 
   func discardPendingStart() {
     queue.async { [self] in
-      if phase == .starting { finishStart(.cancelled) }
+      if phase == .starting {
+        completionSource = .callerCancel
+        finishStart(.cancelled)
+      }
       guard completedStartResult != nil else { return }
       if phase == .active {
         _ = cancelDriver()
@@ -168,7 +174,10 @@ final class VendorCharonControlState: @unchecked Sendable {
 
   private func cancelPendingStartWait() {
     queue.async { [self] in
-      if phase == .starting { finishStart(.cancelled) }
+      if phase == .starting {
+        completionSource = .callerCancel
+        finishStart(.cancelled)
+      }
     }
   }
 
@@ -182,6 +191,8 @@ final class VendorCharonControlState: @unchecked Sendable {
       return
     }
     phase = .starting
+    replyUnavailableObserved = false
+    completionSource = .submission
     currentValidator = peerGenerationValidator
     defer { self.snapshot = nil }
     do {
@@ -245,6 +256,8 @@ final class VendorCharonControlState: @unchecked Sendable {
       return
     }
     phase = .stopping
+    replyUnavailableObserved = false
+    completionSource = .submission
     requestSent = false
     emptyReplyObserved = false
     armTimeout(milliseconds: timeoutMilliseconds, operation: .stopConnection)
@@ -264,6 +277,7 @@ final class VendorCharonControlState: @unchecked Sendable {
     let timer = DispatchSource.makeTimerSource(queue: queue)
     timer.schedule(deadline: .now() + .milliseconds(milliseconds))
     timer.setEventHandler { [self] in
+      completionSource = .timeout
       if operation == .startConnection {
         finishStart(.timeout)
       } else {
@@ -287,6 +301,11 @@ final class VendorCharonControlState: @unchecked Sendable {
       (operation == .startConnection && phase == .starting)
         || (operation == .stopConnection && phase == .stopping)
     else { return }
+    if event == .replyUnavailable {
+      replyUnavailableObserved = true
+      return
+    }
+    completionSource = .replyDictionary
     switch event {
     case .decodedDictionary:
       return
@@ -294,8 +313,8 @@ final class VendorCharonControlState: @unchecked Sendable {
       finishReply(.unexpectedReplyPayload, operation)
     case .emptyAcknowledgement:
       acceptEmptyAcknowledgement(for: operation)
-    case .connectionInterrupted: finishReply(.connectionInterrupted, operation)
-    case .connectionInvalid: finishReply(.connectionInvalid, operation)
+    case .replyUnavailable:
+      return
     case .peerCodeSigningRequirement: finishReply(.peerCodeSigningRequirement, operation)
     case .unexpectedXPCError: finishReply(.unexpectedXPCError, operation)
     case .unexpectedPayload: finishReply(.unexpectedReplyPayload, operation)
@@ -311,6 +330,11 @@ final class VendorCharonControlState: @unchecked Sendable {
     } else {
       finishStop(.transportAcknowledged, retainConnection: false)
     }
+  }
+
+  func recordOrdinaryConnectionCompletionSource() {
+    completionSource =
+      replyUnavailableObserved ? .replyUnavailableThenOrdinary : .ordinaryConnection
   }
 
   private func finishReply(
@@ -350,7 +374,12 @@ final class VendorCharonControlState: @unchecked Sendable {
       break
     case .ncRouteToggleAcknowledgement(let success):
       guard let attempt = consumeNCRouteToggleOrdinaryAcknowledgementAttempt() else { return }
-      handleNCRouteToggleAcknowledgement(success, attempt: attempt)
+      handleNCRouteToggleAcknowledgement(
+        success,
+        attempt: attempt,
+        source:
+          replyUnavailableObserved ? .replyUnavailableThenOrdinary : .ordinaryConnection
+      )
     case .emptyDispatcherTail:
       updateObservation {
         if dispatcherTailEvents < Int.max { dispatcherTailEvents += 1 }
@@ -358,6 +387,7 @@ final class VendorCharonControlState: @unchecked Sendable {
       // The helper uses an ordinary send at 0x1001ac379-0x1001ac38e.
       // Attempt 6 observed `1:connection:{}` and no reply-channel message.
       guard requestSent else { return }
+      recordOrdinaryConnectionCompletionSource()
       if phase == .starting {
         acceptEmptyAcknowledgement(for: .startConnection)
       } else if phase == .stopping {
@@ -403,6 +433,7 @@ final class VendorCharonControlState: @unchecked Sendable {
   }
 
   private func finishPending(_ outcome: VendorCharonControlOutcome) {
+    completionSource = .connectionTerminal
     updateObservation { terminalConnectionOutcome = outcome }
     finishStatusWait(.terminalError)
     if phase == .starting {

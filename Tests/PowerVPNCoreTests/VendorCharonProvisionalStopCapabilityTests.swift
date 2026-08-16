@@ -16,13 +16,21 @@ import Testing
 
   @Test func timeoutAfterSubmissionCanStopSameSessionExactlyOnce() async throws {
     let factory = CharonControlDriverFactory()
-    let result = await controlTransport(factory).start(
-      snapshot: try ControlSnapshotFixture().snapshot(),
-      timeoutMilliseconds: 5,
-      peerGenerationValidator: { true }
-    )
+    let task = Task {
+      await controlTransport(factory).start(
+        snapshot: try ControlSnapshotFixture().snapshot(),
+        timeoutMilliseconds: 10,
+        peerGenerationValidator: { true }
+      )
+    }
+    #expect(await waitForControl { factory.driver.submitCount == 1 })
+    factory.driver.emitReply(.replyUnavailable, at: 0)
+    let result = try await task.value
 
     #expect(result.receipt.outcome == .timeout)
+    #expect(result.receipt.replyUnavailableObserved)
+    #expect(result.receipt.completionSource == .timeout)
+    #expect(factory.driver.cancelCount == 0)
     try await expectExactlyOneSameSessionStop(result, factory: factory)
   }
 

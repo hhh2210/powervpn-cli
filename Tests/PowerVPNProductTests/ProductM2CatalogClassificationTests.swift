@@ -15,7 +15,7 @@ import Testing
 
     let report = await catalogReport(snapshot: fixture.snapshot)
 
-    #expect(report.schemaVersion == 14)
+    #expect(report.schemaVersion == 15)
     #expect(report.outcome == .resourceCatalogRejected)
     #expect(report.firstBadEvent == .resourceCatalogRejected)
     #expect(report.selectionFailureClass == .catalogMapping)

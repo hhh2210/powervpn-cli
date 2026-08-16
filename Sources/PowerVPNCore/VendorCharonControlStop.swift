@@ -61,6 +61,7 @@ extension VendorCharonControlState {
       attempt.cancel()
       self.queue.async { [self] in
         if currentStopAttempt === attempt {
+          completionSource = .callerCancel
           if phase == .stopping { finishStop(.cancelled, retainConnection: false) }
         } else if postStopDrainAttempt === attempt {
           _ = cancelDriver()

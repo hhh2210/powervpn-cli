@@ -97,6 +97,38 @@ import Testing
     #expect(await waitForControl { factory.driver.cancelCount == 1 })
   }
 
+  @Test func replyUnavailableProbeAndStopContinueOnOrdinaryConnectionEvents() async {
+    let factory = EmergencyConnectionDriverFactory()
+    let scheduler = ManualConnectionDrainScheduler()
+    let task = emergencyStopTask(
+      factory,
+      peerGenerationValidator: { true },
+      drainScheduler: scheduler.schedule
+    )
+    #expect(await waitForControl { factory.driver.probeCount == 1 })
+
+    factory.driver.emitProbeReply(.replyUnavailable)
+    await Task.yield()
+    #expect(factory.driver.stopCount == 0)
+    #expect(factory.driver.cancelCount == 0)
+
+    factory.driver.emitProbeBusiness()
+    #expect(await waitForControl { factory.driver.stopCount == 1 })
+    factory.driver.emitStopReply(.replyUnavailable)
+    await Task.yield()
+    #expect(factory.driver.cancelCount == 0)
+
+    factory.driver.emitStopEvent(.emptyDispatcherTail)
+    let receipt = await task.value
+    #expect(receipt.outcome == .transportAcknowledged)
+    #expect(receipt.requestSent)
+    #expect(receipt.peerGenerationValidated)
+    #expect(receipt.dispatcherTailEventCount == 1)
+    #expect(!receipt.connectionCancelRequested)
+    #expect(scheduler.isArmed)
+    #expect(factory.driver.cancelCount == 0)
+  }
+
   @Test func businessFirstStillWaitsForEmptyProbeReplyBeforeStop() async {
     let factory = EmergencyConnectionDriverFactory()
     let task = emergencyStopTask(factory)
@@ -207,8 +239,6 @@ import Testing
 
   @Test func probeReplyErrorAfterValidBusinessNeverSendsStop() async {
     let replyCases: [(VendorXPCReplyCallbackEvent, VendorCharonControlOutcome)] = [
-      (.connectionInterrupted, .connectionInterrupted),
-      (.connectionInvalid, .connectionInvalid),
       (.peerCodeSigningRequirement, .peerCodeSigningRequirement),
       (.unexpectedXPCError, .unexpectedXPCError),
       (.unexpectedPayload, .unexpectedReplyPayload),

@@ -50,6 +50,8 @@ extension ProductPersistentTunnelCoordinator {
     execution.startEventSignatures = start.receipt.startEventSignatures
     execution.startReplySignatures = start.receipt.startReplySignatures
     execution.unexpectedEventSignature = start.receipt.unexpectedEventSignature
+    execution.startReplyUnavailableObserved = start.receipt.replyUnavailableObserved
+    execution.startCompletionSource = start.receipt.completionSource
     execution.helperMutationRequested = start.receipt.requestSent
     if applyWorkAbortIfNeeded(&execution, budget: budget) {
       return await finishStartFailure(

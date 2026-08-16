@@ -253,7 +253,7 @@ import Testing
     ).run(m2CleanupRequest)
     let json = String(decoding: try JSONEncoder().encode(report), as: UTF8.self)
 
-    #expect(report.schemaVersion == 14)
+    #expect(report.schemaVersion == 15)
     #expect(report.sshProofEvidence?.failureClass == .unclassified)
     #expect(json.contains("\"failureClass\":\"unclassified\""))
     #expect(json.contains("\"cleanupCaptureState\":\"measured_complete\""))
