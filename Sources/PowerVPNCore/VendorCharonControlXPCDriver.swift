@@ -24,6 +24,7 @@ enum VendorCharonControlReplyEvent: Equatable, Sendable {
     event: VendorCharonControlReplyEvent
   )
   case emptyAcknowledgement
+  case ncRouteToggleAcknowledgement(success: Bool)
   case connectionInterrupted
   case connectionInvalid
   case peerCodeSigningRequirement
@@ -127,6 +128,45 @@ enum VendorCharonControlWireCodec {
     return VendorCharonStopContext(gatewayCString: copiedGateway)
   }
 
+  static func ncRouteToggleContext(
+    copyingTunnelNameFromStartRequest request: xpc_object_t
+  ) -> VendorCharonNCRouteToggleContext? {
+    guard xpc_get_type(request) == XPC_TYPE_DICTIONARY,
+      let tunnels = xpc_dictionary_get_value(request, "tunnels"),
+      xpc_get_type(tunnels) == XPC_TYPE_ARRAY,
+      xpc_array_get_count(tunnels) == 1
+    else { return nil }
+    let tunnel = xpc_array_get_value(tunnels, 0)
+    guard xpc_get_type(tunnel) == XPC_TYPE_DICTIONARY,
+      let tunnelName = xpc_dictionary_get_string(tunnel, "tunnel-name")
+    else { return nil }
+    return VendorCharonNCRouteToggleContext(
+      tunnelNameCString: Array(
+        UnsafeBufferPointer(start: tunnelName, count: strlen(tunnelName) + 1)
+      )
+    )
+  }
+
+  static func makeNCRouteToggleRequest(
+    context: VendorCharonNCRouteToggleContext,
+    enabled: Bool
+  ) -> xpc_object_t {
+    let request = xpc_dictionary_create(nil, nil, 0)
+    for field in VendorCharonNCRouteToggleContract.orderedFields {
+      field.key.withCString { key in
+        field.value.withCString { value in
+          xpc_dictionary_set_string(request, key, value)
+        }
+      }
+    }
+    xpc_dictionary_set_bool(request, "updown", enabled)
+    context.withTunnelNameCString {
+      xpc_dictionary_set_string(request, "tunnel-name", $0)
+    }
+    precondition(xpc_dictionary_get_count(request) == 4)
+    return request
+  }
+
   static func makeStopRequest(
     context: VendorCharonStopContext
   ) -> xpc_object_t {
@@ -197,10 +237,16 @@ enum VendorCharonControlWireCodec {
     }
     let type = xpc_get_type(object)
     if type == XPC_TYPE_ERROR { return .unexpectedXPCError }
-    guard type == XPC_TYPE_DICTIONARY, xpc_dictionary_get_count(object) == 0 else {
-      return .unexpectedPayload
+    guard type == XPC_TYPE_DICTIONARY else { return .unexpectedPayload }
+    if xpc_dictionary_get_count(object) == 0 {
+      return .emptyAcknowledgement
     }
-    return .emptyAcknowledgement
+    guard xpc_dictionary_get_count(object) == 1,
+      hasType(object, key: "updown_nc_success", type: XPC_TYPE_BOOL)
+    else { return .unexpectedPayload }
+    return .ncRouteToggleAcknowledgement(
+      success: xpc_dictionary_get_bool(object, "updown_nc_success")
+    )
   }
 
   private static func tunnelNameReport(_ object: xpc_object_t) -> Bool? {
@@ -235,6 +281,13 @@ enum VendorCharonControlWireCodec {
     guard let value = xpc_dictionary_get_value(object, key) else { return false }
     return xpc_get_type(value) == type
   }
+}
+
+enum VendorCharonNCRouteToggleContract {
+  static let orderedFields = [
+    VendorXPCRequestField(key: "type", value: "rpc"),
+    VendorXPCRequestField(key: "rpc", value: "updown_nc"),
+  ]
 }
 
 enum VendorCharonStopContract {

@@ -142,13 +142,14 @@ struct VendorCharonStartXPCEncoder: Sendable {
       .tunnelName
     )
     record(.tunnelName, in: .tunnel)
-    setInteger(result, "family", try required(tunnel.family, .family).value)
+    let family = try required(tunnel.family, .family).value
+    setInteger(result, "family", family)
     record(.family, in: .tunnel)
     setInteger(result, "rflag", try required(tunnel.resourceFlag, .resourceFlag).value)
     record(.resourceFlag, in: .tunnel)
     try setText(result, "name", required(tunnel.name, .name), .name)
     record(.name, in: .tunnel)
-    let routes = try makeRoutes(required(tunnel.routes, .routes))
+    let routes = try makeRoutes(required(tunnel.routes, .routes), family: family)
     setValue(result, key: "routes", value: routes)
     record(.routes, in: .tunnel)
     try setText(result, "mapid", required(tunnel.mapID, .mapID), .mapID)
@@ -161,11 +162,14 @@ struct VendorCharonStartXPCEncoder: Sendable {
   }
 
   private func makeRoutes(
-    _ routes: [VendorCharonStartRouteCandidate]
+    _ routes: [VendorCharonStartRouteCandidate],
+    family: Int32
   ) throws -> xpc_object_t {
     let result = xpc_array_create(nil, 0)
     for route in routes {
       let encoded = xpc_dictionary_create(nil, nil, 0)
+      setDecimalString(encoded, "family", family)
+      record(.family, in: .route)
       try setText(encoded, "net", required(route.network, .routeNetwork), .routeNetwork)
       record(.routeNetwork, in: .route)
       let prefix = try required(route.prefix, .routePrefix)
@@ -194,6 +198,16 @@ struct VendorCharonStartXPCEncoder: Sendable {
     _ field: VendorCharonStartField
   ) throws {
     try setTextMaterial(dictionary, key, value.value, field)
+  }
+
+  private func setDecimalString(
+    _ dictionary: xpc_object_t,
+    _ key: String,
+    _ value: Int32
+  ) {
+    String(value).withCString {
+      xpc_dictionary_set_string(dictionary, key, $0)
+    }
   }
 
   private func setTextMaterial(

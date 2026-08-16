@@ -86,6 +86,7 @@ extension ProductPersistentTunnelCoordinator {
         lease: start?.lease,
         provisionalStop: start?.provisionalStopCapability,
         emergencyStop: start?.emergencyStopCapability,
+        routeActivation: execution.routeActivation,
         startReceipt: start?.receipt ?? .unsent(.notAttempted)
       ),
       mutationLease: mutationLease,

@@ -310,7 +310,7 @@ import Testing
     #expect(report.stopInvalidityClass == nil)
     #expect(trace.count("stop") == 1)
     #expect(trace.count("emergency_stop") == 0)
-    #expect(trace.count("observe_generation") == 4)
+    #expect(trace.count("observe_generation") == 6)
   }
 
   @Test func invalidStopClassifiesSingleHelperExitWithOneBoundedObservation() async throws {
@@ -337,7 +337,7 @@ import Testing
     #expect(m2EventIndex("stop", in: events) < lastObserve)
     #expect(trace.count("begin_start") == 1)
     #expect(trace.count("mutation_lease") == 1)
-    #expect(trace.count("observe_generation") == 5)
+    #expect(trace.count("observe_generation") == 7)
   }
 
   @Test func invalidStopWithSameRunningGenerationClassifiesSessionInvalid() async throws {
@@ -359,7 +359,7 @@ import Testing
     #expect(report.stopInvalidityClass == .helperRunningSessionInvalid)
     #expect(trace.count("stop") == 1)
     #expect(trace.count("emergency_stop") == 0)
-    #expect(trace.count("observe_generation") == 5)
+    #expect(trace.count("observe_generation") == 7)
   }
 
   @Test func invalidStopWithAdvancedRunCountClassifiesHelperRestart() async throws {
@@ -382,7 +382,7 @@ import Testing
     #expect(report.stopInvalidityClass == .helperRestarted)
     #expect(trace.count("stop") == 1)
     #expect(trace.count("emergency_stop") == 0)
-    #expect(trace.count("observe_generation") == 5)
+    #expect(trace.count("observe_generation") == 7)
   }
 
   @Test func invalidStopWithUnobservableGenerationStaysUnclassified() async throws {
@@ -405,7 +405,7 @@ import Testing
     #expect(report.stopInvalidityClass == .unclassified)
     #expect(trace.count("stop") == 1)
     #expect(trace.count("emergency_stop") == 0)
-    #expect(trace.count("observe_generation") == 5)
+    #expect(trace.count("observe_generation") == 7)
   }
 
   @Test func unsentInvalidStopClassifiesFromExistingObservation() async throws {
@@ -462,9 +462,9 @@ import Testing
     #expect(report.stopInvalidityClass == .helperExitedSingleGeneration)
     #expect(trace.count("stop") == 1)
     #expect(trace.count("emergency_stop") == 0)
-    // Classification spent exactly the one bounded read-only observation
-    // (report-budget fallback), and nothing else mutated afterwards.
-    #expect(trace.count("observe_generation") == 5)
+    // The single bounded classification observation is additional to the
+    // generation validations for start and the two NC route acknowledgements.
+    #expect(trace.count("observe_generation") == 7)
     #expect(trace.count("mutation_lease") == 1)
     #expect(trace.count("begin_start") == 1)
   }

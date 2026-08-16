@@ -10,7 +10,7 @@ private enum VendorCharonWireSignatureChannel: String {
 }
 
 final class VendorCharonControlState: @unchecked Sendable {
-  enum Phase { case idle, starting, provisional, active, stopping, closed }
+  enum Phase { case idle, starting, provisional, active, togglingNC, stopping, closed }
 
   final class StopAttempt: @unchecked Sendable {
     private let lock = NSLock()
@@ -29,6 +29,7 @@ final class VendorCharonControlState: @unchecked Sendable {
   let postStopDrainScheduler: VendorCharonConnectionDrainScheduler
   var snapshot: VendorCharonStartSnapshot?
   var stopContext: VendorCharonStopContext?
+  var ncRouteToggleContext: VendorCharonNCRouteToggleContext?
   var driver: (any VendorCharonControlConnectionDriving)?
   var postStopDrain: VendorCharonControlConnectionDrain?
   var phase = Phase.idle
@@ -41,6 +42,10 @@ final class VendorCharonControlState: @unchecked Sendable {
   var stopStatusAtSubmission: VendorCharonStatusClassification?
   var currentValidator: (@Sendable () async -> Bool)?
   var validation: VendorCharonAsyncValidation?
+  var ncRouteToggleContinuation: CheckedContinuation<VendorCharonControlReceipt, Never>?
+  var ncRouteToggleValidation: VendorCharonAsyncValidation?
+  var ncRouteToggleAttemptSequence: UInt64 = 0
+  var activeNCRouteToggleAttempt: UInt64?
   var requestSent = false
   var emptyReplyObserved = false
   var statusEvents = 0
@@ -118,11 +123,17 @@ final class VendorCharonControlState: @unchecked Sendable {
 
   func abandon() {
     queue.async { [self] in
-      guard phase == .active || postStopDrain != nil else { return }
+      guard phase == .active || phase == .togglingNC || postStopDrain != nil else { return }
       if phase == .active { finishStatusWait(.leaseClosed) }
-      _ = cancelDriver()
-      phase = .closed
+      if phase == .togglingNC, let attempt = activeNCRouteToggleAttempt {
+        finishNCRouteToggle(.leaseClosed, retainConnection: false, attempt: attempt)
+      } else {
+        _ = cancelDriver()
+        phase = .closed
+      }
       stopContext = nil
+      ncRouteToggleContext = nil
+      activeNCRouteToggleAttempt = nil
     }
   }
 
@@ -145,6 +156,7 @@ final class VendorCharonControlState: @unchecked Sendable {
       }
       completedStartResult = nil
       stopContext = nil
+      ncRouteToggleContext = nil
     }
   }
 
@@ -175,12 +187,21 @@ final class VendorCharonControlState: @unchecked Sendable {
         else {
           throw VendorCharonStartEncodingError.incompleteSnapshot(.gateway)
         }
+        guard
+          let ncRouteToggleContext =
+            VendorCharonControlWireCodec.ncRouteToggleContext(
+              copyingTunnelNameFromStartRequest: request
+            )
+        else {
+          throw VendorCharonStartEncodingError.incompleteSnapshot(.tunnelName)
+        }
         do {
           try commitStartAuthorization()
         } catch {
           throw VendorCharonStartAuthorizationCommitFailure(underlying: error)
         }
         self.stopContext = stopContext
+        self.ncRouteToggleContext = ncRouteToggleContext
         let driver = driverFactory(queue) { [weak self] event in
           guard let self else { return }
           self.queue.async { self.handle(event) }
@@ -259,6 +280,8 @@ final class VendorCharonControlState: @unchecked Sendable {
     switch event {
     case .decodedDictionary:
       return
+    case .ncRouteToggleAcknowledgement:
+      finishReply(.unexpectedReplyPayload, operation)
     case .emptyAcknowledgement:
       acceptEmptyAcknowledgement(for: operation)
     case .connectionInterrupted: finishReply(.connectionInterrupted, operation)
@@ -362,6 +385,10 @@ final class VendorCharonControlState: @unchecked Sendable {
     }
   }
 
+  func recordReplyWireSignature(_ signature: [String]) {
+    recordWireSignature(signature, channel: .reply)
+  }
+
   private func finishPending(_ outcome: VendorCharonControlOutcome) {
     updateObservation { terminalConnectionOutcome = outcome }
     finishStatusWait(.terminalError)
@@ -369,6 +396,8 @@ final class VendorCharonControlState: @unchecked Sendable {
       finishStart(outcome, sealSubmittedSession: true)
     } else if phase == .stopping {
       finishStop(outcome, retainConnection: false)
+    } else if phase == .togglingNC, let attempt = activeNCRouteToggleAttempt {
+      finishNCRouteToggle(outcome, retainConnection: false, attempt: attempt)
     } else if phase == .active {
       _ = cancelDriver()
       phase = .closed

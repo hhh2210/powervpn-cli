@@ -120,6 +120,8 @@ func productM2TestControl(
   startEventSignatures: [String]? = nil,
   startReplySignatures: [String]? = nil,
   unexpectedEventSignature: [String]? = nil,
+  routeActivationOutcome: ProductM2ControlOutcome = .transportAcknowledged,
+  routeDeactivationOutcome: ProductM2ControlOutcome = .transportAcknowledged,
   onBeginStart: @escaping @Sendable (Int) -> Void = { _ in },
   onAwaitStart: @escaping @Sendable () -> Void = {},
   onStop: @escaping @Sendable (Int) -> Void = { _ in },
@@ -168,6 +170,17 @@ func productM2TestControl(
             statusOperation: { _ in
               trace.record("status_wait")
               return plan.statusEvidence
+            },
+            routeToggleOperation: { enabled, _, validator in
+              trace.record(enabled ? "route_enable" : "route_disable")
+              let configured = enabled ? routeActivationOutcome : routeDeactivationOutcome
+              let accepted =
+                configured == .transportAcknowledged ? await validator() : false
+              return m2Receipt(
+                configured == .transportAcknowledged && !accepted
+                  ? .peerGenerationMismatch : configured,
+                requestSent: true
+              )
             }
           ) : nil
         let provisionalStopCapability =

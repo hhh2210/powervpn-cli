@@ -53,11 +53,19 @@ import Testing
     #expect(report.authorizationFailure == nil)
     #expect(report.startOutcome == .transportAcknowledged)
     #expect(report.vendorStatusEvidence.connectedProven)
+    #expect(report.routeActivationOutcome == .transportAcknowledged)
+    #expect(report.routeActivationRequestSent)
+    #expect(report.routeActivationAcknowledged)
+    #expect(report.routeActivationPeerGenerationValidated)
     #expect(report.activeNetworkEvidence.connectionProven)
     #expect(report.sshProof == .proven)
     #expect(report.networkProofSource == .sshBanner)
     #expect(report.cleanupPath == .sameLeaseStop)
     #expect(report.stopOutcome == .transportAcknowledged)
+    #expect(report.routeDeactivationOutcome == .transportAcknowledged)
+    #expect(report.routeDeactivationRequestSent)
+    #expect(report.routeDeactivationAcknowledged)
+    #expect(report.routeDeactivationPeerGenerationValidated)
     #expect(report.authorizationClose == .accepted)
     #expect(report.cleanupVerified)
     #expect(trace.count("baseline") == 3)
@@ -72,11 +80,68 @@ import Testing
     #expect(m2EventIndex("acquire", in: events) < m2EventIndex("baseline_stable", in: events))
     #expect(m2EventIndex("baseline_stable", in: events) < m2EventIndex("begin_start", in: events))
     #expect(m2EventIndex("begin_start", in: events) < m2EventIndex("status_wait", in: events))
-    #expect(m2EventIndex("status_wait", in: events) < m2EventIndex("ssh", in: events))
+    #expect(m2EventIndex("status_wait", in: events) < m2EventIndex("route_enable", in: events))
+    #expect(m2EventIndex("route_enable", in: events) < m2EventIndex("ssh", in: events))
     #expect(m2EventIndex("ssh", in: events) < m2EventIndex("active_assessment", in: events))
-    #expect(m2EventIndex("active_assessment", in: events) < m2EventIndex("stop", in: events))
+    #expect(
+      m2EventIndex("active_assessment", in: events)
+        < m2EventIndex("route_disable", in: events))
+    #expect(m2EventIndex("route_disable", in: events) < m2EventIndex("stop", in: events))
     #expect(m2EventIndex("stop", in: events) < m2EventIndex("logout", in: events))
     #expect(m2EventIndex("logout", in: events) < m2EventIndex("verify", in: events))
+  }
+
+  @Test func routeActivationRejectionFailsBeforeSSHAndStillCleansUp() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        routeActivationOutcome: .helperRejected
+      )
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(report.outcome == .routeActivationRejected)
+    #expect(report.firstBadEvent == .routeActivationRejected)
+    #expect(report.routeActivationOutcome == .helperRejected)
+    #expect(report.routeActivationRequestSent)
+    #expect(!report.routeActivationAcknowledged)
+    #expect(trace.count("route_enable") == 1)
+    #expect(trace.count("ssh") == 0)
+    #expect(trace.count("route_disable") == 1)
+    #expect(trace.count("stop") == 1)
+    #expect(trace.count("verify") == 1)
+    #expect(report.cleanupVerified)
+  }
+
+  @Test func routeDeactivationFailureStillRunsStopAndAuthoritativeCleanup() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        routeDeactivationOutcome: .connectionInvalid
+      )
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(report.routeDeactivationOutcome == .connectionInvalid)
+    #expect(report.routeDeactivationRequestSent)
+    #expect(!report.routeDeactivationAcknowledged)
+    #expect(trace.count("route_disable") == 1)
+    #expect(trace.count("stop") == 1)
+    #expect(trace.count("verify") == 1)
+    #expect(report.cleanupVerified)
+    #expect(
+      m2EventIndex("route_disable", in: trace.events)
+        < m2EventIndex("stop", in: trace.events))
   }
 
   @Test func coldToFirstObservedBaselineGenerationDriftNeverAcquiresPortal() async throws {
@@ -283,7 +348,7 @@ import Testing
     #expect(stop.unexpectedEventSignature == nil)
   }
 
-  @Test func startWireDiagnosticsFlowToSchemaNineReportWithoutValues() async throws {
+  @Test func startWireDiagnosticsFlowToSchemaTwelveReportWithoutValues() async throws {
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
     defer { fixture.erase() }
     let trace = ProductM2TestTrace()
@@ -303,7 +368,7 @@ import Testing
       ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
     )
 
-    #expect(report.schemaVersion == 11)
+    #expect(report.schemaVersion == 12)
     #expect(
       report.startEventSignatures == [
         "1:connection:get_tun_name_success:bool,namev4:string",
@@ -336,6 +401,11 @@ import Testing
     #expect(json.contains("\"containsSecrets\":false"))
     #expect(json.contains("\"snapshotSerialized\":false"))
     #expect(json.contains("\"authorizationOwnedMaterialErased\":true"))
+    #expect(json.contains("\"schemaVersion\":12"))
+    #expect(json.contains("\"routeActivationOutcome\":\"transport_acknowledged\""))
+    #expect(json.contains("\"routeActivationAcknowledged\":true"))
+    #expect(json.contains("\"routeDeactivationOutcome\":\"transport_acknowledged\""))
+    #expect(json.contains("\"routeDeactivationAcknowledged\":true"))
     #expect(!json.contains("portal:"))
     #expect(!json.contains("helper-session-material"))
     #expect(!json.contains("psk-material"))
@@ -343,6 +413,8 @@ import Testing
     #expect(!json.contains("10.1.2.3"))
     #expect(!json.contains("11.11.0.0"))
     #expect(!json.contains("\"handle\""))
+    #expect(!json.contains("tunnel-name"))
+    #expect(!json.contains("updown_nc"))
     #expect(json.contains("\"persistentRoutesRestored\":true"))
     #expect(json.contains("\"selectedRouteResidueCount\":0"))
     #expect(json.contains("\"containsRawRoutes\":false"))

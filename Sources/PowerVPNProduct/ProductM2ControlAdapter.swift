@@ -72,13 +72,23 @@ package struct ProductM2ControlReceipt: Equatable, Sendable {
 package struct ProductM2ControlLease: Sendable {
   private let stopOperation: @Sendable (Int) async -> ProductM2ControlReceipt
   private let statusOperation: @Sendable (Int) async -> ProductM2VendorStatusEvidence
+  private let routeToggleOperation:
+    @Sendable (Bool, Int, @escaping @Sendable () async -> Bool) async
+      -> ProductM2ControlReceipt
 
   init(
     stopOperation: @escaping @Sendable (Int) async -> ProductM2ControlReceipt,
-    statusOperation: @escaping @Sendable (Int) async -> ProductM2VendorStatusEvidence
+    statusOperation: @escaping @Sendable (Int) async -> ProductM2VendorStatusEvidence,
+    routeToggleOperation:
+      @escaping @Sendable (
+        Bool,
+        Int,
+        @escaping @Sendable () async -> Bool
+      ) async -> ProductM2ControlReceipt
   ) {
     self.stopOperation = stopOperation
     self.statusOperation = statusOperation
+    self.routeToggleOperation = routeToggleOperation
   }
 
   package func stop(timeoutMilliseconds: Int) async -> ProductM2ControlReceipt {
@@ -89,6 +99,14 @@ package struct ProductM2ControlLease: Sendable {
     timeoutMilliseconds: Int
   ) async -> ProductM2VendorStatusEvidence {
     await statusOperation(timeoutMilliseconds)
+  }
+
+  package func setSelectedNCEnabled(
+    _ enabled: Bool,
+    timeoutMilliseconds: Int,
+    peerGenerationValidator: @escaping @Sendable () async -> Bool
+  ) async -> ProductM2ControlReceipt {
+    await routeToggleOperation(enabled, timeoutMilliseconds, peerGenerationValidator)
   }
 }
 
@@ -154,6 +172,14 @@ package struct ProductM2ControlAdapter: Sendable {
                 ProductM2VendorStatusEvidence(
                   await lease.waitForConnectedStatus(
                     timeoutMilliseconds: timeoutMilliseconds
+                  ))
+              },
+              routeToggleOperation: { enabled, timeoutMilliseconds, validator in
+                ProductM2ControlReceipt(
+                  await lease.setSelectedNCEnabled(
+                    enabled,
+                    timeoutMilliseconds: timeoutMilliseconds,
+                    peerGenerationValidator: validator
                   ))
               }
             )
@@ -297,6 +323,7 @@ extension ProductM2ControlOutcome {
     case .unexpectedXPCError: self = .unexpectedXPCError
     case .unexpectedConnectionEvent: self = .unexpectedConnectionEvent
     case .unexpectedReplyPayload: self = .unexpectedReplyPayload
+    case .helperRejected: self = .helperRejected
     case .leaseClosed: self = .leaseClosed
     }
   }

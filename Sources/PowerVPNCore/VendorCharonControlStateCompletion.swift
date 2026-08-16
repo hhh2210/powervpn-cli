@@ -72,7 +72,10 @@ extension VendorCharonControlState {
         cleanupCapable ? VendorCharonProvisionalStopCapability(state: self) : nil,
       stopContext: retainedStopContext
     )
-    if !acknowledged && !provisional { stopContext = nil }
+    if !acknowledged && !provisional {
+      stopContext = nil
+      ncRouteToggleContext = nil
+    }
     if let continuation = startContinuation {
       startContinuation = nil
       continuation.resume(returning: result)
@@ -111,7 +114,10 @@ extension VendorCharonControlState {
     )
     receipt.statusAtSubmission = stopStatusAtSubmission
     stopStatusAtSubmission = nil
-    if !retainConnection { stopContext = nil }
+    if !retainConnection {
+      stopContext = nil
+      ncRouteToggleContext = nil
+    }
     stopContinuation = nil
     continuation.resume(returning: receipt)
   }

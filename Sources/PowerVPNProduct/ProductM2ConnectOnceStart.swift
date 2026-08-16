@@ -86,6 +86,7 @@ extension ProductPersistentTunnelCoordinator {
         baseline: baseline,
         selectedRoutes: selection.selectedRoutes,
         controlLease: start.lease,
+        coldGeneration: coldGeneration,
         budget: budget
       )
     else {
@@ -123,6 +124,7 @@ extension ProductPersistentTunnelCoordinator {
           lease: start.lease,
           provisionalStop: start.provisionalStopCapability,
           emergencyStop: start.emergencyStopCapability,
+          routeActivation: execution.routeActivation,
           startReceipt: start.receipt
         ),
         authorizationLease: authorizationLease,
@@ -135,9 +137,17 @@ extension ProductPersistentTunnelCoordinator {
     baseline: ProductM2NetworkBaseline,
     selectedRoutes: VendorCharonSelectedRouteMatcher,
     controlLease: ProductM2ControlLease?,
+    coldGeneration: VendorHelperGenerationSnapshot,
     budget: ProductM2AbsoluteBudget
   ) async -> Bool {
     await proveVendorStatus(&execution, controlLease: controlLease, budget: budget)
+    guard execution.firstBadEvent == nil else { return false }
+    await activateSelectedNCRoutes(
+      &execution,
+      controlLease: controlLease,
+      coldGeneration: coldGeneration,
+      budget: budget
+    )
     guard execution.firstBadEvent == nil else { return false }
     guard captureActiveDiagnosticsBeforeOpen else { return true }
     await captureActiveNetworkDiagnostics(
@@ -172,6 +182,47 @@ extension ProductPersistentTunnelCoordinator {
     }
     guard status.connectedProven else {
       execution.fail(.vendorStatusUnproven, event: .vendorStatusUnproven, state: .failed)
+      return
+    }
+  }
+
+  private func activateSelectedNCRoutes(
+    _ execution: inout ProductM2Execution,
+    controlLease: ProductM2ControlLease?,
+    coldGeneration: VendorHelperGenerationSnapshot,
+    budget: ProductM2AbsoluteBudget
+  ) async {
+    guard let controlLease,
+      let timeout = budget.work.remainingMilliseconds(cappedAt: 2_000)
+    else {
+      _ = applyWorkAbortIfNeeded(&execution, budget: budget)
+      if execution.firstBadEvent == nil {
+        execution.fail(
+          .routeActivationRejected,
+          event: .routeActivationRejected,
+          state: .failed
+        )
+      }
+      return
+    }
+    let receipt = await controlLease.setSelectedNCEnabled(
+      true,
+      timeoutMilliseconds: timeout,
+      peerGenerationValidator: replyValidator(
+        before: coldGeneration,
+        deadline: budget.work
+      )
+    )
+    execution.routeActivation = receipt
+    execution.helperMutationRequested =
+      execution.helperMutationRequested || receipt.requestSent
+    if applyWorkAbortIfNeeded(&execution, budget: budget) { return }
+    guard receipt.transportAcknowledged else {
+      execution.fail(
+        .routeActivationRejected,
+        event: .routeActivationRejected,
+        state: .failed
+      )
       return
     }
   }

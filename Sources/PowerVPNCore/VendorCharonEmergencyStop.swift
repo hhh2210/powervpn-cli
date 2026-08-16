@@ -243,6 +243,8 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
     switch event {
     case .decodedDictionary(_, let decoded):
       handleStopReply(decoded)
+    case .ncRouteToggleAcknowledgement:
+      finish(.unexpectedReplyPayload)
     case .emptyAcknowledgement:
       acknowledgeStopTransport()
     case .connectionInterrupted: finish(.connectionInterrupted)

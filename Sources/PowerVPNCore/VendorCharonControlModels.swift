@@ -1,5 +1,8 @@
+import Foundation
+
 package enum VendorCharonControlOperation: String, Equatable, Sendable {
   case startConnection = "start_connection"
+  case resourceToggleNC = "resource_toggle_nc"
   case stopConnection = "stop_connection"
 }
 
@@ -18,16 +21,16 @@ package enum VendorCharonControlOutcome: String, Equatable, Sendable {
   case peerCodeSigningRequirement = "peer_code_signing_requirement"
   case unexpectedXPCError = "unexpected_xpc_error"
   case unexpectedConnectionEvent = "unexpected_connection_event"
+  case helperRejected = "helper_rejected"
   case unexpectedReplyPayload = "unexpected_reply_payload"
   case leaseClosed = "lease_closed"
 }
 
 /// Value-free evidence for one bounded helper-control request.
 ///
-/// `requestSent` means the request was handed to libxpc. An exact empty
-/// acknowledgement, whether delivered by the reply callback or the ordinary-
-/// send dispatcher tail, proves only that the vendor dispatcher handled the
-/// request; tunnel success must be established by later network/status evidence.
+/// `requestSent` means the request was handed to libxpc. Start/stop use an
+/// exact empty acknowledgement; `resourceToggleNC` uses an exact true boolean
+/// reply. Neither acknowledgement proves tunnel routing or cleanup.
 package struct VendorCharonControlReceipt: Equatable, Sendable {
   package let operation: VendorCharonControlOperation
   package let outcome: VendorCharonControlOutcome
@@ -80,13 +83,16 @@ package struct VendorCharonControlReceipt: Equatable, Sendable {
 
   package var transportAcknowledged: Bool {
     outcome == .transportAcknowledged
-      && requestSent && emptyReplyObserved && peerGenerationValidated
+      && requestSent && peerGenerationValidated
+      && (operation == .resourceToggleNC || emptyReplyObserved)
   }
 
   package var helperMayHaveMutated: Bool { requestSent }
 
-  /// The installed charon helper has no synchronous start/stop business reply.
-  package var helperSuccessEstablished: Bool { false }
+  /// The route-toggle reply proves only that the helper accepted the request.
+  package var helperSuccessEstablished: Bool {
+    operation == .resourceToggleNC && transportAcknowledged
+  }
 
   /// Transport acknowledgement alone cannot prove route/tunnel cleanup.
   package var cleanupEstablished: Bool { false }
@@ -193,5 +199,39 @@ package final class VendorCharonControlLease: @unchecked Sendable {
     await state.waitForConnectedStatus(timeoutMilliseconds: timeoutMilliseconds)
   }
 
+  package func setSelectedNCEnabled(
+    _ enabled: Bool,
+    timeoutMilliseconds: Int,
+    peerGenerationValidator: @escaping @Sendable () async -> Bool
+  ) async -> VendorCharonControlReceipt {
+    await state.setSelectedNCEnabled(
+      enabled,
+      timeoutMilliseconds: timeoutMilliseconds,
+      peerGenerationValidator: peerGenerationValidator
+    )
+  }
+
   var statusWaitPending: Bool { state.statusWaitPending }
+}
+final class VendorCharonNCRouteToggleAttempt: @unchecked Sendable {
+  private let lock = NSLock()
+  private var cancelled = false
+  private var identity: UInt64?
+
+  var isCancelled: Bool { lock.withLock { cancelled } }
+
+  func activate(identity: UInt64) -> Bool {
+    lock.withLock {
+      precondition(self.identity == nil)
+      self.identity = identity
+      return !cancelled
+    }
+  }
+
+  func cancel() -> UInt64? {
+    lock.withLock {
+      cancelled = true
+      return identity
+    }
+  }
 }

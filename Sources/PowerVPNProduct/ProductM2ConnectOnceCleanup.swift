@@ -3,6 +3,7 @@ import PowerVPNCore
 
 package struct ProductM2CleanupResult: Sendable {
   let path: ProductM2CleanupPath
+  let routeDeactivation: ProductM2ControlReceipt
   let stop: ProductM2ControlReceipt
   let stopInvalidityClass: ProductM2StopInvalidityClass?
   let emergencyStop: ProductM2ControlReceipt
@@ -15,6 +16,7 @@ struct ProductM2ControlCleanupAuthority: Sendable {
   let lease: ProductM2ControlLease?
   let provisionalStop: ProductM2ProvisionalStopCapability?
   let emergencyStop: ProductM2EmergencyStopCapability?
+  let routeActivation: ProductM2ControlReceipt
   let startReceipt: ProductM2ControlReceipt
 }
 
@@ -30,6 +32,8 @@ package struct ProductM2CleanupRunner: Sendable {
     controlAuthority: ProductM2ControlCleanupAuthority,
     deadlines: ProductM2CleanupDeadlines
   ) async -> ProductM2CleanupResult {
+    let routeDeactivation =
+      await deactivateSelectedNCRoutes(coldGeneration, controlAuthority, deadlines)
     let completedControl = await closeControl(
       coldGeneration: coldGeneration,
       authority: controlAuthority,
@@ -65,6 +69,7 @@ package struct ProductM2CleanupRunner: Sendable {
     let controlClassified = control.path != .cleanupUnproven
     return ProductM2CleanupResult(
       path: control.path,
+      routeDeactivation: routeDeactivation,
       stop: control.stop,
       stopInvalidityClass: control.stopInvalidityClass,
       emergencyStop: control.emergencyStop,
@@ -278,7 +283,7 @@ package struct ProductM2CleanupRunner: Sendable {
     )
   }
 
-  private func availableControlDeadline(
+  func availableControlDeadline(
     _ deadline: ProductM2StageDeadline,
     reportDeadline: ProductM2StageDeadline
   ) -> ProductM2StageDeadline? {

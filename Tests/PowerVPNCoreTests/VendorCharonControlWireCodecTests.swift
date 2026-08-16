@@ -187,6 +187,51 @@ import Testing
     let array = xpc_array_create(nil, 0)
     #expect(VendorCharonControlWireCodec.replyEvent(array) == .unexpectedPayload)
   }
+  @Test func ncRouteToggleCopiesTunnelNameAndUsesExactOfficialWireShape() throws {
+    #expect(
+      VendorCharonNCRouteToggleContract.orderedFields == [
+        VendorXPCRequestField(key: "type", value: "rpc"),
+        VendorXPCRequestField(key: "rpc", value: "updown_nc"),
+      ])
+    var context: VendorCharonNCRouteToggleContext?
+    try ControlSnapshotFixture().snapshot().withEncodedStartMessage { start in
+      context = VendorCharonControlWireCodec.ncRouteToggleContext(
+        copyingTunnelNameFromStartRequest: start
+      )
+    }
+
+    for enabled in [true, false] {
+      let request = VendorCharonControlWireCodec.makeNCRouteToggleRequest(
+        context: try #require(context),
+        enabled: enabled
+      )
+      #expect(hasExactKeys(request, ["type", "rpc", "updown", "tunnel-name"]))
+      #expect(try string(request, "type") == "rpc")
+      #expect(try string(request, "rpc") == "updown_nc")
+      #expect(xpc_dictionary_get_bool(request, "updown") == enabled)
+      #expect(try string(request, "tunnel-name") == "synthetic-tunnel")
+    }
+  }
+
+  @Test func onlyExactBooleanNCRouteToggleReplyIsDecoded() {
+    for success in [true, false] {
+      let reply = xpc_dictionary_create(nil, nil, 0)
+      xpc_dictionary_set_bool(reply, "updown_nc_success", success)
+      #expect(
+        VendorCharonControlWireCodec.replyEvent(reply)
+          == .ncRouteToggleAcknowledgement(success: success))
+    }
+
+    let extra = xpc_dictionary_create(nil, nil, 0)
+    xpc_dictionary_set_bool(extra, "updown_nc_success", true)
+    xpc_dictionary_set_bool(extra, "extra", true)
+    #expect(VendorCharonControlWireCodec.replyEvent(extra) == .unexpectedPayload)
+
+    let wrongType = xpc_dictionary_create(nil, nil, 0)
+    xpc_dictionary_set_string(wrongType, "updown_nc_success", "true")
+    #expect(VendorCharonControlWireCodec.replyEvent(wrongType) == .unexpectedPayload)
+  }
+
 }
 
 private func statusObject(

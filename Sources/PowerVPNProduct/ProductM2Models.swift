@@ -32,6 +32,7 @@ public enum ProductM2ConnectOutcome: String, Encodable, Equatable, Sendable {
   case startSnapshotRejected = "start_snapshot_rejected"
   case startRejected = "start_rejected"
   case vendorStatusUnproven = "vendor_status_unproven"
+  case routeActivationRejected = "route_activation_rejected"
   /// Pre-schema-11 host-evidence gate: the active capture failed completeness.
   /// Since schema 11 the capture is diagnostic-only and the fresh SSH proof
   /// decides (`sshProofRejected`); no live path emits this outcome.
@@ -65,6 +66,7 @@ public enum ProductM2BadEvent: String, Encodable, Equatable, Sendable {
   case startControlRejected = "start_control_rejected"
   case postStartGenerationRejected = "post_start_generation_rejected"
   case vendorStatusUnproven = "vendor_status_unproven"
+  case routeActivationRejected = "route_activation_rejected"
   case activeNetworkUnproven = "active_network_unproven"
   case sshProofRejected = "ssh_proof_rejected"
   case deadlineExceeded = "deadline_exceeded"
@@ -90,6 +92,7 @@ public enum ProductM2ControlOutcome: String, Encodable, Equatable, Sendable {
   case unexpectedXPCError = "unexpected_xpc_error"
   case unexpectedConnectionEvent = "unexpected_connection_event"
   case unexpectedReplyPayload = "unexpected_reply_payload"
+  case helperRejected = "helper_rejected"
   case leaseClosed = "lease_closed"
 }
 
@@ -331,7 +334,7 @@ public struct ProductM2ConnectRequest: Equatable, Sendable {
 }
 
 public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
-  public let schemaVersion = 11
+  public let schemaVersion = 12
   public let outcome: ProductM2ConnectOutcome
   public let finalState: ProductM2ConnectionState
   public let lastGoodState: ProductM2ConnectionState
@@ -350,6 +353,11 @@ public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
   /// Exact key/type signature of the event that terminally rejected start.
   public var unexpectedEventSignature: [String]? = nil
   public let vendorStatusEvidence: ProductM2VendorStatusEvidence
+  /// Value-free acknowledgement evidence for the post-connected NC route toggle.
+  public var routeActivationOutcome: ProductM2ControlOutcome = .notAttempted
+  public var routeActivationRequestSent = false
+  public var routeActivationAcknowledged = false
+  public var routeActivationPeerGenerationValidated = false
   public let activeNetworkEvidence: ProductM2ActiveNetworkEvidence
   /// Diagnostic classification of the active-network capture stage
   /// (schema 10). Nil — omitted from JSON — when the run never reached the
@@ -367,6 +375,11 @@ public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
   public var networkProofSource: ProductM2NetworkProofSource? = nil
   public let cleanupPath: ProductM2CleanupPath
   public let stopOutcome: ProductM2ControlOutcome
+  /// Value-free acknowledgement evidence for the pre-stop NC route toggle.
+  public var routeDeactivationOutcome: ProductM2ControlOutcome = .notAttempted
+  public var routeDeactivationRequestSent = false
+  public var routeDeactivationAcknowledged = false
+  public var routeDeactivationPeerGenerationValidated = false
   /// Read-only classification of a `connection_invalid` stop via one bounded
   /// post-stop generation re-observation (schema 10). Nil when the stop was
   /// not `connection_invalid`.

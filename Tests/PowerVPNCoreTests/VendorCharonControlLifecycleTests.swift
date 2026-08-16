@@ -64,6 +64,9 @@ import Testing
           operation: "start_connection",
           exactStartShape: true,
           exactStopShape: false,
+          exactNCRouteToggleShape: false,
+          ncRouteEnabled: nil,
+          tunnelName: nil,
           gateway: "synthetic-gateway"
         )
       ])

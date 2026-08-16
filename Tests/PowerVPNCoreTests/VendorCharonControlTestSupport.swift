@@ -96,6 +96,9 @@ struct ControlEnvelopeObservation: Equatable, Sendable {
   let operation: String?
   let exactStartShape: Bool
   let exactStopShape: Bool
+  let exactNCRouteToggleShape: Bool
+  let ncRouteEnabled: Bool?
+  let tunnelName: String?
   let gateway: String?
 }
 
@@ -142,12 +145,27 @@ final class ScriptedCharonControlDriver: @unchecked Sendable,
       && (try? string(request, "type")) == "rpc"
       && common.map { hasExactKeys($0, ["gateway"]) } == true
       && gateway != nil
+    let ncRouteToggleShape =
+      operation == "updown_nc"
+      && hasExactKeys(request, ["type", "rpc", "updown", "tunnel-name"])
+      && (try? string(request, "type")) == "rpc"
+      && xpc_dictionary_get_value(request, "updown")
+        .map { xpc_get_type($0) == XPC_TYPE_BOOL } == true
+      && xpc_dictionary_get_value(request, "tunnel-name")
+        .map { xpc_get_type($0) == XPC_TYPE_STRING } == true
+    let ncRouteEnabled =
+      ncRouteToggleShape ? xpc_dictionary_get_bool(request, "updown") : nil
+    let tunnelName =
+      ncRouteToggleShape ? try? string(request, "tunnel-name") : nil
     lock.withLock {
       envelopes.append(
         ControlEnvelopeObservation(
           operation: operation,
           exactStartShape: startShape,
           exactStopShape: stopShape,
+          exactNCRouteToggleShape: ncRouteToggleShape,
+          ncRouteEnabled: ncRouteEnabled,
+          tunnelName: tunnelName,
           gateway: gateway
         ))
       replyHandlers.append(replyHandler)

@@ -59,12 +59,14 @@ import Testing
         let routes = try array(tunnel, "routes")
         #expect(xpc_array_get_count(routes) == 2)
         let integerRoute = try arrayDictionary(routes, 0)
-        #expect(hasExactKeys(integerRoute, ["net", "prfix"]))
+        #expect(hasExactKeys(integerRoute, ["family", "net", "prfix"]))
+        #expect(try string(integerRoute, "family") == "4")
         #expect(try string(integerRoute, "net") == "10.0.0.0")
         #expect(xpc_get_type(try value(integerRoute, "prfix")) == XPC_TYPE_INT64)
         #expect(xpc_dictionary_get_int64(integerRoute, "prfix") == 24)
         let textRoute = try arrayDictionary(routes, 1)
-        #expect(hasExactKeys(textRoute, ["net", "prfix"]))
+        #expect(hasExactKeys(textRoute, ["family", "net", "prfix"]))
+        #expect(try string(textRoute, "family") == "4")
         #expect(try string(textRoute, "net") == "2001:db8::")
         #expect(xpc_get_type(try value(textRoute, "prfix")) == XPC_TYPE_STRING)
         #expect(try string(textRoute, "prfix") == "64")
@@ -83,7 +85,8 @@ import Testing
       ])
     #expect(
       insertions.fields(in: .route) == [
-        .routeNetwork, .routePrefix, .routeNetwork, .routePrefix,
+        .family, .routeNetwork, .routePrefix,
+        .family, .routeNetwork, .routePrefix,
       ])
   }
 
