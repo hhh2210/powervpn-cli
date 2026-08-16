@@ -112,6 +112,51 @@ import Testing
     }
   }
 
+  @Test func resourceHTTPStatusCompatibilityPreservesClosedBoundaries() async throws {
+    let cases =
+      (200...204).map { ($0, true) }
+      + [(199, false), (205, false)]
+
+    for (resourceStatus, shouldAccept) in cases {
+      var steps: [SyntheticTransportStep] = [
+        .response(status: 200, body: acceptedLoginXML, setCookie: syntheticSessionCookie),
+        .response(status: resourceStatus, body: acceptedResourceXML),
+      ]
+      if shouldAccept {
+        steps.append(contentsOf: [
+          .response(status: 200, body: acceptedSessionXML),
+          .response(status: 200, body: ""),
+        ])
+      }
+      let transport = SyntheticPortalTransport(steps)
+      let sleeper = SyntheticPortalSleeper()
+      let report = try await syntheticLoginWorkflow(
+        try syntheticRequestFactory(), transport, sleeper
+      ).run(
+        credentials: syntheticCredentials(),
+        platformSerial: syntheticSerial()
+      )
+
+      if shouldAccept {
+        #expect(report.status == .accepted)
+        #expect(report.transactionAccepted)
+        #expect(report.operations == fullyAcceptedOperations)
+        #expect(await sleeper.sleeps() == [60])
+      } else {
+        #expect(report.status == .resourceListRejected)
+        #expect(report.operations.loginAccepted)
+        #expect(report.operations.resourceListRequested)
+        #expect(!report.operations.resourceListAccepted)
+        #expect(!report.operations.sessionCheckRequested)
+        #expect(report.operations.logoutRequested)
+        #expect(await sleeper.sleeps().isEmpty)
+      }
+      #expect(await transport.remainingStepCount() == 0)
+      #expect(await transport.allOwnedRequestMaterialErased())
+      #expect(await transport.allOwnedResponseMaterialErased())
+    }
+  }
+
   @Test func nonacceptingPasswordDecisionsNeverStoreSessionOrRequestResources() async throws {
     for responseStatus in 200...204 {
       for (xml, status) in [

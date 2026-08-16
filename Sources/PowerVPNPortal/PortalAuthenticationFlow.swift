@@ -149,7 +149,7 @@ struct PortalAuthenticationFlow: Sendable {
       response.erase()
       tracker.observeErasedResponse(response)
     }
-    guard response.statusCode == 200 else { return nil }
+    guard (200...204).contains(response.statusCode) else { return nil }
     let document = try parse(response)
     do {
       guard try LeadSecPortalProfile.resourceAccepted(document) else {

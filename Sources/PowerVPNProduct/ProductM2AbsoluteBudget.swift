@@ -48,6 +48,11 @@ package struct ProductM2StageDeadline: Sendable {
 package struct ProductM2AuthorizationBudget: Sendable {
   package let work: ProductM2StageDeadline
   package let cleanup: ProductM2StageDeadline
+  /// A sealed native acquisition performs two independently bounded 15-second
+  /// HTTP exchanges (login, then catalog). A retry must be able to fund both.
+  package var canStartFullAcquisition: Bool {
+    work.remainingMilliseconds(cappedAt: 30_000) == 30_000
+  }
 }
 
 package struct ProductM2AbsoluteBudget: Sendable {

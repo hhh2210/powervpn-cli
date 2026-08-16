@@ -112,6 +112,40 @@ final class ProductM2TestTrace: @unchecked Sendable {
 }
 
 final class ProductM2TestMutationLease: ProductMutationLeaseHolding, @unchecked Sendable {}
+final class ProductM2AuthorizationAttemptQueue: @unchecked Sendable {
+  private let lock = NSLock()
+  private var attempts: [ProductM2AuthorizationAttempt]
+
+  init(_ attempts: [ProductM2AuthorizationAttempt]) {
+    self.attempts = attempts
+  }
+
+  func next() -> ProductM2AuthorizationAttempt {
+    lock.withLock {
+      precondition(!attempts.isEmpty, "authorization attempt queue exhausted")
+      return attempts.removeFirst()
+    }
+  }
+}
+
+func productM2AuthorizationAttempt(
+  _ lease: ProductM2AuthorizedResourceLease,
+  trace: ProductM2TestTrace
+) -> ProductM2AuthorizationAttempt {
+  ProductM2AuthorizationAttempt(
+    source: .nativePortal,
+    operation: {
+      trace.record("acquire")
+      return .acquired(
+        source: .nativePortal,
+        lease: lease,
+        serverContactRequested: true
+      )
+    },
+    cancel: { trace.record("cancel_acquire") }
+  )
+}
+
 final class ProductM2CleanupAttemptQueue: @unchecked Sendable {
   private let lock = NSLock()
   private var attempts: [ProductM2CleanupCaptureAttempt]
@@ -181,37 +215,57 @@ func productM2TestDependencies(
   let cleanupAttemptQueue = ProductM2CleanupAttemptQueue(
     cleanupAttempts ?? [defaultCleanupAttempt]
   )
-  let lease = ProductM2AuthorizedResourceLease(
-    source: leaseAuthorizationSource,
-    catalog: {
-      try ProductM2PortalAdapter.catalog(snapshot: snapshot)
-    },
-    prepare: { handle, requiredTargetIPv4 in
-      if let authorizationPrepare {
-        return try authorizationPrepare(handle, requiredTargetIPv4)
+  let beginAuthorization: @Sendable (ProductM2AuthorizationBudget) -> ProductM2AuthorizationAttempt
+  if let beginAuthorizationOverride {
+    beginAuthorization = beginAuthorizationOverride
+  } else {
+    let lease = ProductM2AuthorizedResourceLease(
+      source: leaseAuthorizationSource,
+      catalog: {
+        try ProductM2PortalAdapter.catalog(snapshot: snapshot)
+      },
+      prepare: { handle, requiredTargetIPv4 in
+        if let authorizationPrepare {
+          return try authorizationPrepare(handle, requiredTargetIPv4)
+        }
+        return try ProductM2PortalAdapter.prepare(
+          snapshot: snapshot,
+          handle: handle,
+          requiredTargetIPv4: requiredTargetIPv4
+        )
+      },
+      eraseOwnedMaterial: {
+        trace.record("erase_authorization")
+        snapshot.erase()
+        return snapshot.isErased
+      },
+      close: { deadline in
+        trace.record("logout")
+        onAuthorizationClose(deadline)
+        return ProductM2AuthorizationCloseReceipt(
+          outcome: logout,
+          ownedMaterialErased: snapshot.isErased,
+          sourceCloseRequested: true,
+          serverContactRequested: false
+        )
       }
-      return try ProductM2PortalAdapter.prepare(
-        snapshot: snapshot,
-        handle: handle,
-        requiredTargetIPv4: requiredTargetIPv4
-      )
-    },
-    eraseOwnedMaterial: {
-      trace.record("erase_authorization")
-      snapshot.erase()
-      return snapshot.isErased
-    },
-    close: { deadline in
-      trace.record("logout")
-      onAuthorizationClose(deadline)
-      return ProductM2AuthorizationCloseReceipt(
-        outcome: logout,
-        ownedMaterialErased: snapshot.isErased,
-        sourceCloseRequested: true,
-        serverContactRequested: false
+    )
+    beginAuthorization = { _ in
+      ProductM2AuthorizationAttempt(
+        source: acquisitionAuthorizationSource,
+        operation: {
+          trace.record("acquire")
+          if cancelDuringAcquire { withUnsafeCurrentTask { $0?.cancel() } }
+          return .acquired(
+            source: acquisitionAuthorizationSource,
+            lease: lease,
+            serverContactRequested: true
+          )
+        },
+        cancel: { trace.record("cancel_acquire") }
       )
     }
-  )
+  }
   return ProductM2ConnectOnceDependencies(
     acquireMutationLease: {
       trace.record("mutation_lease")
@@ -250,21 +304,7 @@ func productM2TestDependencies(
       return activeNetwork
     },
     authorizationSource: dependencyAuthorizationSource,
-    beginAuthorization: beginAuthorizationOverride ?? { _ in
-      ProductM2AuthorizationAttempt(
-        source: acquisitionAuthorizationSource,
-        operation: {
-          trace.record("acquire")
-          if cancelDuringAcquire { withUnsafeCurrentTask { $0?.cancel() } }
-          return .acquired(
-            source: acquisitionAuthorizationSource,
-            lease: lease,
-            serverContactRequested: true
-          )
-        },
-        cancel: { trace.record("cancel_acquire") }
-      )
-    },
+    beginAuthorization: beginAuthorization,
     control: productM2TestControl(
       trace: trace,
       plan: plan,

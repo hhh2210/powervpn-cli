@@ -443,7 +443,7 @@ public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
   public let cleanupVerified: Bool
   public let serverContactRequested: Bool
   public let helperMutationRequested: Bool
-  public let automaticRetryCount = 0
+  public var automaticRetryCount = 0
   public let containsSecrets = false
   public let snapshotSerialized = false
   /// Approval mode the CLI used before invoking the runtime:

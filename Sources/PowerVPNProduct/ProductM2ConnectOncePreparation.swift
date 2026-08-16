@@ -17,6 +17,16 @@ extension ProductPersistentTunnelCoordinator {
       )
     } catch {
       applySelectionFailure(error, to: &execution)
+      if let retry = await retryCatalogAcquisitionIfEligible(
+        &execution,
+        baseline: baseline,
+        coldGeneration: coldGeneration,
+        failedLease: authorizationLease,
+        mutationLease: mutationLease,
+        budget: budget
+      ) {
+        return retry
+      }
       return await finishOpenFailure(
         &execution,
         baseline: baseline,
@@ -92,6 +102,136 @@ extension ProductPersistentTunnelCoordinator {
       selection: selection,
       mutationLease: mutationLease,
       budget: budget
+    )
+  }
+
+  private func retryCatalogAcquisitionIfEligible(
+    _ execution: inout ProductM2Execution,
+    baseline: ProductM2NetworkBaseline,
+    coldGeneration: VendorHelperGenerationSnapshot,
+    failedLease: ProductM2AuthorizedResourceLease,
+    mutationLease: any ProductMutationLeaseHolding,
+    budget: ProductM2AbsoluteBudget
+  ) async -> ProductPersistentTunnelSessionOpenResult? {
+    guard execution.catalogRetryEligible,
+      !Task.isCancelled,
+      budget.authorization.canStartFullAcquisition
+    else { return nil }
+
+    let firstClose = await Task.detached {
+      await failedLease.closeAndErase(deadline: budget.authorization.cleanup)
+    }.value
+    execution.authorizationClose = firstClose.outcome
+    execution.authorizationOwnedMaterialErased = firstClose.ownedMaterialErased
+    execution.serverContactRequested =
+      execution.serverContactRequested || firstClose.serverContactRequested
+    guard firstClose.outcome == .accepted, firstClose.ownedMaterialErased else {
+      return await finishOpenFailure(
+        &execution,
+        baseline: baseline,
+        coldGeneration: coldGeneration,
+        mutationLease: mutationLease,
+        budget: budget
+      )
+    }
+    guard !Task.isCancelled, budget.authorization.canStartFullAcquisition else {
+      _ = applyWorkAbortIfNeeded(&execution, budget: budget)
+      return await finishOpenFailure(
+        &execution,
+        baseline: baseline,
+        coldGeneration: coldGeneration,
+        mutationLease: mutationLease,
+        budget: budget
+      )
+    }
+
+    execution.prepareForAuthorizationRetry()
+    let acquisition = await acquireAuthorization(budget: budget.authorization)
+    switch acquisition {
+    case .acquired(let source, let lease, let contacted):
+      execution.serverContactRequested = execution.serverContactRequested || contacted
+      execution.authorizationOwnedMaterialErased = false
+      guard source == dependencies.authorizationSource, lease.source == source else {
+        execution.authorizationAcquisition = .rejected
+        execution.authorizationFailure = .sourceMismatch
+        execution.fail(
+          .authorizationAcquisitionRejected,
+          event: .authorizationAcquisitionRejected,
+          state: .blocked
+        )
+        return await finishOpenFailure(
+          &execution,
+          baseline: baseline,
+          coldGeneration: coldGeneration,
+          authorizationLease: lease,
+          mutationLease: mutationLease,
+          budget: budget
+        )
+      }
+      execution.authorizationAcquisition = .acquired
+      if applyWorkAbortIfNeeded(&execution, budget: budget) {
+        return await finishOpenFailure(
+          &execution,
+          baseline: baseline,
+          coldGeneration: coldGeneration,
+          authorizationLease: lease,
+          mutationLease: mutationLease,
+          budget: budget
+        )
+      }
+      return await selectPrepareAndOpen(
+        &execution,
+        baseline: baseline,
+        coldGeneration: coldGeneration,
+        authorizationLease: lease,
+        mutationLease: mutationLease,
+        budget: budget
+      )
+
+    case .rejected(let source, let failure, let cleanup):
+      applyRetryAcquisitionRejection(
+        &execution,
+        source: source,
+        failure: failure,
+        cleanup: cleanup,
+        budget: budget.authorization
+      )
+      return await finishOpenFailure(
+        &execution,
+        baseline: baseline,
+        coldGeneration: coldGeneration,
+        mutationLease: mutationLease,
+        budget: budget
+      )
+    }
+  }
+
+  private func applyRetryAcquisitionRejection(
+    _ execution: inout ProductM2Execution,
+    source: ProductM2AuthorizationSource,
+    failure: ProductM2AuthorizationFailure,
+    cleanup: ProductM2AuthorizationCloseReceipt,
+    budget: ProductM2AuthorizationBudget
+  ) {
+    execution.serverContactRequested =
+      execution.serverContactRequested || cleanup.serverContactRequested
+    execution.authorizationOwnedMaterialErased = cleanup.ownedMaterialErased
+    execution.authorizationClose =
+      cleanup.outcome == .notRequired ? .accepted : cleanup.outcome
+    let normalizedFailure =
+      source == dependencies.authorizationSource ? failure : .sourceMismatch
+    execution.authorizationAcquisition =
+      normalizedFailure == .cancelled ? .cancelled : .rejected
+    execution.authorizationFailure = normalizedFailure
+    let deadlineExceeded = normalizedFailure == .timedOut || !budget.work.hasRemaining
+    execution.fail(
+      deadlineExceeded
+        ? .deadlineExceeded
+        : (normalizedFailure == .cancelled ? .cancelled : .authorizationAcquisitionRejected),
+      event: deadlineExceeded
+        ? .deadlineExceeded
+        : (normalizedFailure == .cancelled ? .cancelled : .authorizationAcquisitionRejected),
+      state: deadlineExceeded || normalizedFailure == .cancelled ? .failed : .blocked
     )
   }
 

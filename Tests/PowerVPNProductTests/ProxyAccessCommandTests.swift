@@ -147,12 +147,34 @@ import Testing
     let sentinel = "server-catalog-value-must-not-escape"
     let xml = m2ResourceXML(["server-display-must-not-escape"])
       .replacingOccurrences(of: "port=\"500\"", with: "port=\"\(sentinel)\"")
-    let fixture = try authenticatedSnapshot(resourceXML: xml)
-    defer { fixture.erase() }
+    let first = try authenticatedSnapshot(resourceXML: xml)
+    let second = try authenticatedSnapshot(resourceXML: xml)
+    defer {
+      first.erase()
+      second.erase()
+    }
+    let trace = ProductM2TestTrace()
+    let attempts = ProductM2AuthorizationAttemptQueue([
+      productM2AuthorizationAttempt(
+        testAuthorizationLease(
+          snapshot: first.snapshot,
+          state: AuthorizationLeaseTestState()
+        ),
+        trace: trace
+      ),
+      productM2AuthorizationAttempt(
+        testAuthorizationLease(
+          snapshot: second.snapshot,
+          state: AuthorizationLeaseTestState()
+        ),
+        trace: trace
+      ),
+    ])
     let runtime = ProductPersistentTunnelRuntime(
       dependencies: productM2TestDependencies(
-        snapshot: fixture.snapshot,
-        trace: ProductM2TestTrace()
+        snapshot: second.snapshot,
+        trace: trace,
+        beginAuthorizationOverride: { _ in attempts.next() }
       )
     )
     let child = ProxyTestChildRunner()
@@ -180,12 +202,34 @@ import Testing
   }
 
   @Test func emptyCatalogHasSelectionTokenWithoutMappingDetails() async throws {
-    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML([]))
-    defer { fixture.erase() }
+    let first = try authenticatedSnapshot(resourceXML: m2ResourceXML([]))
+    let second = try authenticatedSnapshot(resourceXML: m2ResourceXML([]))
+    defer {
+      first.erase()
+      second.erase()
+    }
+    let trace = ProductM2TestTrace()
+    let attempts = ProductM2AuthorizationAttemptQueue([
+      productM2AuthorizationAttempt(
+        testAuthorizationLease(
+          snapshot: first.snapshot,
+          state: AuthorizationLeaseTestState()
+        ),
+        trace: trace
+      ),
+      productM2AuthorizationAttempt(
+        testAuthorizationLease(
+          snapshot: second.snapshot,
+          state: AuthorizationLeaseTestState()
+        ),
+        trace: trace
+      ),
+    ])
     let runtime = ProductPersistentTunnelRuntime(
       dependencies: productM2TestDependencies(
-        snapshot: fixture.snapshot,
-        trace: ProductM2TestTrace()
+        snapshot: second.snapshot,
+        trace: trace,
+        beginAuthorizationOverride: { _ in attempts.next() }
       )
     )
     let child = ProxyTestChildRunner()

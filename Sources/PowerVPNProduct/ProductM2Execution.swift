@@ -42,6 +42,7 @@ package struct ProductM2Execution {
   var cleanupVerified = false
   var serverContactRequested = false
   var helperMutationRequested = false
+  var automaticRetryCount = 0
 
   /// Which channel proved the tunnel's network effect. Nil until the run
   /// reaches the network-proof stage (`activeCaptureState` set); `.sshBanner`
@@ -106,6 +107,33 @@ package struct ProductM2Execution {
       (outcome, event) = (.resourceCatalogRejected, .resourceCatalogRejected)
     }
     fail(outcome, event: event, state: .blocked)
+  }
+
+  var catalogRetryEligible: Bool {
+    guard automaticRetryCount == 0,
+      authorizationAcquisition == .acquired,
+      authorizationFailure == nil
+    else { return false }
+    switch selectionFailureClass {
+    case .catalogMapping, .catalogEmpty, .catalogInvariantInvalid:
+      return true
+    case .prepareRemap, .selectionReplay, .preparedSelectionMismatch, nil:
+      return false
+    }
+  }
+
+  mutating func prepareForAuthorizationRetry() {
+    automaticRetryCount = 1
+    outcome = .authorizationAcquisitionRejected
+    finalState = .authenticating
+    lastGoodState = .authenticating
+    firstBadEvent = nil
+    authorizationAcquisition = .notRequested
+    authorizationFailure = nil
+    resourceCatalogFailure = nil
+    selectionFailureClass = nil
+    authorizationClose = .notRequired
+    authorizationOwnedMaterialErased = true
   }
 
   mutating func apply(_ cleanup: ProductM2CleanupResult) {
@@ -232,7 +260,8 @@ package struct ProductM2Execution {
       cleanupCaptureAttemptCount: cleanupCaptureAttemptCount,
       cleanupVerified: cleanupVerified,
       serverContactRequested: serverContactRequested,
-      helperMutationRequested: helperMutationRequested
+      helperMutationRequested: helperMutationRequested,
+      automaticRetryCount: automaticRetryCount
     )
   }
 }

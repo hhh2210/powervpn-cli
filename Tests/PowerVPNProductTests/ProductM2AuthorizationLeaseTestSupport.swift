@@ -7,7 +7,8 @@ func testAuthorizationLease(
   snapshot: AuthenticatedPortalSnapshot,
   state: AuthorizationLeaseTestState,
   closeGate: AuthorizationCloseGate? = nil,
-  eraseSucceeds: Bool = true
+  eraseSucceeds: Bool = true,
+  onClose: @escaping @Sendable () -> Void = {}
 ) -> ProductM2AuthorizedResourceLease {
   ProductM2AuthorizedResourceLease(
     source: .nativePortal,
@@ -30,6 +31,7 @@ func testAuthorizationLease(
     },
     close: { _ in
       state.recordClose()
+      onClose()
       if let closeGate { await closeGate.block() }
       return closeReceipt(erased: state.erased)
     }

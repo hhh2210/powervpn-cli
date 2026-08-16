@@ -131,12 +131,7 @@ extension ProductPersistentTunnelCoordinator {
     }
 
     execution.lastGoodState = .authenticating
-    let acquisitionAttempt = dependencies.beginAuthorization(budget.authorization)
-    let acquisition = await withTaskCancellationHandler {
-      await acquisitionAttempt.result()
-    } onCancel: {
-      acquisitionAttempt.cancel()
-    }
+    let acquisition = await acquireAuthorization(budget: budget.authorization)
     let authorizationLease: ProductM2AuthorizedResourceLease?
     switch acquisition {
     case .acquired(let source, let lease, let contacted):
@@ -223,5 +218,16 @@ extension ProductPersistentTunnelCoordinator {
       mutationLease: mutationLease,
       budget: budget
     )
+  }
+
+  func acquireAuthorization(
+    budget: ProductM2AuthorizationBudget
+  ) async -> ProductM2AuthorizedResourceAcquisition {
+    let attempt = dependencies.beginAuthorization(budget)
+    return await withTaskCancellationHandler {
+      await attempt.result()
+    } onCancel: {
+      attempt.cancel()
+    }
   }
 }

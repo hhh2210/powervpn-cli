@@ -127,11 +127,15 @@ import Testing
       requiredTargetIPv4: ProductM2SSHTarget.thu21.requiredTargetIPv4
     )
 
-    let report = try await report(using: lease)
+    let trace = ProductM2TestTrace()
+    let report = try await report(using: lease, trace: trace)
 
     #expect(report.outcome == .resourceCatalogRejected)
     #expect(report.selectionFailureClass == .selectionReplay)
     #expect(report.resourceCatalogFailure == nil)
+    #expect(report.automaticRetryCount == 0)
+    #expect(trace.count("acquire") == 1)
+
   }
 
   @Test(
@@ -192,36 +196,250 @@ import Testing
     #expect(report.resourceCatalogFailure == nil)
   }
 
+  @Test func catalogFailureRetriesWithFreshSessionThenSucceeds() async throws {
+    let first = try authenticatedSnapshot(resourceXML: m2ResourceXML([]))
+    let second = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    let support = try authenticatedSnapshot(resourceXML: m2ResourceXML(["support-only"]))
+    defer {
+      first.erase()
+      second.erase()
+      support.erase()
+    }
+    let trace = ProductM2TestTrace()
+    let firstState = AuthorizationLeaseTestState()
+    let secondState = AuthorizationLeaseTestState()
+    let firstLease = testAuthorizationLease(
+      snapshot: first.snapshot,
+      state: firstState,
+      onClose: { trace.record("logout_1") }
+    )
+    let secondLease = testAuthorizationLease(
+      snapshot: second.snapshot,
+      state: secondState,
+      onClose: { trace.record("logout_2") }
+    )
+    let attempts = ProductM2AuthorizationAttemptQueue([
+      authorizationAttempt(firstLease, trace: trace, label: "login_1"),
+      authorizationAttempt(secondLease, trace: trace, label: "login_2"),
+    ])
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: support.snapshot,
+        trace: trace,
+        beginAuthorizationOverride: { _ in attempts.next() }
+      )
+    ).run(request())
+
+    #expect(report.outcome == .connectedAndCleanedUp)
+    #expect(report.automaticRetryCount == 1)
+    #expect(firstState.closeCount == 1)
+    #expect(secondState.closeCount == 1)
+    #expect(
+      trace.events.filter { $0.hasPrefix("login_") || $0.hasPrefix("logout_") }
+        == ["login_1", "logout_1", "login_2", "logout_2"]
+    )
+    let object = try #require(
+      JSONSerialization.jsonObject(with: JSONEncoder().encode(report)) as? [String: Any])
+    #expect(object["automaticRetryCount"] as? Int == 1)
+  }
+
+  @Test func secondCatalogFailureWinsAndNeverRetriesAgain() async throws {
+    let first = try authenticatedSnapshot(resourceXML: m2ResourceXML([]))
+    let sentinel = "second-attempt-invalid"
+    let second = try authenticatedSnapshot(
+      resourceXML: m2ResourceXML(["Campus NC"])
+        .replacingOccurrences(of: "port=\"500\"", with: "port=\"\(sentinel)\"")
+    )
+    let support = try authenticatedSnapshot(resourceXML: m2ResourceXML(["support-only"]))
+    defer {
+      first.erase()
+      second.erase()
+      support.erase()
+    }
+    let trace = ProductM2TestTrace()
+    let firstState = AuthorizationLeaseTestState()
+    let secondState = AuthorizationLeaseTestState()
+    let attempts = ProductM2AuthorizationAttemptQueue([
+      authorizationAttempt(
+        testAuthorizationLease(
+          snapshot: first.snapshot,
+          state: firstState,
+          onClose: { trace.record("logout_1") }
+        ),
+        trace: trace,
+        label: "login_1"
+      ),
+      authorizationAttempt(
+        testAuthorizationLease(
+          snapshot: second.snapshot,
+          state: secondState,
+          onClose: { trace.record("logout_2") }
+        ),
+        trace: trace,
+        label: "login_2"
+      ),
+    ])
+
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: support.snapshot,
+        trace: trace,
+        beginAuthorizationOverride: { _ in attempts.next() }
+      )
+    ).run(request())
+
+    #expect(report.outcome == .resourceCatalogRejected)
+    #expect(report.automaticRetryCount == 1)
+    #expect(report.selectionFailureClass == .catalogMapping)
+    #expect(report.resourceCatalogFailure?.failureClass == .integerInvalid)
+    #expect(report.resourceCatalogFailure?.fieldPath == "common.ike_port")
+    #expect(firstState.closeCount == 1)
+    #expect(secondState.closeCount == 1)
+    #expect(
+      trace.events.filter { $0.hasPrefix("login_") || $0.hasPrefix("logout_") }
+        == ["login_1", "logout_1", "login_2", "logout_2"]
+    )
+    try assertValueFree(report, sentinels: [sentinel])
+  }
+
+  @Test func retryLoginFailureKeepsFirstLogoutAndReportsSecondFailure() async throws {
+    let first = try authenticatedSnapshot(resourceXML: m2ResourceXML([]))
+    let support = try authenticatedSnapshot(resourceXML: m2ResourceXML(["support-only"]))
+    defer {
+      first.erase()
+      support.erase()
+    }
+    let trace = ProductM2TestTrace()
+    let state = AuthorizationLeaseTestState()
+    let firstLease = testAuthorizationLease(
+      snapshot: first.snapshot,
+      state: state,
+      onClose: { trace.record("logout_1") }
+    )
+    let attempts = ProductM2AuthorizationAttemptQueue([
+      authorizationAttempt(firstLease, trace: trace, label: "login_1"),
+      ProductM2AuthorizationAttempt(
+        source: .nativePortal,
+        operation: {
+          trace.record("login_2")
+          return .rejected(
+            source: .nativePortal,
+            failure: .providerUnavailable,
+            cleanup: ProductM2AuthorizationCloseReceipt(
+              outcome: .notRequired,
+              ownedMaterialErased: true,
+              sourceCloseRequested: false,
+              serverContactRequested: true
+            )
+          )
+        },
+        cancel: {}
+      ),
+    ])
+
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: support.snapshot,
+        trace: trace,
+        beginAuthorizationOverride: { _ in attempts.next() }
+      )
+    ).run(request())
+
+    #expect(report.outcome == .authorizationAcquisitionRejected)
+    #expect(report.authorizationFailure == .providerUnavailable)
+    #expect(report.authorizationAcquisition == .rejected)
+    #expect(report.automaticRetryCount == 1)
+    #expect(report.cleanupVerified)
+    #expect(state.closeCount == 1)
+    #expect(
+      trace.events.filter { $0.hasPrefix("login_") || $0.hasPrefix("logout_") }
+        == ["login_1", "logout_1", "login_2"]
+    )
+  }
+
+  @Test func insufficientAcquisitionBudgetSkipsCatalogRetry() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML([]))
+    let snapshot = fixture.snapshot
+    let support = try authenticatedSnapshot(resourceXML: m2ResourceXML(["support-only"]))
+    defer { fixture.erase() }
+    defer { support.erase() }
+    let clock = ProductM2ManualClock()
+    let budget = ProductM2AbsoluteBudget.start(clock: clock.clock)
+    let trace = ProductM2TestTrace()
+    let state = AuthorizationLeaseTestState()
+    let attempts = ProductM2AuthorizationAttemptQueue([
+      ProductM2AuthorizationAttempt(
+        source: .nativePortal,
+        operation: {
+          trace.record("login_1")
+          clock.set(milliseconds: 36_000)
+          return .acquired(
+            source: .nativePortal,
+            lease: testAuthorizationLease(
+              snapshot: snapshot,
+              state: state,
+              onClose: { trace.record("logout_1") }
+            ),
+            serverContactRequested: true
+          )
+        },
+        cancel: {}
+      )
+    ])
+
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: support.snapshot,
+        trace: trace,
+        beginAuthorizationOverride: { _ in attempts.next() }
+      )
+    ).run(request(), budget: budget)
+
+    #expect(report.outcome == .resourceCatalogRejected)
+    #expect(report.automaticRetryCount == 0)
+    #expect(state.closeCount == 1)
+    #expect(trace.events.filter { $0.hasPrefix("login_") } == ["login_1"])
+  }
+
   @Test func nonCatalogReportOmitsBothOptionalKeys() async throws {
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Other NC"]))
     defer { fixture.erase() }
 
-    let report = await catalogReport(snapshot: fixture.snapshot)
+    let trace = ProductM2TestTrace()
+    let report = await catalogReport(snapshot: fixture.snapshot, trace: trace)
     let encoded = try #require(
       String(data: JSONEncoder().encode(report), encoding: .utf8))
 
     #expect(report.outcome == .resourceNotFound)
     #expect(report.resourceCatalogFailure == nil)
     #expect(report.selectionFailureClass == nil)
+    #expect(report.automaticRetryCount == 0)
+    #expect(trace.count("acquire") == 1)
     #expect(!encoded.contains("resourceCatalogFailure"))
     #expect(!encoded.contains("selectionFailureClass"))
   }
 
   private func catalogReport(
-    snapshot: AuthenticatedPortalSnapshot
+    snapshot: AuthenticatedPortalSnapshot,
+    trace: ProductM2TestTrace = ProductM2TestTrace()
   ) async -> ProductM2ConnectReport {
-    let trace = ProductM2TestTrace()
+    let clock = ProductM2ManualClock()
+    let budget = ProductM2AbsoluteBudget.start(clock: clock.clock)
+    clock.set(milliseconds: 36_000)
     return await ProductM2ConnectOnceCoordinator(
       dependencies: productM2TestDependencies(snapshot: snapshot, trace: trace)
-    ).run(request())
+    ).run(request(), budget: budget)
   }
 
   private func report(
-    using lease: ProductM2AuthorizedResourceLease
+    using lease: ProductM2AuthorizedResourceLease,
+    trace: ProductM2TestTrace = ProductM2TestTrace()
   ) async throws -> ProductM2ConnectReport {
     let support = try authenticatedSnapshot(resourceXML: m2ResourceXML(["support-only"]))
     defer { support.erase() }
-    let trace = ProductM2TestTrace()
+    let clock = ProductM2ManualClock()
+    let budget = ProductM2AbsoluteBudget.start(clock: clock.clock)
+    clock.set(milliseconds: 36_000)
     return await ProductM2ConnectOnceCoordinator(
       dependencies: productM2TestDependencies(
         snapshot: support.snapshot,
@@ -230,7 +448,8 @@ import Testing
           ProductM2AuthorizationAttempt(
             source: .nativePortal,
             operation: {
-              .acquired(
+              trace.record("acquire")
+              return .acquired(
                 source: .nativePortal,
                 lease: lease,
                 serverContactRequested: true
@@ -240,7 +459,7 @@ import Testing
           )
         }
       )
-    ).run(request())
+    ).run(request(), budget: budget)
   }
 
   private func classifiedLease(
@@ -264,6 +483,25 @@ import Testing
           serverContactRequested: false
         )
       }
+    )
+  }
+
+  private func authorizationAttempt(
+    _ lease: ProductM2AuthorizedResourceLease,
+    trace: ProductM2TestTrace,
+    label: String
+  ) -> ProductM2AuthorizationAttempt {
+    ProductM2AuthorizationAttempt(
+      source: .nativePortal,
+      operation: {
+        trace.record(label)
+        return .acquired(
+          source: .nativePortal,
+          lease: lease,
+          serverContactRequested: true
+        )
+      },
+      cancel: {}
     )
   }
 
