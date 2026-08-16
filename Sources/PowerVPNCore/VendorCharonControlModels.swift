@@ -37,9 +37,10 @@ package enum VendorCharonControlCompletionSource: String, Equatable, Sendable {
 
 /// Value-free evidence for one bounded helper-control request.
 ///
-/// `requestSent` means the request was handed to libxpc. Start/stop use an
-/// exact empty acknowledgement; `resourceToggleNC` uses an exact true boolean
-/// acknowledgement on either XPC channel. Neither proves routing or cleanup.
+/// `requestSent` means the request was handed to libxpc. Start uses an exact
+/// empty acknowledgement; stop accepts either that acknowledgement or a
+/// post-submission disconnected status. `resourceToggleNC` uses an exact true
+/// boolean acknowledgement on either XPC channel. None proves routing or cleanup.
 package struct VendorCharonControlReceipt: Equatable, Sendable {
   package let operation: VendorCharonControlOperation
   package let outcome: VendorCharonControlOutcome
@@ -97,9 +98,13 @@ package struct VendorCharonControlReceipt: Equatable, Sendable {
   }
 
   package var transportAcknowledged: Bool {
-    outcome == .transportAcknowledged
+    let ordinaryStopCompletion =
+      operation == .stopConnection
+      && (completionSource == .ordinaryConnection
+        || completionSource == .replyUnavailableThenOrdinary)
+    return outcome == .transportAcknowledged
       && requestSent && peerGenerationValidated
-      && (operation == .resourceToggleNC || emptyReplyObserved)
+      && (operation == .resourceToggleNC || emptyReplyObserved || ordinaryStopCompletion)
   }
 
   package var helperMayHaveMutated: Bool { requestSent }
@@ -185,6 +190,10 @@ package final class VendorCharonProvisionalStopCapability: @unchecked Sendable {
   ) async -> VendorCharonControlReceipt {
     await state.stopProvisional(timeoutMilliseconds: timeoutMilliseconds)
   }
+
+  package func awaitPostStopDrain() async {
+    await state.awaitPostStopDrain()
+  }
 }
 
 package final class VendorCharonControlLease: @unchecked Sendable {
@@ -206,6 +215,10 @@ package final class VendorCharonControlLease: @unchecked Sendable {
     timeoutMilliseconds: Int
   ) async -> VendorCharonControlReceipt {
     await state.stop(timeoutMilliseconds: timeoutMilliseconds)
+  }
+
+  package func awaitPostStopDrain() async {
+    await state.awaitPostStopDrain()
   }
 
   package func waitForConnectedStatus(

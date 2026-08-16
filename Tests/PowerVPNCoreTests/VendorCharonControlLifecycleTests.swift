@@ -162,6 +162,51 @@ import Testing
     withExtendedLifetime(lease) {}
   }
 
+  @Test func disconnectedStatusAfterStopSubmissionAcknowledgesAndTransfersDrain()
+    async throws
+  {
+    let factory = CharonControlDriverFactory()
+    let scheduler = ManualConnectionDrainScheduler()
+    let lease = try await activeLease(factory, drainScheduler: scheduler.schedule)
+    let task = Task { await lease.stop(timeoutMilliseconds: 500) }
+    #expect(await waitForControl { factory.driver.submitCount == 2 })
+
+    factory.driver.emitConnection(.status(VendorCharonStatusSignal(type: 1, phase: 2, state: 7)))
+    let receipt = await task.value
+
+    #expect(receipt.outcome == .transportAcknowledged)
+    #expect(receipt.transportAcknowledged)
+    #expect(receipt.requestSent)
+    #expect(receipt.completionSource == .ordinaryConnection)
+    #expect(receipt.statusEventCount == 1)
+    #expect(!receipt.connectionRetained)
+    #expect(!receipt.connectionCancelRequested)
+    #expect(scheduler.isArmed)
+    #expect(factory.driver.cancelCount == 0)
+    withExtendedLifetime(lease) {}
+  }
+
+  @Test func nonDisconnectedStatusAfterStopSubmissionStillTimesOut() async throws {
+    let factory = CharonControlDriverFactory()
+    let scheduler = ManualConnectionDrainScheduler()
+    let lease = try await activeLease(factory, drainScheduler: scheduler.schedule)
+    let task = Task { await lease.stop(timeoutMilliseconds: 20) }
+    #expect(await waitForControl { factory.driver.submitCount == 2 })
+
+    factory.driver.emitConnection(.status(VendorCharonStatusSignal(type: 1, phase: 2, state: 5)))
+    let receipt = await task.value
+
+    #expect(receipt.outcome == .timeout)
+    #expect(receipt.requestSent)
+    #expect(receipt.completionSource == .timeout)
+    #expect(receipt.statusEventCount == 1)
+    #expect(!receipt.connectionRetained)
+    #expect(!receipt.connectionCancelRequested)
+    #expect(scheduler.isArmed)
+    #expect(factory.driver.cancelCount == 0)
+    withExtendedLifetime(lease) {}
+  }
+
   @Test func connectionTailAcknowledgesStartWithoutReplyAndKeepsLeaseUsable()
     async throws
   {
@@ -357,6 +402,27 @@ import Testing
     #expect(await waitForControl { factory.driver.cancelCount == 1 })
     #expect(scheduler.cancellationCount == 1)
   }
+  @Test func postStopDrainWaitIgnoresTaskCancellationAndCompletesOnExpiry() async throws {
+    let factory = CharonControlDriverFactory()
+    let scheduler = ManualConnectionDrainScheduler()
+    let lease = try await activeLease(factory, drainScheduler: scheduler.schedule)
+    _ = await acknowledgedStop(lease, factory: factory)
+    let completion = DrainCompletionProbe()
+    let waiter = Task {
+      await lease.awaitPostStopDrain()
+      completion.mark()
+    }
+
+    waiter.cancel()
+    await Task.yield()
+    #expect(!completion.isComplete)
+    #expect(factory.driver.cancelCount == 0)
+    scheduler.expire()
+    await waiter.value
+    #expect(completion.isComplete)
+    #expect(factory.driver.cancelCount == 1)
+  }
+
   @Test func callerCancellationAfterAcknowledgedStopDoesNotCollapseDrain() async throws {
     let factory = CharonControlDriverFactory()
     let scheduler = ManualConnectionDrainScheduler()

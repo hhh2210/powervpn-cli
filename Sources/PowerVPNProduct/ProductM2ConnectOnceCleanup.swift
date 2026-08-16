@@ -13,6 +13,7 @@ package struct ProductM2CleanupResult: Sendable {
   let captureRetryReason: ProductM2CleanupCaptureRetryReason?
   let captureAttemptCount: Int
   let verified: Bool
+  let awaitPostStopDrain: @Sendable () async -> Void
 }
 
 struct ProductM2ControlCleanupAuthority: Sendable {
@@ -83,7 +84,8 @@ package struct ProductM2CleanupRunner: Sendable {
         && verificationCompletedWithinDeadline
         && authorizationClosed
         && controlClassified
-        && verification.evidence.allDimensionsRestored
+        && verification.evidence.allDimensionsRestored,
+      awaitPostStopDrain: control.awaitPostStopDrain
     )
   }
 
@@ -116,7 +118,8 @@ package struct ProductM2CleanupRunner: Sendable {
             deadline: deadline,
             reportDeadline: reportDeadline
           ),
-          emergencyStop: .unsent(.notAttempted)
+          emergencyStop: .unsent(.notAttempted),
+          awaitPostStopDrain: { await controlLease.awaitPostStopDrain() }
         )
       }
       return await classifyPostStartGeneration(
@@ -151,7 +154,8 @@ package struct ProductM2CleanupRunner: Sendable {
             deadline: deadline,
             reportDeadline: reportDeadline
           ),
-          emergencyStop: .unsent(.notAttempted)
+          emergencyStop: .unsent(.notAttempted),
+          awaitPostStopDrain: { await provisionalStopCapability.awaitPostStopDrain() }
         )
       }
       return await classifyPostStartGeneration(
@@ -234,8 +238,8 @@ package struct ProductM2CleanupRunner: Sendable {
     else {
       return .deadlineExceeded(stop: stop)
     }
-    let emergency = await Task.detached {
-      await emergencyStopCapability.stop(
+    let emergencyAttempt = await Task.detached {
+      await emergencyStopCapability.stopAttempt(
         timeoutMilliseconds: timeout,
         expectedRunningPredicate: {
           ProductM2GenerationFence.singleRunningGeneration(
@@ -255,7 +259,8 @@ package struct ProductM2CleanupRunner: Sendable {
       path: .authenticatedEmergencyStop,
       stop: stop,
       stopInvalidityClass: stopInvalidityClass,
-      emergencyStop: emergency
+      emergencyStop: emergencyAttempt.receipt,
+      awaitPostStopDrain: emergencyAttempt.awaitPostStopDrain
     )
   }
 
@@ -315,11 +320,27 @@ private struct ControlCleanup {
   let stop: ProductM2ControlReceipt
   var stopInvalidityClass: ProductM2StopInvalidityClass? = nil
   let emergencyStop: ProductM2ControlReceipt
+  let awaitPostStopDrain: @Sendable () async -> Void
+
+  init(
+    path: ProductM2CleanupPath,
+    stop: ProductM2ControlReceipt,
+    stopInvalidityClass: ProductM2StopInvalidityClass? = nil,
+    emergencyStop: ProductM2ControlReceipt,
+    awaitPostStopDrain: @escaping @Sendable () async -> Void = {}
+  ) {
+    self.path = path
+    self.stop = stop
+    self.stopInvalidityClass = stopInvalidityClass
+    self.emergencyStop = emergencyStop
+    self.awaitPostStopDrain = awaitPostStopDrain
+  }
 
   static let notRequired = Self(
     path: .notRequired,
     stop: .unsent(.notAttempted),
-    emergencyStop: .unsent(.notAttempted)
+    emergencyStop: .unsent(.notAttempted),
+    awaitPostStopDrain: {}
   )
 
   static let deadlineExceeded = Self.deadlineExceeded(
@@ -332,7 +353,8 @@ private struct ControlCleanup {
     Self(
       path: .cleanupUnproven,
       stop: stop,
-      emergencyStop: .unsent(.timeout)
+      emergencyStop: .unsent(.timeout),
+      awaitPostStopDrain: {}
     )
   }
 
@@ -341,7 +363,8 @@ private struct ControlCleanup {
       path: .cleanupUnproven,
       stop: stop,
       stopInvalidityClass: stopInvalidityClass,
-      emergencyStop: emergencyStop
+      emergencyStop: emergencyStop,
+      awaitPostStopDrain: awaitPostStopDrain
     )
   }
 }

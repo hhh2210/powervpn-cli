@@ -472,6 +472,37 @@ import Testing
     #expect(!json.contains("\"startReplySignatures\""))
     #expect(!json.contains("\"unexpectedEventSignature\""))
   }
+  @Test func connectOnceDoesNotReturnUntilPostStopDrainExpires() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+    let gate = AuthorizationCloseGate()
+    let coordinator = ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        awaitPostStopDrain: { await gate.block() }
+      ))
+    let run = Task {
+      let report = await coordinator.run(
+        ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+      )
+      trace.record("connect_once_returned")
+      return report
+    }
+
+    await gate.waitUntilEntered()
+    run.cancel()
+    #expect(trace.count("stop") == 1)
+    #expect(trace.count("verify") == 1)
+    #expect(trace.count("connect_once_returned") == 0)
+
+    await gate.release()
+    let report = await run.value
+    #expect(report.cleanupVerified)
+    #expect(trace.count("connect_once_returned") == 1)
+  }
+
 }
 
 private func vendorDiagnosticReceipt(

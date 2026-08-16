@@ -31,11 +31,13 @@ package struct ProductM2ConnectOnceCoordinator: Sendable {
         assets,
         deadlines: ProductM2CleanupDeadlines(budget)
       )
-      return coordinator.connectOnceReport(
+      let report = coordinator.connectOnceReport(
         &assets.execution,
         cleanup: cleanup,
         reportDeadline: budget.report
       )
+      await cleanup.awaitPostStopDrain()
+      return report
     }
   }
 }

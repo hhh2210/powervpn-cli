@@ -231,25 +231,31 @@ import Testing
     #expect(monitor.stopCount == 1)
   }
 
-  @Test func signalDuringShutdownOverridesSuccessfulChildAfterVerifiedCleanup() async throws {
+  @Test func proxyProcessWaitsForPostStopDrainBeforeReturningCancellation() async throws {
     let monitor = M2ManualSignalMonitor()
-    let lease = ProxyTestLease(blocksShutdown: true)
+    let completion = M2CommandTrace()
+    let lease = ProxyTestLease(blocksPostStopDrain: true)
     let command = Task {
-      try await runProxySSHCommand(
+      let result = try await runProxySSHCommand(
         proxySSHArguments,
         authorizationAvailabilityFailure: { nil },
         signalMonitorFactory: { monitor },
         childRunner: ProxyTestChildRunner(outcome: .exited(0)),
         runtime: proxyOpen(lease: lease)
       )
+      completion.record("returned")
+      return result
     }
     #expect(lease.waitUntilShutdownStarted())
     monitor.emit()
+    await Task.yield()
+    #expect(completion.events.isEmpty)
     await lease.releaseShutdown()
     let result = try await command.value
 
     #expect(result.exitCode == 130)
     #expect(result.standardError == "cancelled\n")
+    #expect(completion.events == ["returned"])
     #expect(monitor.stopCount == 1)
   }
 

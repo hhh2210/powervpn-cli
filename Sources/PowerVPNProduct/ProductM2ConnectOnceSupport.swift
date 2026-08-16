@@ -128,7 +128,9 @@ extension ProductPersistentTunnelCoordinator {
         state: execution.helperMutationRequested ? .disconnected : .blocked
       )
     }
-    return execution.report()
+    let report = execution.report()
+    await cleanup.awaitPostStopDrain()
+    return report
   }
 
   func finishStartFailure(

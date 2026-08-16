@@ -66,6 +66,35 @@ import Testing
     #expect(await waitForControl { factory.driver.cancelCount == 1 })
   }
 
+  @Test func disconnectedStatusAcknowledgesSubmittedEmergencyStopWithoutReply() async {
+    let factory = EmergencyConnectionDriverFactory()
+    let scheduler = ManualConnectionDrainScheduler()
+    let task = emergencyStopTask(
+      factory,
+      peerGenerationValidator: { true },
+      drainScheduler: scheduler.schedule
+    )
+    #expect(await waitForControl { factory.driver.probeCount == 1 })
+    factory.driver.emitProbeReply(.emptyAcknowledgement)
+    factory.driver.emitProbeBusiness()
+    #expect(await waitForControl { factory.driver.stopCount == 1 })
+
+    factory.driver.emitStopEvent(
+      .status(VendorCharonStatusSignal(type: 1, phase: 2, state: 7))
+    )
+    let receipt = await task.value
+
+    #expect(receipt.outcome == .transportAcknowledged)
+    #expect(receipt.transportAcknowledged)
+    #expect(receipt.completionSource == .ordinaryConnection)
+    #expect(receipt.statusEventCount == 1)
+    #expect(!receipt.emptyReplyObserved)
+    #expect(scheduler.isArmed)
+    #expect(factory.driver.cancelCount == 0)
+    scheduler.expire()
+    #expect(await waitForControl { factory.driver.cancelCount == 1 })
+  }
+
   @Test func connectionTailAcknowledgesStopWithoutReplyAndArmsDrain() async {
     let factory = EmergencyConnectionDriverFactory()
     let scheduler = ManualConnectionDrainScheduler()
@@ -371,6 +400,40 @@ import Testing
     #expect(factory.driver.cancelCount == 0)
     scheduler.expire()
     #expect(await waitForControl { factory.driver.cancelCount == 1 })
+  }
+
+  @Test func emergencyPostStopDrainWaitCompletesOnlyAfterExpiry() async {
+    let factory = EmergencyConnectionDriverFactory()
+    let scheduler = ManualConnectionDrainScheduler()
+    let resultTask = Task {
+      await emergencyTransport(factory).emergencyStopWithDrain(
+        timeoutMilliseconds: 500,
+        stopContext: syntheticEmergencyStopContext,
+        expectedRunningPredicate: { true },
+        peerGenerationValidator: { true },
+        postStopDrainScheduler: scheduler.schedule
+      )
+    }
+    #expect(await waitForControl { factory.driver.probeCount == 1 })
+    factory.driver.emitProbeReply(.emptyAcknowledgement)
+    factory.driver.emitProbeBusiness()
+    #expect(await waitForControl { factory.driver.stopCount == 1 })
+    factory.driver.emitStopReply(.emptyAcknowledgement)
+    let result = await resultTask.value
+    #expect(result.receipt.outcome == .transportAcknowledged)
+
+    let completion = DrainCompletionProbe()
+    let waiter = Task {
+      await result.awaitPostStopDrain()
+      completion.mark()
+    }
+    waiter.cancel()
+    await Task.yield()
+    #expect(!completion.isComplete)
+    scheduler.expire()
+    await waiter.value
+    #expect(completion.isComplete)
+    #expect(factory.driver.cancelCount == 1)
   }
 
 }

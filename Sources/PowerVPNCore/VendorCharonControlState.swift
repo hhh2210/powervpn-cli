@@ -146,6 +146,14 @@ final class VendorCharonControlState: @unchecked Sendable {
       activeNCRouteToggleAttempt = nil
     }
   }
+  func awaitPostStopDrain() async {
+    let drain = await withCheckedContinuation { continuation in
+      queue.async { [self] in
+        continuation.resume(returning: postStopDrain)
+      }
+    }
+    await drain?.awaitCompletion()
+  }
 
   func abandonProvisionalStop() {
     queue.async { [self] in
@@ -374,6 +382,10 @@ final class VendorCharonControlState: @unchecked Sendable {
         latestStatus = signal
       }
       handleStatusWait(signal.classification)
+      if phase == .stopping, requestSent, signal.classification == .disconnected {
+        recordOrdinaryConnectionCompletionSource()
+        finishStop(.transportAcknowledged, retainConnection: false)
+      }
     case .tunnelNameReported:
       break
     case .ncRouteToggleAcknowledgement(let success):

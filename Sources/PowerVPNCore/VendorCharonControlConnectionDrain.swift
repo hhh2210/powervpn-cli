@@ -1,4 +1,4 @@
-import Dispatch
+import Foundation
 
 typealias VendorCharonConnectionDrainScheduler =
   @Sendable (
@@ -33,6 +33,9 @@ final class VendorCharonControlConnectionDrain: @unchecked Sendable {
   private var cancelDriver: (@Sendable () -> Void)?
   private var cancelExpiration: (@Sendable () -> Void)?
   private var armed = false
+  private let completionLock = NSLock()
+  private var completed = false
+  private var completionWaiters: [CheckedContinuation<Void, Never>] = []
 
   init(
     cancelDriver: @escaping @Sendable () -> Void,
@@ -50,14 +53,41 @@ final class VendorCharonControlConnectionDrain: @unchecked Sendable {
     }
   }
 
+  func awaitCompletion() async {
+    await withCheckedContinuation { continuation in
+      let resumeImmediately = completionLock.withLock {
+        guard !completed else { return true }
+        completionWaiters.append(continuation)
+        return false
+      }
+      if resumeImmediately {
+        continuation.resume()
+      }
+    }
+  }
+
   @discardableResult
   func cancelNow() -> Bool {
     let cancelExpiration = cancelExpiration
     self.cancelExpiration = nil
     cancelExpiration?()
-    guard let cancelDriver else { return false }
-    self.cancelDriver = nil
-    cancelDriver()
-    return true
+    let cancelled: Bool
+    if let cancelDriver {
+      self.cancelDriver = nil
+      cancelDriver()
+      cancelled = true
+    } else {
+      cancelled = false
+    }
+    let waiters = completionLock.withLock {
+      guard !completed else { return [CheckedContinuation<Void, Never>]() }
+      completed = true
+      defer { completionWaiters.removeAll() }
+      return completionWaiters
+    }
+    for waiter in waiters {
+      waiter.resume()
+    }
+    return cancelled
   }
 }

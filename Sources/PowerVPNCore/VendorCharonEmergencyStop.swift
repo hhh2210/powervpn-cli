@@ -1,6 +1,23 @@
 import Dispatch
 import Foundation
 
+package struct VendorCharonEmergencyStopResult: Sendable {
+  package let receipt: VendorCharonControlReceipt
+  private let awaitPostStopDrainOperation: @Sendable () async -> Void
+
+  init(
+    receipt: VendorCharonControlReceipt,
+    awaitPostStopDrainOperation: @escaping @Sendable () async -> Void = {}
+  ) {
+    self.receipt = receipt
+    self.awaitPostStopDrainOperation = awaitPostStopDrainOperation
+  }
+
+  package func awaitPostStopDrain() async {
+    await awaitPostStopDrainOperation()
+  }
+}
+
 extension RawVendorCharonControlTransport {
   package func emergencyStop(
     timeoutMilliseconds: Int = Self.defaultTimeoutMilliseconds,
@@ -8,7 +25,21 @@ extension RawVendorCharonControlTransport {
     expectedRunningPredicate: @escaping @Sendable () async -> Bool,
     peerGenerationValidator: @escaping @Sendable () async -> Bool
   ) async -> VendorCharonControlReceipt {
-    await emergencyStop(
+    (await emergencyStopWithDrain(
+      timeoutMilliseconds: timeoutMilliseconds,
+      stopContext: stopContext,
+      expectedRunningPredicate: expectedRunningPredicate,
+      peerGenerationValidator: peerGenerationValidator
+    )).receipt
+  }
+
+  package func emergencyStopWithDrain(
+    timeoutMilliseconds: Int = Self.defaultTimeoutMilliseconds,
+    stopContext: VendorCharonStopContext,
+    expectedRunningPredicate: @escaping @Sendable () async -> Bool,
+    peerGenerationValidator: @escaping @Sendable () async -> Bool
+  ) async -> VendorCharonEmergencyStopResult {
+    await emergencyStopWithDrain(
       timeoutMilliseconds: timeoutMilliseconds,
       stopContext: stopContext,
       expectedRunningPredicate: expectedRunningPredicate,
@@ -24,11 +55,31 @@ extension RawVendorCharonControlTransport {
     peerGenerationValidator: @escaping @Sendable () async -> Bool,
     postStopDrainScheduler: @escaping VendorCharonConnectionDrainScheduler
   ) async -> VendorCharonControlReceipt {
+    (await emergencyStopWithDrain(
+      timeoutMilliseconds: timeoutMilliseconds,
+      stopContext: stopContext,
+      expectedRunningPredicate: expectedRunningPredicate,
+      peerGenerationValidator: peerGenerationValidator,
+      postStopDrainScheduler: postStopDrainScheduler
+    )).receipt
+  }
+
+  func emergencyStopWithDrain(
+    timeoutMilliseconds: Int,
+    stopContext: VendorCharonStopContext,
+    expectedRunningPredicate: @escaping @Sendable () async -> Bool,
+    peerGenerationValidator: @escaping @Sendable () async -> Bool,
+    postStopDrainScheduler: @escaping VendorCharonConnectionDrainScheduler
+  ) async -> VendorCharonEmergencyStopResult {
     guard Self.validTimeoutMilliseconds.contains(timeoutMilliseconds) else {
-      return Self.unsentEmergencyStop(.invalidTimeout)
+      return VendorCharonEmergencyStopResult(
+        receipt: Self.unsentEmergencyStop(.invalidTimeout)
+      )
     }
     guard !Task.isCancelled else {
-      return Self.unsentEmergencyStop(.cancelled)
+      return VendorCharonEmergencyStopResult(
+        receipt: Self.unsentEmergencyStop(.cancelled)
+      )
     }
     let transaction = VendorCharonEmergencyStopTransaction(
       driverFactory: emergencyDriverFactory,
@@ -38,7 +89,13 @@ extension RawVendorCharonControlTransport {
       postStopDrainScheduler: postStopDrainScheduler
     )
     transaction.beginSynchronously(timeoutMilliseconds: timeoutMilliseconds)
-    return await transaction.result()
+    let receipt = await transaction.result()
+    return VendorCharonEmergencyStopResult(
+      receipt: receipt,
+      awaitPostStopDrainOperation: {
+        await transaction.awaitPostStopDrain()
+      }
+    )
   }
 
   private static func unsentEmergencyStop(
@@ -81,6 +138,8 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
   private var probeReplyUnavailableObserved = false
   private var peerGenerationValidated = false
   private var statusEventCount = 0
+  private var stopReplyUnavailableObserved = false
+  private var completionSource = VendorCharonControlCompletionSource.submission
   private var dispatcherTailEventCount = 0
   private var cancelIssued = false
   private var validation: VendorCharonAsyncValidation?
@@ -126,6 +185,15 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
     } onCancel: {
       self.cancel()
     }
+  }
+
+  func awaitPostStopDrain() async {
+    let drain = await withCheckedContinuation { continuation in
+      queue.async { [self] in
+        continuation.resume(returning: postStopDrain)
+      }
+    }
+    await drain?.awaitCompletion()
   }
 
   private func armTimeout(milliseconds: Int) {
@@ -239,15 +307,20 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
 
   private func handleStopReply(_ event: VendorCharonControlReplyEvent) {
     guard phase == .stopping else { return }
+    if event == .replyUnavailable {
+      stopReplyUnavailableObserved = true
+      return
+    }
+    completionSource = .replyDictionary
     switch event {
     case .decodedDictionary(_, let decoded):
       handleStopReply(decoded)
     case .ncRouteToggleAcknowledgement:
       finish(.unexpectedReplyPayload)
     case .emptyAcknowledgement:
-      acknowledgeStopTransport()
+      acknowledgeStopTransport(source: .replyDictionary)
     case .replyUnavailable:
-      break
+      return
     case .peerCodeSigningRequirement: finish(.peerCodeSigningRequirement)
     case .unexpectedXPCError: finish(.unexpectedXPCError)
     case .unexpectedPayload: finish(.unexpectedReplyPayload)
@@ -259,8 +332,14 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
     switch event {
     case .decodedDictionary(_, let decoded):
       handleStopEvent(decoded)
-    case .status:
+    case .status(let signal):
       if statusEventCount < Int.max { statusEventCount += 1 }
+      guard stopRequestSent, signal.classification == .disconnected else { return }
+      acknowledgeStopTransport(
+        emptyAcknowledgementObserved: false,
+        source:
+          stopReplyUnavailableObserved ? .replyUnavailableThenOrdinary : .ordinaryConnection
+      )
     case .tunnelNameReported:
       break
     case .ncRouteToggleAcknowledgement:
@@ -268,7 +347,10 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
     case .emptyDispatcherTail:
       if dispatcherTailEventCount < Int.max { dispatcherTailEventCount += 1 }
       guard stopRequestSent else { return }
-      acknowledgeStopTransport()
+      acknowledgeStopTransport(
+        source:
+          stopReplyUnavailableObserved ? .replyUnavailableThenOrdinary : .ordinaryConnection
+      )
     case .unexpectedDictionary: finish(.unexpectedConnectionEvent)
     case .connectionInterrupted: finish(.connectionInterrupted)
     case .connectionInvalid: finish(.connectionInvalid)
@@ -278,8 +360,12 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
     }
   }
 
-  private func acknowledgeStopTransport() {
-    emptyStopReplyObserved = true
+  private func acknowledgeStopTransport(
+    emptyAcknowledgementObserved: Bool = true,
+    source: VendorCharonControlCompletionSource = .submission
+  ) {
+    emptyStopReplyObserved = emptyStopReplyObserved || emptyAcknowledgementObserved
+    completionSource = source
     finish(.transportAcknowledged)
   }
 
@@ -309,7 +395,9 @@ private final class VendorCharonEmergencyStopTransaction: @unchecked Sendable {
       connectionCancelRequested: cancelled,
       encodingError: nil,
       statusEventCount: statusEventCount,
-      dispatcherTailEventCount: dispatcherTailEventCount
+      dispatcherTailEventCount: dispatcherTailEventCount,
+      replyUnavailableObserved: stopReplyUnavailableObserved,
+      completionSource: completionSource
     )
     if let continuation {
       self.continuation = nil

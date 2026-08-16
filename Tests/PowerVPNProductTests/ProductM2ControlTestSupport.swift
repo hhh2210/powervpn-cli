@@ -127,6 +127,7 @@ func productM2TestControl(
   onBeginStart: @escaping @Sendable (Int) -> Void = { _ in },
   onAwaitStart: @escaping @Sendable () -> Void = {},
   onStop: @escaping @Sendable (Int) -> Void = { _ in },
+  awaitPostStopDrain: @escaping @Sendable () async -> Void = {},
   onEmergencyStop: @escaping @Sendable (Int) -> Void = { _ in }
 ) -> ProductM2ControlAdapter {
   let currentStatusEventCount: @Sendable () -> Int =
@@ -187,12 +188,15 @@ func productM2TestControl(
                 requestSent: true,
                 completionSource: enabled ? routeActivationCompletionSource : .submission
               )
-            }
+            },
+            awaitPostStopDrainOperation: awaitPostStopDrain
           ) : nil
         let provisionalStopCapability =
           !acknowledged && receipt.requestSent
-          ? ProductM2ProvisionalStopCapability(stopOperation: stopOperation)
-          : nil
+          ? ProductM2ProvisionalStopCapability(
+            stopOperation: stopOperation,
+            awaitPostStopDrainOperation: awaitPostStopDrain
+          ) : nil
         return ProductM2StartResult(
           receipt: receipt,
           lease: lease,

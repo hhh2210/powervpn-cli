@@ -293,6 +293,17 @@ final class ManualConnectionDrainScheduler: @unchecked Sendable {
   var cancellationCount: Int { lock.withLock { cancellations } }
 }
 
+final class DrainCompletionProbe: @unchecked Sendable {
+  private let lock = NSLock()
+  private var completed = false
+
+  func mark() {
+    lock.withLock { completed = true }
+  }
+
+  var isComplete: Bool { lock.withLock { completed } }
+}
+
 func controlTransport(
   _ factory: CharonControlDriverFactory
 ) -> RawVendorCharonControlTransport {

@@ -129,7 +129,7 @@ actor ProductPersistentTunnelSession {
           assets,
           deadlines: ProductM2CleanupDeadlines(budget)
         )
-        return ProductPersistentTunnelShutdownReport(
+        let report = ProductPersistentTunnelShutdownReport(
           state: .stopped,
           cleanupPath: cleanup.verified ? cleanup.path : .cleanupUnproven,
           stopOutcome: cleanup.stop.outcome,
@@ -141,6 +141,8 @@ actor ProductPersistentTunnelSession {
           cleanupCaptureRetryReason: cleanup.captureRetryReason,
           cleanupCaptureAttemptCount: cleanup.captureAttemptCount
         )
+        await cleanup.awaitPostStopDrain()
+        return report
       }
       storage = .stopping(task)
       return await completeShutdown(task)

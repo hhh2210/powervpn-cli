@@ -98,6 +98,7 @@ package struct ProductM2ControlLease: Sendable {
   private let routeToggleOperation:
     @Sendable (Bool, Int, @escaping @Sendable () async -> Bool) async
       -> ProductM2ControlReceipt
+  private let awaitPostStopDrainOperation: @Sendable () async -> Void
 
   init(
     stopOperation: @escaping @Sendable (Int) async -> ProductM2ControlReceipt,
@@ -108,16 +109,22 @@ package struct ProductM2ControlLease: Sendable {
         Bool,
         Int,
         @escaping @Sendable () async -> Bool
-      ) async -> ProductM2ControlReceipt
+      ) async -> ProductM2ControlReceipt,
+    awaitPostStopDrainOperation: @escaping @Sendable () async -> Void = {}
   ) {
     self.stopOperation = stopOperation
     self.statusOperation = statusOperation
     self.statusEventCountOperation = statusEventCountOperation
     self.routeToggleOperation = routeToggleOperation
+    self.awaitPostStopDrainOperation = awaitPostStopDrainOperation
   }
 
   package func stop(timeoutMilliseconds: Int) async -> ProductM2ControlReceipt {
     await stopOperation(timeoutMilliseconds)
+  }
+
+  package func awaitPostStopDrain() async {
+    await awaitPostStopDrainOperation()
   }
 
   package func waitForConnectedStatus(
@@ -213,30 +220,41 @@ package struct ProductM2ControlAdapter: Sendable {
                     timeoutMilliseconds: timeoutMilliseconds,
                     peerGenerationValidator: validator
                   ))
+              },
+              awaitPostStopDrainOperation: {
+                await lease.awaitPostStopDrain()
               }
             )
           },
           provisionalStopCapability: result.provisionalStopCapability.map { capability in
-            ProductM2ProvisionalStopCapability { timeoutMilliseconds in
-              ProductM2ControlReceipt(
-                await capability.stop(
-                  timeoutMilliseconds: timeoutMilliseconds
-                ))
-            }
+            ProductM2ProvisionalStopCapability(
+              stopOperation: { timeoutMilliseconds in
+                ProductM2ControlReceipt(
+                  await capability.stop(
+                    timeoutMilliseconds: timeoutMilliseconds
+                  ))
+              },
+              awaitPostStopDrainOperation: {
+                await capability.awaitPostStopDrain()
+              }
+            )
           },
           emergencyStopCapability: result.stopContext.map { stopContext in
-            ProductM2EmergencyStopCapability {
+            ProductM2EmergencyStopCapability(drainingStopOperation: {
               timeoutMilliseconds,
               expectedRunningPredicate,
               peerGenerationValidator in
-              ProductM2ControlReceipt(
-                await transport.emergencyStop(
-                  timeoutMilliseconds: timeoutMilliseconds,
-                  stopContext: stopContext,
-                  expectedRunningPredicate: expectedRunningPredicate,
-                  peerGenerationValidator: peerGenerationValidator
-                ))
-            }
+              let result = await transport.emergencyStopWithDrain(
+                timeoutMilliseconds: timeoutMilliseconds,
+                stopContext: stopContext,
+                expectedRunningPredicate: expectedRunningPredicate,
+                peerGenerationValidator: peerGenerationValidator
+              )
+              return (
+                ProductM2ControlReceipt(result.receipt),
+                { await result.awaitPostStopDrain() }
+              )
+            })
           }
         )
       }

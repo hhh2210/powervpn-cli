@@ -17,7 +17,7 @@ final class ProxyTestLease: ProxyTunnelLeasing, @unchecked Sendable {
   private let lock = NSLock()
   private let permitted: Bool
   private let verified: Bool
-  private let blocksShutdown: Bool
+  private let blocksPostStopDrain: Bool
   private let shutdownStarted = DispatchSemaphore(value: 0)
   private let shutdownGate = ProxyTestShutdownGate()
   private var events: [String] = []
@@ -25,11 +25,11 @@ final class ProxyTestLease: ProxyTunnelLeasing, @unchecked Sendable {
   init(
     permitted: Bool = true,
     cleanupVerified: Bool = true,
-    blocksShutdown: Bool = false
+    blocksPostStopDrain: Bool = false
   ) {
     self.permitted = permitted
     verified = cleanupVerified
-    self.blocksShutdown = blocksShutdown
+    self.blocksPostStopDrain = blocksPostStopDrain
   }
 
   func permitsIPv4(_ address: UInt32) async -> Bool {
@@ -40,7 +40,7 @@ final class ProxyTestLease: ProxyTunnelLeasing, @unchecked Sendable {
   func shutdown(budget _: ProductM2CleanupBudget) async -> ProxyTunnelShutdown {
     lock.withLock { events.append("shutdown") }
     shutdownStarted.signal()
-    if blocksShutdown {
+    if blocksPostStopDrain {
       await shutdownGate.wait()
     }
     return ProxyTunnelShutdown(cleanupVerified: verified)

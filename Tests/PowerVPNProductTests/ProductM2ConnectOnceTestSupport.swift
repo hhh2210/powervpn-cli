@@ -170,6 +170,7 @@ func productM2TestDependencies(
   onBeginStart: @escaping @Sendable (Int) -> Void = { _ in },
   onAwaitStart: @escaping @Sendable () -> Void = {},
   onStop: @escaping @Sendable (Int) -> Void = { _ in },
+  awaitPostStopDrain: @escaping @Sendable () async -> Void = {},
   onEmergencyStop: @escaping @Sendable (Int) -> Void = { _ in }
 ) -> ProductM2ConnectOnceDependencies {
   let defaultCleanupAttempt = ProductM2CleanupCaptureAttempt(
@@ -277,6 +278,7 @@ func productM2TestDependencies(
       onBeginStart: onBeginStart,
       onAwaitStart: onAwaitStart,
       onStop: onStop,
+      awaitPostStopDrain: awaitPostStopDrain,
       onEmergencyStop: onEmergencyStop
     ),
     proveFreshSSH: { target, deadline in

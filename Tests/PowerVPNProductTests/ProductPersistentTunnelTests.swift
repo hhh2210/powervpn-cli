@@ -63,6 +63,48 @@ import Testing
     let targetPermittedAfterShutdown = await lease.permitsIPv4(ipv4(11, 11, 30, 21))
     #expect(!targetPermittedAfterShutdown)
   }
+  @Test func shutdownCapturesCleanupBeforeWaitingForUncancellablePostStopDrain()
+    async throws
+  {
+    let trace = ProductM2TestTrace()
+    let gate = AuthorizationCloseGate()
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let runtime = ProductPersistentTunnelRuntime(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        awaitPostStopDrain: { await gate.block() }
+      )
+    )
+    let opened = await runtime.open(
+      request: ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21),
+      startupBudget: m2TestBudget()
+    )
+    guard case .opened(let lease, _) = opened else {
+      Issue.record("persistent tunnel did not open")
+      return
+    }
+    let shutdown = Task {
+      let report = await lease.shutdown(budget: .start())
+      trace.record("shutdown_returned")
+      return report
+    }
+
+    await gate.waitUntilEntered()
+    shutdown.cancel()
+    #expect(trace.count("stop") == 1)
+    #expect(trace.count("logout") == 1)
+    #expect(trace.count("verify") == 1)
+    #expect(trace.count("shutdown_returned") == 0)
+
+    await gate.release()
+    let report = await shutdown.value
+    #expect(report.cleanupVerified)
+    #expect(report.disconnected)
+    #expect(trace.count("shutdown_returned") == 1)
+  }
+
   @Test func activeRuntimeRejectsSecondOpenWithoutClaimingSideEffects() async throws {
     let trace = ProductM2TestTrace()
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
