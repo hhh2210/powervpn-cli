@@ -1,22 +1,22 @@
 # PowerVPN Native Rescue
 
-An unofficial, arm64-native macOS client under development for ordinary
-GUI-free use of the installed LeadSec PowerVPN tunnel helpers. Authentication
-is never bypassed, and the current product still requires the official PowerVPN
-installation.
+状态：M1 被动查询 / M2 一次性连接 / proxy 持久访问，三阶段 live-proven。
 
-The installed official PowerVPN 3.2.1 client is discontinued and frozen: no
-future vendor updates or current-generation official handoff route are
-available. Server compatibility with its legacy protocol remains unknown and
-may still work. Treat the installed client only as a read-only static protocol
-oracle, never as an authorization source. Its successful login and resource
-start observed on 2026-08-11 mean backend death is not proven, but do not
-establish current success.
+非官方 arm64 原生 macOS 客户端，替代已停更的 LeadSec PowerVPN 3.2.1 GUI。
+它不自带隧道栈，而是驱动官方安装的特权 helper
+（/Library/PrivilegedHelperTools/com.leadsec.charon-xpc）按原协议建隧道。
+不绕过认证；前提是这台机器仍装有官方 PowerVPN。
 
-## Current product status — 2026-08-15
+## 当前状态
 
-The active branch is `rescue-mvp`. M1 exposes four passive, value-free
-product-readiness commands:
+- M1 被动查询：只读命令，不登录 Portal，不改 helper 状态。
+- M2 一次性连接：connect-once 全链 PASS，含新鲜 SSH banner 证明。
+- 持久代理访问：proxy ssh 经 OpenSSH ProxyCommand 直达远端主机，exit 0；
+  IDE 场景（Remote-SSH 走 Host 别名）同样 exit 0。
+
+## 命令
+
+被动查询（M1）：
 
 ```sh
 powervpn doctor --json
@@ -25,483 +25,114 @@ powervpn resources --json
 powervpn snapshot --dry-run --json
 ```
 
-One separate explicit command performs the bounded local helper probe:
-
-```sh
-powervpn helper status --probe --json
-```
-
-That probe was not run for this update. On 2026-08-15, safe passive executions
-of `.build/debug/powervpn` reported:
-
-- `doctor --json`: exit 2, `productState=blocked`,
-  `profileSource=operator_approved_fixed_origin`,
-  `resourceSource=unavailable`,
-  `blocker=authorized_resource_provider_unavailable`, and
-  `firstMissingField=common.sessionid`;
-- `helper status --json`: exit 2, `productState=degraded`,
-  `blocker=direct_xpc_not_probed`, `liveProbePerformed=false`, helper available,
-  and launchd inactive at run 7;
-- `resources --json`: exit 69, `productState=blocked`, the fixed profile
-  available, `resourceSource=unavailable`, and zero selectable resources;
-- `snapshot --dry-run --json`: exit 69, `productState=blocked`,
-  `snapshotComplete=false`, and `firstMissingField=common.sessionid`.
-
-These passive paths neither authenticate nor contact the Portal, and they
-request no helper mutation. They can therefore report the fixed profile as
-available while `resourceSource` remains unavailable; an empty passive catalog
-is not evidence that the authenticated Portal catalog is empty.
-
-After fresh explicit approval, the bounded M2 transaction has one exact command:
+一次性连接（M2）：
 
 ```sh
 powervpn m2 connect-once \
-  --resource-display-name login21 \
-  --ssh-target thu21 \
+  --resource-display-name <resource> \
+  --ssh-target <ssh-target> \
   --json
 ```
 
-Commit `b706b7c` makes the production `ProductM2CurrentMachineRuntime` compose
-`ProductM2PortalAdapter` with `PortalLoginRuntime.acquireCurrentMachine()`.
-Construction remains inert. Production Portal acquisition uses the immutable
-operator-approved fixed-origin/SPKI TOFU development authority, which is
-`releaseReady=false`; there is no alternate authorization source or weaker
-fallback.
-
-The standalone `powervpn portal dry-run` path remains a separately approved
-diagnostic. It may validate and erase one Portal lease, but it does not supply
-that lease or catalog to M2 and is not an authorization source for an M2 run.
-
-Commit `305a05a` derives stop authority from the exact `common.gateway` copied
-from the encoded submitted start request. The active lease, provisional-stop
-capability, and emergency-stop capability preserve that authority; production
-cleanup cannot substitute a caller-supplied or reconstructed gateway. M2 keeps
-one monotonic 120-second transaction and report budget, generation fencing,
-bounded cleanup, local material erasure, and value-free reporting.
-
-This is **offline GO only** for the composition and stop-authority deltas:
-those commits ran no live Portal request, helper mutation, SSH proof, or M2
-transaction. Catalog classifier `schemaVersion` 9 has since landed
-(`9df94e7`). Attempt-7 is consumed: Portal acquisition completed, then the
-run ended `resource_catalog_rejected` before helper mutation. Commit
-`57293c5` implements `proxy ssh` and `proxy serve` on `rescue-mvp`; they
-are offline-only and not live-tested. There is no current live
-connect/disconnect proof, and the product is not yet a usable VPN. M2 is
-**not PASS**. The Goal remains **ACTIVE**. The next live action requires a
-fresh exact approval. This statement grants no attempt or retry.
-
-## IDE access
-
-These commands are implemented on `rescue-mvp` at `57293c5`. They remain
-offline-only and have not been live-tested. They are not an M2 PASS.
+代理访问（proxy）：
 
 ```sh
-powervpn proxy ssh --resource-display-name <exact> --ssh-target <thu21|thu52> <numeric-ipv4> <port> [--non-interactive]
-powervpn proxy serve --resource-display-name <exact> --ssh-target <thu21|thu52> [--listen-port <1-65535>] [--non-interactive] [--json]
+# OpenSSH ProxyCommand 模式（Remote-SSH 推荐路径）
+powervpn proxy ssh --resource-display-name <resource> --ssh-target <ssh-target> \
+  <numeric-ipv4> <port> --non-interactive
+
+# 前台 loopback SOCKS4/5，默认 127.0.0.1:1080，给浏览器等 TCP 客户端用
+powervpn proxy serve --resource-display-name <resource> --ssh-target <ssh-target> \
+  --listen-port 1080 --non-interactive --json
 ```
 
-Optional flags, when present, appear in that order only. `--json` is valid
-only on `serve`. Closed argv: extra, missing, reordered, or `--flag=value`
-tokens fail with exit `64` before approval. The destination of `proxy ssh`
-must already be numeric IPv4; hostnames are rejected.
+proxy serve 底层是系统 /usr/bin/ssh -D，不是自研 SOCKS 实现，也没有
+LaunchAgent/daemon。两个命令都在前台运行，SIGHUP/SIGINT/SIGTERM 停止，
+退出前会停掉 helper 租约并验证清理。
 
-In the examples below, replace `/absolute/path/to/powervpn` with the
-absolute path of the arm64 binary from
-`swift build --product powervpn --arch arm64` (or a copy of that binary).
-The examples do not claim that `powervpn` is installed or on `PATH`.
+## 凭据
 
-### A. OpenSSH ProxyCommand (recommended for Remote-SSH)
+--non-interactive 模式从 ~/.config/powervpn/credentials.env（0600）读：
 
-`proxy ssh` is an OpenSSH `ProxyCommand`. After one approved resource
-lease, it runs `/usr/bin/nc` to the numeric IPv4 and port with inherited
-stdin and stdout. VS Code and Cursor Remote-SSH spawn that same `ssh`.
-When `remote.SSH.configFile` is set they pass `-F`; otherwise they use
-`~/.ssh/config`. They do not need an app-specific SOCKS hop.
-`http.proxy` / `remote.SSH.httpProxy` are unrelated to this SSH hop.
+```sh
+PORTAL_USERNAME=...
+PORTAL_PASSWORD=...
+```
 
-Do not quote the entire `ProxyCommand` line: OpenSSH then `exec`s it as
-one path. Quote only an individual argument that contains spaces, such as
-the display name. `ProxyCommand` is one config line; do not insert shell
-backslashes. OpenSSH expands `%h` (Hostname after `HostName` substitution)
-and `%p` (port). Write `%%` only when a literal `%` is required, for
-example in the executable path.
+不加 --non-interactive 时走 TTY 模式，操作者当场输入。凭据绝不进
+argv、日志或报告。
 
-`Host` patterns are globs (`*`, `?`, `!`), not CIDR. `Host 192.0.2.0/24`
-matches only the destination string `192.0.2.0/24`.
+## Remote-SSH 配置
 
-Literal host with numeric `HostName`:
+proxy ssh 就是一个 OpenSSH ProxyCommand：拿到一次批准的资源租约后，
+exec 系统 /usr/bin/nc 连到数字 IPv4 + 端口，透传 stdin/stdout。
+VS Code / Cursor 的 Remote-SSH 起的就是同一个 ssh，不需要额外 SOCKS 跳板，
+http.proxy / remote.SSH.httpProxy 与这一跳无关。
 
 ```text
 Host campus-host
-  HostName 192.0.2.10
+  HostName <numeric-ipv4>
   User <remote-user>
   Port 22
-  ProxyCommand /absolute/path/to/powervpn proxy ssh --resource-display-name <exact> --ssh-target thu52 %h %p --non-interactive
+  ControlMaster no
+  ProxyCommand <binary-path> proxy ssh --resource-display-name <resource> --ssh-target <ssh-target> %h %p --non-interactive
 ```
 
-Wildcard IP group:
+规则：
 
-```text
-Host 192.0.2.*
-  User <remote-user>
-  Port 22
-  ProxyCommand /absolute/path/to/powervpn proxy ssh --resource-display-name <exact> --ssh-target thu52 %h %p --non-interactive
-```
+- `%h` 展开后必须是数字 IPv4，主机名会被拒绝，所以 HostName 直接写数字地址。
+- `--non-interactive` 必须是最后一个参数；Remote-SSH 没有控制 TTY。
+- `ControlMaster no`：共享 socket 会让后续连接绕过隧道，必须关掉。
+- ProxyCommand 是一整行，不要整体加引号；只有含空格的单个参数（如资源
+  显示名）才单独引起来。`<binary-path>` 用
+  swift build --product powervpn --arch arm64 产物的绝对路径。
 
-`%h` must expand to numeric IPv4. Remote-SSH usually has no controlling
-TTY, so the documented form uses `--non-interactive`, which must remain
-the last argument.
+## 工程约束
 
-### B. Foreground loopback SOCKS (browsers and other TCP apps)
+- 协议保真不变量：每个出站字节都必须能溯源到 vendor 证据（从冻结的官方
+  客户端逆向出的字段与序列），不发明、不猜。
+- value-free 报告：JSON 报告为 schema 15，全部 closed enum token，
+  不携带地址、用户名等值。
+- M2 是一次性交易：单调 120 秒预算、生成围栏（generation fencing）、
+  有界清理、授权材料用后擦除。
+- proxy 退出码：0 成功且清理已验证；64 用法错误；69 helper 变更前不可用；
+  70 已验证清理后的运行失败；74 清理未证明（不要重试）；77 批准被拒或
+  不可用；130 取消。
 
-`proxy serve` is a foreground SOCKS4/5 listener on `127.0.0.1`, backed by
-system `/usr/bin/ssh -D`. The default listen port is 1080. It is not a
-custom SOCKS implementation, LaunchAgent, or daemon. It is not the
-recommended Remote-SSH path; use A.
+## 已知 vendor 缺陷与客户端对策
 
-```sh
-powervpn proxy serve --resource-display-name <exact> --ssh-target thu52
-powervpn proxy serve --resource-display-name <exact> --ssh-target thu52 --listen-port 1080 --non-interactive --json
-```
+helper 是官方闭件，不可修改；以下缺陷都在客户端侧缓解：
 
-The listener binds `127.0.0.1` only. Point the browser or other TCP client
-at `127.0.0.1` and that port.
+- 所有命令响应只经 ordinary connection channel 返回，reply callback 永远
+  不回业务 ACK。客户端把 ReplyFailed 归为 replyUnavailable（非终结），
+  继续在 ordinary channel 上等结果。
+- 异步 status 通知会读一个未 retain 的全局请求指针（use-after-free），
+  迟到的 CHILD_SA install/delete 通知可触发 helper SIGILL。客户端在 stop
+  后驻留 10 秒 drain，并在 route 前对 status 通知设 400/800ms 静默门。
+  teardown 臂无法根治（崩溃可能晚于任何有限 drain），install 臂已缓解。
+- Portal catalog 偶发服务端退化（拒绝列举）。客户端做一次 fresh-login
+  重试，再失败即如实上报失败判别 token。
 
-### Lifecycle, credentials, and exits
-
-One TTY approval is required unless `--non-interactive` is set. With
-`--non-interactive`, Portal credentials are read from
-`~/.config/powervpn/credentials.env` (mode 0600 regular file) or from the
-absolute path in `POWERVPN_PORTAL_CREDENTIALS`. The file keys are
-`PORTAL_USERNAME` and `PORTAL_PASSWORD`. Values must not appear in argv,
-logs, or documentation.
-
-Both commands stay in the foreground. Stop them with SIGHUP, SIGINT, or
-SIGTERM. The process then stops the helper lease and verifies cleanup.
-Exit `74` means cleanup is unproven; do not retry.
-
-## Development
+## 构建与目录
 
 ```sh
 swift build --product powervpn --arch arm64
-swift test --filter 'ProductReadinessRuntimeTests|ProductCommandTests'
+swift test
 ```
 
-For a one-command arm64 build followed by an exact CLI invocation:
-
-```sh
-scripts/build_and_run.sh doctor --json
-```
-
-With no arguments the wrapper builds the product and prints CLI usage; it does
-not choose or run a live operation by default.
-
-Product JSON commands use exit `0` when ready, `2` for a completed degraded
-observation, `64` for invalid product-command grammar, and `69` when a required
-local provider is unavailable. The M2 command additionally uses `74` when
-cleanup is unproven and `124` when its absolute report deadline is exceeded
-without a higher-priority cleanup failure. `proxy ssh` and `proxy serve`
-exit `0` only when the child exits `0` and cleanup is verified. They use
-`64` for usage, `69` when unavailable before helper mutation, `70` for an
-operational failure after verified cleanup, `74` when cleanup is unproven
-(no retry), `77` when approval is denied or unavailable, and `130` when
-cancelled with no mutation or after verified cleanup.
-
-## Archived evidence history
-
-The following sections preserve the protocol lab and Rescue R1/R2 lineage. They
-are useful implementation inputs, but they are no longer the active product
-critical path.
-
-- Active execution has switched to the Rescue CLI on
-  `rescue-state-machine`; Native V3 remains frozen at the clean CP7B fallback,
-  and its noncanonical CP8A work is preserved on `native-v3-cp8a-wip`.
-- Rescue R1 is **PASS**. The arm64 CLI directly received the installed charon
-  helper's exact `version="24572"`, `get_version=true` business event and bound
-  it synchronously to the single cold-start launchd generation. The helper had
-  zero TCP/UDP descriptors and exited naturally within the deadline; network,
-  Surge, route, DNS, interface, and utun evidence stayed stable. The probe did
-  not log in, contact a server, send `start_connection`, or create an SA,
-  route, or utun. Direct SAD/SPD comparison remained unavailable to the
-  unprivileged harness and is not claimed.
-- Rescue R2 is a **hard NO-GO, not PASS**. The `PowerVPNPortal` target
-  implements the evidence-locked password POST,
-  resource GET, 60-second session check and logout with a no-echo controlling
-  TTY, system TLS trust, a closed XML profile, bounded response storage and
-  app-owned buffer erasure. The current endpoint was confirmed by a narrow
-  latest-address query against a mode-600 encrypted database copy; no user row
-  was queried. The one permitted integrated review completed with five direct
-  findings, and all five were fixed. Foundation's projected `Set-Cookie` value
-  remains locally fail closed because it cannot prove raw header
-  multiplicity/framing. The independent, value-free raw-header subcheckpoint
-  now passes its synthetic offline verifier and its one integrated review is
-  complete. That review returned exactly two direct findings, both applied: a
-  factory-only unforgeable operation proof now keeps forged body, Cookie and
-  User-Agent near misses out of both transport lanes, and TLS trust
-  classification is limited to peer/issuer verification while handshake and
-  cipher failures are `unavailable`. No second raw-header review ran. That
-  synthetic evidence remains implementation evidence, not server compatibility.
-  The exact live-authorized manifest is archived at
-  `fixtures/redacted/r2-portal-login-authorized-manifest-v1.json`, SHA-256
-  `bde4de003e1c5bd2128f5e4b147f05ae3149f2b639126e783585bfb6a1b6302b`
-  and runtime source aggregate SHA-256
-  `83c590c8ebb3c15b8e32d125bfbdef6c4b39aabd94ca9235c35aef140b67eee2`.
-  The manifest separately binds runtime-library SHA-256
-  `b57c969c986f46c58913c5e5d27bace5131771ff9e343c111e86389d97a12047`
-  and raw-header-test aggregate SHA-256
-  `a6d98b928a9c0a63ded37b7b60120e9483fabddf8dea6a895a160276a4acab05`.
-  Its full offline verifier passes with 120 Portal tests in 19 suites and 109
-  Core tests in 10 suites (229 tests in 29 suites), plus the direct raw C
-  parser/status gates. One authorized, exact-manifest-bound R2B window then ran
-  with TTY-only credential re-entry and
-  `exposedCredentialRiskAccepted=true`. It completed with
-  `checkpointPass=false`, CLI exit 2 and `tls_rejected`; only the login request
-  was attempted. Resource listing, session check and logout were not requested.
-  The complete value-free runtime fixture is
-  `fixtures/redacted/r2-portal-login-runtime-v1.json`, SHA-256
-  `78a0815ab247c36e8d30683b7f83a09d34d4da2dbe94e395e6f116c8423ca714`.
-  No helper, native charon or UDP descriptor appeared, launchd stayed 19→19,
-  and artifact identity/cleanup were exact. The strict network gate failed only
-  because the raw IPv4 route SHA changed; route count 136, persistent route
-  count 65/hash, default route, DNS, interfaces, utun, ESP and Surge remained
-  stable. R2B is **FAIL / INCOMPLETE** and the Goal remains active. Next is a
-  credential-free bounded TLS trust evidence gate, not a blind login retry.
-  Post-evidence verifier binding produced development manifest SHA-256
-  `8e19d1937d7ab432e9a747725d636e565432159561a0962a6d0ec07afe9fdb1e`;
-  those changed bytes were not live-authorized and cannot authorize a retry.
-  Two later credential-free TLS evidence windows were both inconclusive and
-  their authorizations are consumed. The post-attempt-2 offline candidate now
-  copies the peer chain directly from Network.framework metadata, calls the
-  rejecting verify completion exactly once, and evaluates new SSL/basic trust
-  objects only on a bounded asynchronous, no-network-fetch lane. Its v3 report
-  separates execution safety, transport evidence, trust evidence,
-  compatibility, monitor quality and environment stability. The candidate is
-  review-only. Follow-up delta analysis required a single-lock combined
-  transport/evidence snapshot, pre-serialization report validation, an exact
-  trust-reservation linearization point, and a one-way finalization barrier
-  with PID-bound guard acknowledgement and atomic result publication. The new
-  pending-review manifest SHA-256 is
-  `22b73d9f6b1f583335f2b0f24f2331b904c8b6bb0f2cb29ef8c99ebb43d54f9d`;
-  the full offline verifier passes 37 TLS-evidence, 120 Portal and 109 Core
-  tests (266 total). Attempt 3, portal login, R3 and UI work remain a hard
-  NO-GO pending an independent delta review.
-  The frozen raw-header contract is documented in
-  `docs/evidence/checkpoint-r2-raw-header-framing.md`.
-
-- The vendor helper is based on strongSwan 5.8.0. This is proven by unstripped
-  Mach-O symbol paths, not inferred from release dates.
-- `leadsecbridge` is both a custom strongSwan kernel plugin and part of a
-  private IKEv1 resource-rule extension. Successful sessions send encrypted
-  QUICK_MODE messages containing `ADDRULE`; the binary also contains the
-  matching `DELRULE` and `expandrule` payload/task code.
-- The standard base is still recognizable: IKEv1 Main Mode, PSK, a conventional
-  IKE proposal, a conventional ESP proposal, and a base CHILD_SA.
-- Upstream strongSwan 6.0.7 builds successfully as arm64 on this Mac with VICI,
-  PF_ROUTE, PF_KEY, kernel-libipsec, IKEv1, and XAuth support. PF_KEY and
-  kernel-libipsec reach their expected root capability gate in an unprivileged
-  startup smoke test.
-- CP4A now has a strict offline 6.0.7 codec for the five observed expandrule
-  wire forms. Seven synthetic byte vectors cover nine logical contexts; the
-  payload's opaque fields deliberately remain unnamed until CP5/CP4B evidence.
-- CP5 correlates the recovered portal/helper schemas with one authorized legal
-  session. The value-free runtime fixture confirms session-check request/status
-  metadata and the GUI resource-toggle producer shape; WebSocket behavior and
-  the exact portal-field-to-PSK/resource mapping remain explicitly unknown.
-- CP4B made zero business-semantic wire promotions: the complete static writer
-  chain remains one evidence class, so opaque resource fields stay opaque.
-- CP6 is **PASS (offline compatibility-port checkpoint)**. Upstream commit
-  `67c9810900e2d8486cb3b11495a8362433494ca0` and replayable 0002 patch SHA-256
-  `6e4c609240ae2a1996a3a547cede72ac1be7121922aa6f576687632609f34213`
-  implement the payload/factory/task surface while leaving `keymat_v1.c` and
-  `task_manager_v1.c` unchanged from CP4A.
-- New static evidence fixes the private Quick Mode contract: vendor
-  `_get_hash_phase2` at `0x10014fa70` has no custom branch; `_build_i` state 0
-  builds standard SA/NONCE/TS and state 1 appends ADDRULE. The resulting
-  `[HASH ADDRULE]` uses standard
-  `HASH(3)=PRF(SKEYID_a,0|M-ID|Ni_b|Nr_b)` and excludes ADDRULE bytes.
-- `fixtures/redacted/leadsec-qm-hash3-static-vector-v1.json` records the
-  value-free static contract, and an independent synthetic HASH(3) reference
-  matches the implementation. Targeted expandrule tests pass 39/39, full
-  libcharon suites pass 5/5, the no-IKEv1 build passes, and patch replay equals
-  the implementation tree.
-- The strict Swift VICI dry run remains accepted: its 335-byte stock
-  `load-conn` request matches the official Python VICI encoder. This does not
-  prove live vendor differential behavior or server acceptance, both of which
-  remain unproven.
-- CP7A is **PASS (local runtime, no backend/server)**. The old VICI
-  timeout was caused by a four-worker pool fully occupied by long-running
-  CRITICAL jobs. With five workers, the official 6.0.7 Python client and the
-  Swift client receive byte-identical `version` responses from the same daemon,
-  then both complete a credential-free synthetic load/list/unload lifecycle.
-  The accepted run used ephemeral ports and a fake kernel, created no route or
-  utun, preserved Surge/default-route/DNS, and left no generation-owned residue.
-  Its one integrated review was closed by rejecting streamed command failures,
-  preserving ownership state on unexpected cleanup residue, and detecting
-  orphan fixed sockets and generation directories.
-- CP7B is **PASS (serverless L5 backend only)**. The authorized window bound to
-  manifest
-  `7e7f6b8525f39e67ef4e45ad348a216b7eba2bb8638bd8f981dc3294238c8187`
-  ran source `a81298234753f314dbf2c4f2867a9a144006bd8c` for 21 seconds as attempt 1.
-  `pfkey-pfroute` and `socket-dynamic` reached ready; the official VICI client
-  completed `version` and read-only status/list probes, with empty
-  connection/SA/policy inventories under the runner contract. Native UDP
-  descriptors stayed at zero, with no endpoint, server packet, credential
-  read, `initiate`, or install operation.
-- The same CP7B result proves SAD, SPD, global ESP port, persistent IPv4/IPv6
-  route projections, default route, DNS, utun inventory, PowerVPN, and Surge
-  remained stable. Cleanup assertion passed; the runtime returned to
-  UID 502:GID 20, mode 700, with only the reviewed `closure` at top level. The
-  earlier manifest's preflight-only inconclusive result remains historical and
-  does not weaken this later PASS.
-- CP7B does **not** prove IKE or server compatibility: no connection was loaded,
-  no credential was handed off, and no SA/policy/route was installed. Main
-  Mode, Quick Mode, ADDRULE, resource data path, and server acceptance remain
-  untested. CP8A secure runtime-material handoff remains the next Native V3
-  fallback step, but it is paused rather than active. Rescue R1 first tests
-  whether the installed helper can be controlled read-only without the GUI.
-  CP7B's one integrated review and one additional narrow review are complete;
-  no third or unrelated-history review is planned.
-
-The frozen Native V3 target remains:
+测试 854 通过。
 
 ```text
-upstream strongSwan 6.0.7
-    + minimal, maintained ADDRULE/DELRULE payload + IKEv1 task extension
-    + a verified macOS kernel/userland IPsec backend
-    + an independent HTTPS/WebSocket control plane
-    + an event-driven recovery coordinator
+Sources/
+  PowerVPNCore/    vendor helper XPC 控制连接与协议模型
+  PowerVPNPortal/  Portal 登录、凭据、cookie、catalog
+  PowerVPNProduct/ M1/M2/proxy 产品编排与状态机
+  PowerVPNCLI/     argv 解析与命令入口
 ```
 
-The vendor 5.8.0 code is a behavioral reference only. Its x86_64 plugin is not
-reused, and strongSwan 6.0.3+ rejects plugins built for a different version in
-any case.
+## 历史证据
 
-## Protocol fidelity invariant
-
-This repository is a compatibility port, not a protocol-design project:
-
-1. It MUST NOT add, remove, reorder, normalize, reinterpret, or symmetrize any
-   observed payload, field, byte order, HASH coverage, or directional asymmetry.
-2. Every outbound byte MUST trace to vendor evidence, a protected reference
-   vector, or an explicitly approved server-acceptance result.
-3. Unknown length-delimited values MUST remain opaque and neutral.
-4. Structural parseability MUST NOT imply profile acceptance or permission to
-   emit; parse, accept, and emit are separate decisions.
-5. The private-context predicate MUST be complete; outside it, payload order,
-   HASH behavior, message rules, and results remain identical to upstream.
-6. A same-implementation generate/verify round trip proves self-consistency
-   only and MUST NOT be reported as compatibility evidence.
-7. Observed vendor behavior outranks standards-driven cleanup or upstream
-   intuition inside the compatibility profile.
-8. Wire-neutral bounds, memory safety, secret hygiene, and fail-closed checks are
-   allowed; wire-visible improvements or generalizations are forbidden.
-9. Owned GUI, XPC/control schema, helper names, classes, and state machines may
-   be refactored; only server-observable bytes, timing, and effects must match.
-10. Intentional divergence MUST live outside the compatibility profile behind
-    an independent feature gate that is default off.
-
-## Commands
-
-```bash
-swift run powervpn status
-swift run powervpn probe --timeout 5
-swift run powervpn diagnose --json
-swift run powervpn oracle inventory --json
-swift run powervpn oracle correlate fixtures/redacted/protocol-correlation-value-free-v1.json --json
-swift run powervpn oracle correlate fixtures/redacted/protocol-correlation-runtime-metadata-v1.json --json
-swift run powervpn spec validate-redacted fixtures/redacted/tunnel-spec.example.json
-swift run powervpn spec vici-dry-run fixtures/redacted/tunnel-spec.vici-dry-run.json --json
-swift run powervpn vici version --socket <scratch-charon.vici> --timeout-ms 2000 --json
-swift run powervpn vici cp7a-smoke --socket <scratch-charon.vici> --timeout-ms 2000 --json
-swift run powervpn xpc get-version --timeout-ms 2000 --json
-scripts/run_r2_portal_login.sh --preflight-only
-```
-
-The VICI runtime commands connect only to an explicitly supplied local socket;
-`cp7a-smoke` loads and removes one RFC-5737 synthetic config with
-`start_action=none`, no credential, and no initiation. Other CLI commands are
-read-only. The old `reconnect` command was removed because terminating and
-relaunching the vendor GUI automates a workaround; it does not advance the
-native replacement.
-
-The XPC command has no configurable service or payload. It is the Rescue R1
-read-only gate and fails closed unless the GUI and helper are absent and the
-legacy DNS/log cold-start hazards are safe. Run the reviewed live harness, not
-the raw command, for checkpoint evidence.
-
-`powervpn login` accepts no options or positional material and emits only a
-closed value-free JSON report. Do not run it directly for checkpoint evidence.
-The completed R2B window was bound to manifest SHA-256
-`bde4de003e1c5bd2128f5e4b147f05ae3149f2b639126e783585bfb6a1b6302b`,
-explicit non-secret exposed-credential risk acceptance and a direct no-echo
-controlling TTY. The credential was personally re-entered through the TTY and
-was never read or copied from chat. The result is a TLS rejection, not login or
-server-compatibility evidence. Do not rerun the raw command or repeat the live
-window; the next gate is credential-free TLS trust evidence collection.
-
-## Repository map
-
-- `Sources/PowerVPNCore`: reusable oracle inspection, redaction, TunnelSpec,
-  and end-to-end probe logic.
-- `Sources/PowerVPNPortal`: isolated installed-config, secure TTY, HTTPS,
-  structural XML, LeadSec profile and portal-login workflow logic; it has no
-  dependency on `PowerVPNCore`.
-- `Sources/PowerVPNCLI`: thin command routing and rendering.
-- `docs/protocol-*.md`: verified protocol facts, unknowns, and next experiments.
-- `docs/evidence/checkpoint-7b-preflight.md`: reviewed scope and safety contract
-  for the separately approved privileged PF_KEY/PF_ROUTE backend window.
-- `fixtures/redacted`: synthetic structures and derived value-free runtime
-  metadata only; no captured values or replayable payloads.
-- `patches/strongswan-6.0.7`: minimal patches replayable on the official tag.
-- `captures`: policy and manifests only; raw packet captures never enter Git.
-
-Start with [the native replacement plan](docs/2026-08-08-native-replacement-plan.md)
-and [the 6.0.7 build evidence](docs/strongswan-6.0.7-arm64.md).
-
-## Build and test
-
-```bash
-swift build --arch arm64
-swift test
-BIN="$(swift build --show-bin-path)/powervpn"
-file "$BIN"
-scripts/verify_checkpoint.sh 4a
-scripts/verify_checkpoint.sh 5
-scripts/verify_checkpoint.sh 6
-scripts/verify_checkpoint.sh 7a
-scripts/verify_checkpoint.sh 7b-preflight
-scripts/verify_checkpoint.sh r1
-scripts/verify_checkpoint.sh r2
-```
-
-The Swift package has one executable product, `powervpn`, and two independent
-library targets, `PowerVPNCore` and `PowerVPNPortal`.
-
-## Safety and scope
-
-- No credential, session ID, PSK, cookie, raw log, or raw packet capture may be
-  committed or printed by the CLI.
-- A credential pasted into chat or task text is exposed and is never an
-  approved runtime source. If rotation is impossible, live reuse requires
-  explicit manifest-bound risk acceptance and personal re-entry through the
-  no-echo controlling TTY; evidence must not claim it was rotated.
-- Raw evidence belongs under a mode-700 directory in `~/scratch-data`, not in
-  this repository.
-- `/Applications/PowerVPN.app`, its helpers, and code signature are never
-  modified. Live network state changes only inside an explicit approval window
-  and must be immediately restored and verified.
-- A live backend test requiring root or a VPN configuration change is a
-  separately approved isolation-window experiment because it may interact with
-  Surge.
-- CP7B's completed manifest-bound serverless window does not authorize a replay,
-  CP8/CP9 server traffic, or access to real runtime material. CP8A may test only
-  synthetic/reference-based provider paths until the user authorizes the exact
-  secure handoff path; secrets remain forbidden in argv, environment, files,
-  fixtures, and logs.
-- No SwiftUI, LaunchDaemon, or recovery service is built until protocol gates
-  pass.
-
-This is an independent, unofficial project. It is not affiliated with LeadSec
-or Tsinghua University. The lab code is MIT-licensed; strongSwan and any future
-patch set retain their own upstream licensing and must be distributed
-separately and correctly.
+Rescue R1/R2、checkpoint 序列、strongSwan 5.8.0 溯源、expandrule 线协议
+契约、R2 TLS 信任链等协议取证材料完整保留在 docs/（含 docs/evidence/、
+docs/progress/）。它们不再是产品关键路径，但仍是理解协议约束的第一手
+依据。
