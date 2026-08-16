@@ -7,6 +7,44 @@
 （/Library/PrivilegedHelperTools/com.leadsec.charon-xpc）按原协议建隧道。
 不绕过认证；前提是这台机器仍装有官方 PowerVPN。
 
+## 平台与依赖
+
+仅支持 macOS 14.4+ 的 arm64 机器（xpc_session 的 peer requirement 校验
+所需）。客户端驱动本机已安装的官方 x86_64 特权 helper，经 Rosetta 翻译
+运行；数据面在内核（utun + IPsec SA）。不存在 Windows/Linux 移植路径。
+构建需要 Xcode 工具链。
+
+## 快速开始
+
+前置：官方 PowerVPN 已安装，且至少完整运行过一次（特权 helper 已落位）。
+
+```sh
+# 1. 安装
+brew tap hhh2210/powervpn
+brew install powervpn
+# 或源码构建：swift build --product powervpn --arch arm64
+
+# 2. 准备配置
+mkdir -p ~/.config/powervpn
+#    credentials.env：PORTAL_USERNAME / PORTAL_PASSWORD，权限 0600
+#    targets.json：cp docs/targets.example.json 改填真实值（portalOrigin
+#    与 targets 映射），权限 0600
+
+# 3. 配置 ~/.ssh/config 的 Host 块，见下文 Remote-SSH 配置
+```
+
+targets.json 缺失、目标不存在、字段非法时分别 fail-closed 为
+config_missing / target_unknown / target_invalid，不联系 Portal。
+
+首次验证：
+
+```sh
+powervpn doctor --json
+```
+
+brew 安装时 ProxyCommand 里的 `<binary-path>` 写 brew 的真实路径
+/opt/homebrew/bin/powervpn；源码构建则用 build 产物的绝对路径。
+
 ## 当前状态
 
 - M1 被动查询：只读命令，不登录 Portal，不改 helper 状态。
