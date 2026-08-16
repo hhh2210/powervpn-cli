@@ -22,6 +22,11 @@ package struct ProductPersistentTunnelOpenReport: Encodable, Equatable, Sendable
   package let authorizationClose: ProductM2AuthorizationCloseOutcome
   package let authorizationOwnedMaterialErased: Bool
   package let cleanupVerified: Bool
+  /// Cleanup restoration booleans are measured only when this state is
+  /// `measured_complete`; other false values are fail-closed placeholders.
+  package var cleanupCaptureState: ProductM2CleanupCaptureState? = nil
+  package var cleanupCaptureRetryReason: ProductM2CleanupCaptureRetryReason? = nil
+  package var cleanupCaptureAttemptCount = 0
   package let containsSecrets = false
   /// Schema-10 diagnostic classification mirrored from the underlying M2
   /// connect report; nil — omitted from JSON — when not applicable.
@@ -57,6 +62,11 @@ package struct ProductPersistentTunnelShutdownReport: Encodable, Equatable, Send
   package let authorizationClose: ProductM2AuthorizationCloseOutcome
   package let authorizationOwnedMaterialErased: Bool
   package let cleanupVerified: Bool
+  /// Cleanup restoration booleans are measured only when this state is
+  /// `measured_complete`; other false values are fail-closed placeholders.
+  package var cleanupCaptureState: ProductM2CleanupCaptureState? = nil
+  package var cleanupCaptureRetryReason: ProductM2CleanupCaptureRetryReason? = nil
+  package var cleanupCaptureAttemptCount = 0
   package let containsSecrets = false
 
   package var disconnected: Bool {

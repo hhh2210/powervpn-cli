@@ -117,6 +117,32 @@ import Testing
     }
   }
 
+  @Test func routeSnapshotProjectsPrimitiveStatesAndObservedInvariants() {
+    let fingerprint = NetworkCleanupFingerprint.observed(
+      count: 0,
+      sha256: String(repeating: "a", count: 64)
+    )
+    let effectiveFailure = NetworkCleanupRouteSnapshot(
+      structural: fingerprint,
+      persistent: fingerprint,
+      selectedRouteMatchCount: 0,
+      selectedRouteTokens: [],
+      effectiveSelectedRoute: .unavailable(.commandFailed)
+    )
+    let inconsistentInventory = NetworkCleanupRouteSnapshot(
+      structural: fingerprint,
+      persistent: fingerprint,
+      selectedRouteMatchCount: 1,
+      selectedRouteTokens: []
+    )
+
+    #expect(
+      effectiveFailure.primitiveObservationStates
+        == [.observed, .observed, .commandFailed])
+    #expect(effectiveFailure.observedPrimitiveStatesConsistent)
+    #expect(!inconsistentInventory.observedPrimitiveStatesConsistent)
+  }
+
   private func selectedMatcher(
     routes: [(network: UInt32, prefix: UInt8)] = [(network: 0x0A01_0200, prefix: 24)]
   ) -> VendorCharonSelectedRouteMatcher {

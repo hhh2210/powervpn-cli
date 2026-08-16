@@ -78,6 +78,27 @@ package struct NetworkCleanupRouteSnapshot: Equatable, Sendable {
     )
   }
 
+  package var primitiveObservationStates: [NetworkCleanupObservationState] {
+    var states = [structural.state, persistent.state]
+    if let effectiveSelectedRoute {
+      states.append(effectiveSelectedRoute.state)
+    }
+    return states
+  }
+
+  package var observedPrimitiveStatesConsistent: Bool {
+    let selectedRouteInventoryConsistent =
+      structural.state != .observed
+      || persistent.state != .observed
+      || selectedRouteMatchCount == selectedRouteTokens.count
+    let effectiveRouteConsistent =
+      effectiveSelectedRoute.map { $0.state != .observed || $0.isObserved } ?? true
+    return (structural.state != .observed || structural.isObserved)
+      && (persistent.state != .observed || persistent.isObserved)
+      && selectedRouteInventoryConsistent
+      && effectiveRouteConsistent
+  }
+
   package var isObserved: Bool {
     structural.isObserved && persistent.isObserved
       && selectedRouteMatchCount == selectedRouteTokens.count

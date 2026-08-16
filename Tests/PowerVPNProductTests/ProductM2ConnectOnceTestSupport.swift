@@ -112,6 +112,21 @@ final class ProductM2TestTrace: @unchecked Sendable {
 }
 
 final class ProductM2TestMutationLease: ProductMutationLeaseHolding, @unchecked Sendable {}
+final class ProductM2CleanupAttemptQueue: @unchecked Sendable {
+  private let lock = NSLock()
+  private var attempts: [ProductM2CleanupCaptureAttempt]
+
+  init(_ attempts: [ProductM2CleanupCaptureAttempt]) {
+    self.attempts = attempts
+  }
+
+  func next() -> ProductM2CleanupCaptureAttempt {
+    lock.withLock {
+      guard !attempts.isEmpty else { return .unavailable }
+      return attempts.removeFirst()
+    }
+  }
+}
 
 func productM2TestDependencies(
   snapshot: AuthenticatedPortalSnapshot,
@@ -127,6 +142,7 @@ func productM2TestDependencies(
   sshProof: ProductM2SSHProofOutcome = .proven,
   sshEvidenceTarget: ProductM2SSHTarget? = nil,
   cleanup: ProductM2CleanupEvidence = m2CompleteCleanup,
+  cleanupAttempts: [ProductM2CleanupCaptureAttempt]? = nil,
   logout: ProductM2AuthorizationCloseOutcome = .accepted,
   dependencyAuthorizationSource: ProductM2AuthorizationSource = .nativePortal,
   acquisitionAuthorizationSource: ProductM2AuthorizationSource = .nativePortal,
@@ -154,6 +170,14 @@ func productM2TestDependencies(
   onStop: @escaping @Sendable (Int) -> Void = { _ in },
   onEmergencyStop: @escaping @Sendable (Int) -> Void = { _ in }
 ) -> ProductM2ConnectOnceDependencies {
+  let defaultCleanupAttempt = ProductM2CleanupCaptureAttempt(
+    evidence: cleanup,
+    state: cleanup.complete ? .measuredComplete : .unavailable,
+    captureInvoked: true
+  )
+  let cleanupAttemptQueue = ProductM2CleanupAttemptQueue(
+    cleanupAttempts ?? [defaultCleanupAttempt]
+  )
   let lease = ProductM2AuthorizedResourceLease(
     source: leaseAuthorizationSource,
     catalog: {
@@ -265,7 +289,7 @@ func productM2TestDependencies(
         selectedRoutes: selectedRoutes,
         startRequestSent: startRequestSent
       )
-      return cleanup
+      return cleanupAttemptQueue.next()
     }
   )
 }

@@ -120,6 +120,34 @@ public enum ProductM2CleanupPath: String, CaseIterable, Encodable, Equatable, Se
   case authenticatedEmergencyStop = "authenticated_emergency_stop"
   case cleanupUnproven = "cleanup_unproven"
 }
+/// Closed, value-free outcome of the final cleanup network capture.
+///
+/// Restoration booleans are measured facts only when this state is
+/// `measured_complete`; otherwise their `false` values are fail-closed
+/// placeholders.
+public enum ProductM2CleanupCaptureState: String, Encodable, Equatable, Sendable {
+  case measuredComplete = "measured_complete"
+  case changedDuringCapture = "changed_during_capture"
+  case helperProcessGenerationInconsistent =
+    "helper_process_generation_inconsistent"
+  case commandFailed = "command_failed"
+  case outputTooLarge = "output_too_large"
+  case invalidOutput = "invalid_output"
+  case unavailable
+  case deadlineExceeded = "deadline_exceeded"
+  case generationNotExact = "generation_not_exact"
+  case vendorProcessResidue = "vendor_process_residue"
+  case structuralInconsistency = "structural_inconsistency"
+}
+
+/// The first capture condition that authorized the single bounded recapture.
+public enum ProductM2CleanupCaptureRetryReason: String, Encodable, Equatable,
+  Sendable
+{
+  case changedDuringCapture = "changed_during_capture"
+  case helperProcessGenerationInconsistent =
+    "helper_process_generation_inconsistent"
+}
 
 public enum ProductM2SSHProofOutcome: String, Encodable, Equatable, Sendable {
   case notAttempted = "not_attempted"
@@ -334,7 +362,7 @@ public struct ProductM2ConnectRequest: Equatable, Sendable {
 }
 
 public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
-  public let schemaVersion = 13
+  public let schemaVersion = 14
   public let outcome: ProductM2ConnectOutcome
   public let finalState: ProductM2ConnectionState
   public let lastGoodState: ProductM2ConnectionState
@@ -388,6 +416,13 @@ public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
   public let authorizationClose: ProductM2AuthorizationCloseOutcome
   public let authorizationOwnedMaterialErased: Bool
   public let cleanupEvidence: ProductM2CleanupEvidence
+  /// Final cleanup-capture classification. Nil when cleanup verification was
+  /// never reached.
+  public var cleanupCaptureState: ProductM2CleanupCaptureState? = nil
+  /// Present only when the first capture authorized the one bounded recapture.
+  public var cleanupCaptureRetryReason: ProductM2CleanupCaptureRetryReason? = nil
+  /// Number of network-observer capture invocations, always in `0...2`.
+  public var cleanupCaptureAttemptCount = 0
   public let cleanupVerified: Bool
   public let serverContactRequested: Bool
   public let helperMutationRequested: Bool

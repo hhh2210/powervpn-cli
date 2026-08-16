@@ -36,7 +36,7 @@ package struct ProductM2ConnectOnceDependencies: Sendable {
       VendorCharonSelectedRouteMatcher?,
       Bool,
       ProductM2StageDeadline
-    ) async -> ProductM2CleanupEvidence
+    ) async -> ProductM2CleanupCaptureAttempt
 
   package init(
     acquireMutationLease:
@@ -86,7 +86,7 @@ package struct ProductM2ConnectOnceDependencies: Sendable {
         VendorCharonSelectedRouteMatcher?,
         Bool,
         ProductM2StageDeadline
-      ) async -> ProductM2CleanupEvidence
+      ) async -> ProductM2CleanupCaptureAttempt
   ) {
     self.acquireMutationLease = acquireMutationLease
     self.controlRuntimePreflightAccepted = controlRuntimePreflightAccepted
@@ -162,17 +162,19 @@ package struct ProductM2ConnectOnceDependencies: Sendable {
       },
       verifyCleanup: { baseline, window, selectedRoutes, startRequestSent, deadline in
         guard let before = baseline.snapshot else { return .unavailable }
+        guard let timeout = deadline.remainingMilliseconds(cappedAt: 24_000) else {
+          return .deadlineExceeded
+        }
         let after = await networkObserver.capture(
           window: window,
           selectedRoutes: selectedRoutes,
-          timeoutMilliseconds: deadline.remainingMilliseconds(cappedAt: 24_000) ?? 0
+          timeoutMilliseconds: timeout
         )
-        return ProductM2CleanupEvidence(
-          NetworkCleanupAssessment.assess(
-            before: before,
-            after: after,
-            startRequestSent: startRequestSent
-          ))
+        return ProductM2CleanupCaptureAttempt(
+          before: before,
+          after: after,
+          startRequestSent: startRequestSent
+        )
       }
     )
   }

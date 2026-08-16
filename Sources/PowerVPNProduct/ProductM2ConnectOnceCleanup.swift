@@ -9,6 +9,9 @@ package struct ProductM2CleanupResult: Sendable {
   let emergencyStop: ProductM2ControlReceipt
   let authorizationClose: ProductM2AuthorizationCloseReceipt
   let evidence: ProductM2CleanupEvidence
+  let captureState: ProductM2CleanupCaptureState
+  let captureRetryReason: ProductM2CleanupCaptureRetryReason?
+  let captureAttemptCount: Int
   let verified: Bool
 }
 
@@ -51,16 +54,13 @@ package struct ProductM2CleanupRunner: Sendable {
     )
     let authorizationCompletedWithinDeadline =
       authorizationLease == nil || deadlines.authorizationCleanup.hasRemaining
-    let verifier = dependencies.verifyCleanup
-    let evidence = await Task.detached {
-      await verifier(
-        baseline,
-        networkWindow,
-        selectedRoutes,
-        controlAuthority.startReceipt.requestSent,
-        deadlines.verification
-      )
-    }.value
+    let verification = await verifyCleanupBounded(
+      baseline: baseline,
+      networkWindow: networkWindow,
+      selectedRoutes: selectedRoutes,
+      startRequestSent: controlAuthority.startReceipt.requestSent,
+      deadline: deadlines.verification
+    )
     let verificationCompletedWithinDeadline = deadlines.verification.hasRemaining
     let authorizationClosed =
       authorizationLease == nil
@@ -74,13 +74,16 @@ package struct ProductM2CleanupRunner: Sendable {
       stopInvalidityClass: control.stopInvalidityClass,
       emergencyStop: control.emergencyStop,
       authorizationClose: authorizationClose,
-      evidence: evidence,
+      evidence: verification.evidence,
+      captureState: verification.state,
+      captureRetryReason: verification.retryReason,
+      captureAttemptCount: verification.attemptCount,
       verified: controlCompletedWithinDeadline
         && authorizationCompletedWithinDeadline
         && verificationCompletedWithinDeadline
         && authorizationClosed
         && controlClassified
-        && evidence.allDimensionsRestored
+        && verification.evidence.allDimensionsRestored
     )
   }
 

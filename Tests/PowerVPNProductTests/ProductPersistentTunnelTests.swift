@@ -254,6 +254,91 @@ import Testing
     #expect(trace.count("stop") == 1)
   }
 
+  @Test func persistentShutdownPropagatesAndCachesCleanupRecapture() async throws {
+    let trace = ProductM2TestTrace()
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let runtime = ProductPersistentTunnelRuntime(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        cleanupAttempts: [
+          ProductM2CleanupCaptureAttempt(
+            evidence: .unavailable,
+            state: .changedDuringCapture,
+            captureInvoked: true
+          ),
+          .measured(m2CompleteCleanup),
+        ]
+      )
+    )
+    let opened = await runtime.open(
+      request: ProductM2ConnectRequest(
+        resourceDisplayName: "Campus NC",
+        sshTarget: .thu21
+      ),
+      startupBudget: m2TestBudget()
+    )
+    guard case .opened(let lease, let openReport) = opened else {
+      Issue.record("persistent tunnel did not open")
+      return
+    }
+    #expect(openReport.cleanupCaptureState == nil)
+    #expect(openReport.cleanupCaptureAttemptCount == 0)
+
+    let first = await lease.shutdown(budget: .start())
+    let cached = await lease.shutdown(budget: .start())
+    #expect(first == cached)
+    #expect(first.cleanupVerified)
+    #expect(first.cleanupCaptureState == .measuredComplete)
+    #expect(first.cleanupCaptureRetryReason == .changedDuringCapture)
+    #expect(first.cleanupCaptureAttemptCount == 2)
+    #expect(trace.count("route_disable") == 1)
+    #expect(trace.count("stop") == 1)
+    #expect(trace.count("logout") == 1)
+    #expect(trace.count("verify") == 2)
+  }
+
+  @Test func persistentOpenFailurePropagatesCleanupRecapture() async throws {
+    let trace = ProductM2TestTrace()
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let runtime = ProductPersistentTunnelRuntime(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        plan: .preSubmissionFailure,
+        cleanupAttempts: [
+          ProductM2CleanupCaptureAttempt(
+            evidence: .unavailable,
+            state: .changedDuringCapture,
+            captureInvoked: true
+          ),
+          .measured(m2CompleteCleanup),
+        ]
+      )
+    )
+
+    let result = await runtime.open(
+      request: ProductM2ConnectRequest(
+        resourceDisplayName: "Campus NC",
+        sshTarget: .thu21
+      ),
+      startupBudget: m2TestBudget()
+    )
+    guard case .failed(let report) = result else {
+      Issue.record("failed start returned a live lease")
+      return
+    }
+    #expect(report.cleanupCaptureState == .measuredComplete)
+    #expect(report.cleanupCaptureRetryReason == .changedDuringCapture)
+    #expect(report.cleanupCaptureAttemptCount == 2)
+    #expect(trace.count("route_disable") == 0)
+    #expect(trace.count("stop") == 0)
+    #expect(trace.count("logout") == 1)
+    #expect(trace.count("verify") == 2)
+  }
+
 }
 
 private func ipv4(

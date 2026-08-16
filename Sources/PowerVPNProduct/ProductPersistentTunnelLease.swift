@@ -74,6 +74,9 @@ actor ProductPersistentTunnelSession {
         authorizationClose: failure.authorizationClose,
         authorizationOwnedMaterialErased: failure.authorizationOwnedMaterialErased,
         cleanupVerified: failure.cleanupVerified,
+        cleanupCaptureState: failure.cleanupCaptureState,
+        cleanupCaptureRetryReason: failure.cleanupCaptureRetryReason,
+        cleanupCaptureAttemptCount: failure.cleanupCaptureAttemptCount,
         activeCaptureState: failure.activeCaptureState,
         activeCaptureChangeAxes: failure.activeCaptureChangeAxes,
         activeCaptureIncompleteReason: failure.activeCaptureIncompleteReason,
@@ -88,7 +91,10 @@ actor ProductPersistentTunnelSession {
           emergencyStopOutcome: failure.emergencyStopOutcome,
           authorizationClose: failure.authorizationClose,
           authorizationOwnedMaterialErased: failure.authorizationOwnedMaterialErased,
-          cleanupVerified: failure.cleanupVerified
+          cleanupVerified: failure.cleanupVerified,
+          cleanupCaptureState: failure.cleanupCaptureState,
+          cleanupCaptureRetryReason: failure.cleanupCaptureRetryReason,
+          cleanupCaptureAttemptCount: failure.cleanupCaptureAttemptCount
         ))
       return .failed(report)
     }
@@ -129,7 +135,10 @@ actor ProductPersistentTunnelSession {
           emergencyStopOutcome: cleanup.emergencyStop.outcome,
           authorizationClose: cleanup.authorizationClose.outcome,
           authorizationOwnedMaterialErased: cleanup.authorizationClose.ownedMaterialErased,
-          cleanupVerified: cleanup.verified
+          cleanupVerified: cleanup.verified,
+          cleanupCaptureState: cleanup.captureState,
+          cleanupCaptureRetryReason: cleanup.captureRetryReason,
+          cleanupCaptureAttemptCount: cleanup.captureAttemptCount
         )
       }
       storage = .stopping(task)

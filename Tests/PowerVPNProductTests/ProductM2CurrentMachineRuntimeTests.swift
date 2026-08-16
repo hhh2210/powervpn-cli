@@ -80,7 +80,7 @@ import Testing
       budget: m2TestBudget()
     )
 
-    #expect(report.schemaVersion == 13)
+    #expect(report.schemaVersion == 14)
     #expect(report.outcome == .authorizationAcquisitionRejected)
     #expect(report.firstBadEvent == .authorizationAcquisitionRejected)
     #expect(report.authorizationSource == .nativePortal)

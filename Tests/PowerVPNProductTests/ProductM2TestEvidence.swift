@@ -79,6 +79,7 @@ func m2CaptureSnapshotFixture(
   helperGeneration: VendorHelperGenerationSnapshot = m2ColdGeneration,
   helperObservationState: NetworkCleanupObservationState = .observed,
   vendorProcesses: NetworkCleanupVendorProcessSnapshot = m2VendorProcessesFixture(),
+  effectiveSelectedRoute: NetworkCleanupEffectiveRouteSnapshot? = nil,
   defaultRoute: NetworkCleanupFingerprint = .observed(
     count: 0,
     sha256: String(repeating: "a", count: 64)
@@ -100,7 +101,8 @@ func m2CaptureSnapshotFixture(
       structural: fingerprint,
       persistent: fingerprint,
       selectedRouteMatchCount: 0,
-      selectedRouteTokens: []
+      selectedRouteTokens: [],
+      effectiveSelectedRoute: effectiveSelectedRoute
     ),
     ipv6Routes: NetworkCleanupRouteSnapshot(
       structural: fingerprint,

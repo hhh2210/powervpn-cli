@@ -32,6 +32,9 @@ package struct ProductM2Execution {
   var authorizationClose: ProductM2AuthorizationCloseOutcome = .notRequired
   var authorizationOwnedMaterialErased = true
   var cleanupEvidence = ProductM2CleanupEvidence.unavailable
+  var cleanupCaptureState: ProductM2CleanupCaptureState? = nil
+  var cleanupCaptureRetryReason: ProductM2CleanupCaptureRetryReason? = nil
+  var cleanupCaptureAttemptCount = 0
   var cleanupVerified = false
   var serverContactRequested = false
   var helperMutationRequested = false
@@ -114,6 +117,9 @@ package struct ProductM2Execution {
     serverContactRequested =
       serverContactRequested || cleanup.authorizationClose.serverContactRequested
     cleanupEvidence = cleanup.evidence
+    cleanupCaptureState = cleanup.captureState
+    cleanupCaptureRetryReason = cleanup.captureRetryReason
+    cleanupCaptureAttemptCount = cleanup.captureAttemptCount
     let authorizationClosed =
       authorizationClose == .accepted || authorizationClose == .notRequired
     cleanupVerified =
@@ -207,6 +213,9 @@ package struct ProductM2Execution {
       authorizationClose: authorizationClose,
       authorizationOwnedMaterialErased: authorizationOwnedMaterialErased,
       cleanupEvidence: cleanupEvidence,
+      cleanupCaptureState: cleanupCaptureState,
+      cleanupCaptureRetryReason: cleanupCaptureRetryReason,
+      cleanupCaptureAttemptCount: cleanupCaptureAttemptCount,
       cleanupVerified: cleanupVerified,
       serverContactRequested: serverContactRequested,
       helperMutationRequested: helperMutationRequested

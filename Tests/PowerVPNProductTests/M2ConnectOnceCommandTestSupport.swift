@@ -119,6 +119,9 @@ func report(
       complete: cleanup, defaultRouteRestored: cleanup, dnsRestored: cleanup,
       interfacesRestored: cleanup, utunRestored: cleanup,
       surgeStateRestored: cleanup, helperGenerationRestored: cleanup),
+    cleanupCaptureState:
+      mutated ? (cleanup ? .measuredComplete : .unavailable) : nil,
+    cleanupCaptureAttemptCount: mutated ? 1 : 0,
     cleanupVerified: cleanup, serverContactRequested: mutated,
     helperMutationRequested: mutated)
 }

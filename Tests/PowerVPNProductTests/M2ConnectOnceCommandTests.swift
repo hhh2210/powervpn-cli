@@ -279,7 +279,7 @@ import Testing
     #expect(trace.count("monitor") == 1)
     #expect(trace.count("runtime:Campus") == 1)
     #expect(result.standardOutput.contains("\"approvalMode\" : \"non_interactive\""))
-    #expect(result.standardOutput.contains("\"schemaVersion\" : 13"))
+    #expect(result.standardOutput.contains("\"schemaVersion\" : 14"))
     #expect(result.standardOutput.contains("\"containsSecrets\" : false"))
     #expect(!result.standardOutput.contains("A1B2C3D4"))
     assertSortedJSON(result.standardOutput)

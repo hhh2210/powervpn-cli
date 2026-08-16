@@ -71,7 +71,7 @@ import Testing
       },
       control: productM2TestControl(trace: trace, plan: .acknowledged),
       proveFreshSSH: { target, _ in m2SSHEvidence(.rejected, target: target) },
-      verifyCleanup: { _, _, _, _, _ in m2CompleteCleanup }
+      verifyCleanup: { _, _, _, _, _ in .measured(m2CompleteCleanup) }
     )
 
     let report = await ProductM2ConnectOnceCoordinator(
@@ -160,7 +160,7 @@ import Testing
       },
       control: productM2TestControl(trace: trace, plan: .acknowledged),
       proveFreshSSH: { target, _ in m2SSHEvidence(.rejected, target: target) },
-      verifyCleanup: { _, _, _, _, _ in m2CompleteCleanup }
+      verifyCleanup: { _, _, _, _, _ in .measured(m2CompleteCleanup) }
     )
 
     let report = await ProductM2ConnectOnceCoordinator(
@@ -215,7 +215,7 @@ import Testing
       beginAuthorization: provider.beginAcquire,
       control: productM2TestControl(trace: trace, plan: .acknowledged),
       proveFreshSSH: { target, _ in m2SSHEvidence(.rejected, target: target) },
-      verifyCleanup: { _, _, _, _, _ in m2CompleteCleanup }
+      verifyCleanup: { _, _, _, _, _ in .measured(m2CompleteCleanup) }
     )
 
     let result = await ProductM2ConnectOnceCoordinator(
