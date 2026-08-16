@@ -141,6 +141,7 @@ extension ProductPersistentTunnelCoordinator {
       execution.fail(.startRejected, event: .startControlRejected, state: .failed)
       return
     }
+    execution.activeCaptureState = .notAttempted
     guard let statusTimeout = budget.work.remainingMilliseconds(cappedAt: 2_000) else {
       _ = applyWorkAbortIfNeeded(&execution, budget: budget)
       return
@@ -157,13 +158,15 @@ extension ProductPersistentTunnelCoordinator {
       return
     }
 
-    guard
-      let active = await dependencies.captureNetworkBaseline(
-        execution.networkWindow,
-        selectedRoutes,
-        budget.work
-      )
-    else {
+    let capture = await dependencies.captureNetworkBaseline(
+      execution.networkWindow,
+      selectedRoutes,
+      budget.work
+    )
+    execution.activeCaptureState = capture.state
+    execution.activeCaptureChangeAxes = capture.changeAxes.isEmpty ? nil : capture.changeAxes
+    execution.activeCaptureIncompleteReason = capture.incompleteReason
+    guard let active = capture.baseline else {
       if !applyWorkAbortIfNeeded(&execution, budget: budget) {
         execution.fail(.activeNetworkUnproven, event: .activeNetworkUnproven, state: .failed)
       }

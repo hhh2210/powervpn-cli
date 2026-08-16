@@ -49,7 +49,9 @@ import Testing
       observeGeneration: { _ in m2ColdGeneration },
       preflightAccepted: { _, _ in true },
       captureNetworkBaseline: { window, selectedRoutes, _ in
-        trace.nextBaseline(window: window, selectedRoutes: selectedRoutes)
+        ProductM2ActiveCaptureOutcome(
+          baseline: trace.nextBaseline(window: window, selectedRoutes: selectedRoutes)
+        )
       },
       baselineStable: { _, _ in false },
       assessActiveConnection: { _, _ in .unavailable },
@@ -136,7 +138,9 @@ import Testing
       observeGeneration: { _ in m2ColdGeneration },
       preflightAccepted: { _, _ in true },
       captureNetworkBaseline: { window, selectedRoutes, _ in
-        trace.nextBaseline(window: window, selectedRoutes: selectedRoutes)
+        ProductM2ActiveCaptureOutcome(
+          baseline: trace.nextBaseline(window: window, selectedRoutes: selectedRoutes)
+        )
       },
       baselineStable: { _, _ in true },
       assessActiveConnection: { _, _ in .unavailable },
@@ -201,7 +205,9 @@ import Testing
       observeGeneration: { _ in m2ColdGeneration },
       preflightAccepted: { _, _ in true },
       captureNetworkBaseline: { window, selectedRoutes, _ in
-        trace.nextBaseline(window: window, selectedRoutes: selectedRoutes)
+        ProductM2ActiveCaptureOutcome(
+          baseline: trace.nextBaseline(window: window, selectedRoutes: selectedRoutes)
+        )
       },
       baselineStable: { _, _ in true },
       assessActiveConnection: { _, _ in .unavailable },

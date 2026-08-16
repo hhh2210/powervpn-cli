@@ -4,6 +4,7 @@ import PowerVPNCore
 package struct ProductM2CleanupResult: Sendable {
   let path: ProductM2CleanupPath
   let stop: ProductM2ControlReceipt
+  let stopInvalidityClass: ProductM2StopInvalidityClass?
   let emergencyStop: ProductM2ControlReceipt
   let authorizationClose: ProductM2AuthorizationCloseReceipt
   let evidence: ProductM2CleanupEvidence
@@ -65,6 +66,7 @@ package struct ProductM2CleanupRunner: Sendable {
     return ProductM2CleanupResult(
       path: control.path,
       stop: control.stop,
+      stopInvalidityClass: control.stopInvalidityClass,
       emergencyStop: control.emergencyStop,
       authorizationClose: authorizationClose,
       evidence: evidence,
@@ -100,6 +102,12 @@ package struct ProductM2CleanupRunner: Sendable {
         return ControlCleanup(
           path: .sameLeaseStop,
           stop: stop,
+          stopInvalidityClass: await classifyStopInvalidity(
+            coldGeneration: coldGeneration,
+            stop: stop,
+            deadline: deadline,
+            reportDeadline: reportDeadline
+          ),
           emergencyStop: .unsent(.notAttempted)
         )
       }
@@ -129,6 +137,12 @@ package struct ProductM2CleanupRunner: Sendable {
         return ControlCleanup(
           path: .sameSessionProvisionalStop,
           stop: stop,
+          stopInvalidityClass: await classifyStopInvalidity(
+            coldGeneration: coldGeneration,
+            stop: stop,
+            deadline: deadline,
+            reportDeadline: reportDeadline
+          ),
           emergencyStop: .unsent(.notAttempted)
         )
       }
@@ -173,10 +187,17 @@ package struct ProductM2CleanupRunner: Sendable {
           await Task.detached { await observe(observationDeadline) }.value
         }
     let post = await shieldedObservation(observationDeadline)
+    let stopInvalidityClass: ProductM2StopInvalidityClass? =
+      stop.outcome == .connectionInvalid
+      ? ProductM2StopInvalidityClass(
+        coldGeneration: coldGeneration,
+        postStopGeneration: post
+      ) : nil
     if ProductM2GenerationFence.singleExitedGeneration(coldGeneration, post) {
       return ControlCleanup(
         path: .naturalHelperExit,
         stop: stop,
+        stopInvalidityClass: stopInvalidityClass,
         emergencyStop: .unsent(.notAttempted)
       )
     }
@@ -184,6 +205,7 @@ package struct ProductM2CleanupRunner: Sendable {
       return ControlCleanup(
         path: .cleanupUnproven,
         stop: stop,
+        stopInvalidityClass: stopInvalidityClass,
         emergencyStop: .unsent(.notAttempted)
       )
     }
@@ -191,6 +213,7 @@ package struct ProductM2CleanupRunner: Sendable {
       return ControlCleanup(
         path: .cleanupUnproven,
         stop: stop,
+        stopInvalidityClass: stopInvalidityClass,
         emergencyStop: .unsent(.notAttempted)
       )
     }
@@ -223,7 +246,35 @@ package struct ProductM2CleanupRunner: Sendable {
     return ControlCleanup(
       path: .authenticatedEmergencyStop,
       stop: stop,
+      stopInvalidityClass: stopInvalidityClass,
       emergencyStop: emergency
+    )
+  }
+
+  /// After a stop whose XPC outcome was `connection_invalid`, performs ONE
+  /// bounded read-only generation re-observation (no mutation, inside the
+  /// existing control-cleanup deadline) and classifies helper exit versus a
+  /// vendor-side session rejection. Purely diagnostic; `stopOutcome` and the
+  /// cleanup gate are unchanged.
+  private func classifyStopInvalidity(
+    coldGeneration: VendorHelperGenerationSnapshot,
+    stop: ProductM2ControlReceipt,
+    deadline: ProductM2StageDeadline,
+    reportDeadline: ProductM2StageDeadline
+  ) async -> ProductM2StopInvalidityClass? {
+    guard stop.outcome == .connectionInvalid else { return nil }
+    guard
+      let observationDeadline = availableControlDeadline(
+        deadline,
+        reportDeadline: reportDeadline
+      ),
+      observationDeadline.remainingMilliseconds(cappedAt: 2_000) != nil
+    else { return .unclassified }
+    let observe = dependencies.observeGeneration
+    let post = await Task.detached { await observe(observationDeadline) }.value
+    return ProductM2StopInvalidityClass(
+      coldGeneration: coldGeneration,
+      postStopGeneration: post
     )
   }
 
@@ -254,6 +305,7 @@ package struct ProductM2CleanupRunner: Sendable {
 private struct ControlCleanup {
   let path: ProductM2CleanupPath
   let stop: ProductM2ControlReceipt
+  var stopInvalidityClass: ProductM2StopInvalidityClass? = nil
   let emergencyStop: ProductM2ControlReceipt
 
   static let notRequired = Self(
@@ -280,6 +332,7 @@ private struct ControlCleanup {
     Self(
       path: .cleanupUnproven,
       stop: stop,
+      stopInvalidityClass: stopInvalidityClass,
       emergencyStop: emergencyStop
     )
   }

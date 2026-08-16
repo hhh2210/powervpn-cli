@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import PowerVPNProduct
@@ -134,5 +135,214 @@ import Testing
     #expect(trace.count("ssh") == 1)
     #expect(trace.count("stop") == 1)
     #expect(m2EventIndex("ssh", in: trace.events) < m2EventIndex("stop", in: trace.events))
+  }
+
+  @Test func captureOutcomeMapsObserverStatesFaithfully() {
+    // Complete snapshot: baseline flows through with the measured-complete token.
+    let complete = ProductM2ActiveCaptureOutcome(snapshot: m2CaptureSnapshotFixture())
+    #expect(complete.state == .measuredComplete)
+    #expect(complete.baseline != nil)
+    #expect(complete.changeAxes.isEmpty)
+    #expect(complete.incompleteReason == nil)
+
+    // Helper A≠B during capture: change axis is the helper generation.
+    let helperChanged = ProductM2ActiveCaptureOutcome(
+      snapshot: m2CaptureSnapshotFixture(
+        helperGeneration: m2RunningGeneration,
+        helperObservationState: .changedDuringCapture,
+        vendorProcesses: m2VendorProcessesFixture(charonProcessCount: 1)
+      ))
+    #expect(helperChanged.baseline == nil)
+    #expect(helperChanged.state == .changedDuringCapture)
+    #expect(helperChanged.changeAxes == [.helperGeneration])
+    #expect(helperChanged.incompleteReason == nil)
+
+    // Everything measured, helper generation exact, but the active-state vendor
+    // process-set rule cannot pass: structural rejection, no change axis.
+    let charonMismatch = ProductM2ActiveCaptureOutcome(
+      snapshot: m2CaptureSnapshotFixture(
+        helperGeneration: m2RunningGeneration,
+        vendorProcesses: m2VendorProcessesFixture()
+      ))
+    #expect(charonMismatch.state == .measuredIncomplete)
+    #expect(charonMismatch.changeAxes.isEmpty)
+    #expect(charonMismatch.incompleteReason == .vendorProcessesInconsistent)
+
+    let ipsecPresent = ProductM2ActiveCaptureOutcome(
+      snapshot: m2CaptureSnapshotFixture(
+        helperGeneration: m2RunningGeneration,
+        vendorProcesses: m2VendorProcessesFixture(ipsecProcessCount: 1)
+      ))
+    #expect(ipsecPresent.state == .measuredIncomplete)
+    #expect(ipsecPresent.incompleteReason == .vendorProcessesInconsistent)
+
+    // Fully measured but the helper generation itself is not exact.
+    let generationNotExact = ProductM2ActiveCaptureOutcome(
+      snapshot: m2CaptureSnapshotFixture(helperGeneration: m2UnavailableGeneration))
+    #expect(generationNotExact.state == .measuredIncomplete)
+    #expect(generationNotExact.incompleteReason == .generationNotExact)
+
+    // A failed sub-observation maps its observer state token verbatim.
+    let commandFailed = ProductM2ActiveCaptureOutcome(
+      snapshot: m2CaptureSnapshotFixture(
+        defaultRoute: .unavailable(.commandFailed)))
+    #expect(commandFailed.state == .commandFailed)
+    #expect(commandFailed.changeAxes == [.defaultRoute])
+    #expect(commandFailed.incompleteReason == .subobservationFailed)
+  }
+
+  @Test func helperChangedCaptureReportsAxisInsteadOfAllFalseOnly() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+    let capture = ProductM2ActiveCaptureOutcome(
+      snapshot: m2CaptureSnapshotFixture(
+        helperGeneration: m2RunningGeneration,
+        helperObservationState: .changedDuringCapture,
+        vendorProcesses: m2VendorProcessesFixture(charonProcessCount: 1)
+      ))
+
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        activeCaptureOutcome: capture
+      )
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(report.outcome == .activeNetworkUnproven)
+    #expect(report.firstBadEvent == .activeNetworkUnproven)
+    #expect(report.activeNetworkEvidence == .unavailable)
+    #expect(report.activeCaptureState == .changedDuringCapture)
+    #expect(report.activeCaptureChangeAxes == [.helperGeneration])
+    #expect(report.activeCaptureIncompleteReason == nil)
+    #expect(trace.count("active_assessment") == 0)
+    #expect(trace.count("ssh") == 0)
+    #expect(trace.count("stop") == 1)
+    #expect(report.cleanupVerified)
+  }
+
+  @Test func structuralVendorProcessRejectionReportsDistinctTokens() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+    let capture = ProductM2ActiveCaptureOutcome(
+      snapshot: m2CaptureSnapshotFixture(
+        helperGeneration: m2RunningGeneration,
+        vendorProcesses: m2VendorProcessesFixture()
+      ))
+
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        activeCaptureOutcome: capture
+      )
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(report.outcome == .activeNetworkUnproven)
+    #expect(report.activeNetworkEvidence == .unavailable)
+    #expect(report.activeCaptureState == .measuredIncomplete)
+    #expect(report.activeCaptureChangeAxes == nil)
+    #expect(report.activeCaptureIncompleteReason == .vendorProcessesInconsistent)
+  }
+
+  @Test func measuredCompleteCaptureKeepsExistingSuccessShape() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        activeCaptureOutcome: ProductM2ActiveCaptureOutcome(
+          snapshot: m2CaptureSnapshotFixture(
+            helperGeneration: m2ColdGeneration,
+            vendorProcesses: m2VendorProcessesFixture()
+          ))
+      )
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(report.outcome == .connectedAndCleanedUp)
+    #expect(report.activeNetworkEvidence.connectionProven)
+    #expect(report.activeCaptureState == .measuredComplete)
+    #expect(report.activeCaptureChangeAxes == nil)
+    #expect(report.activeCaptureIncompleteReason == nil)
+  }
+
+  @Test func vendorStatusFailureBeforeCaptureReportsNotAttempted() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+    let status = ProductM2VendorStatusEvidence(
+      outcome: .timeout,
+      statusEventCount: 0,
+      latestClassification: nil,
+      terminalControlOutcome: nil
+    )
+
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        plan: .acknowledged(status: status)
+      )
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(report.outcome == .vendorStatusUnproven)
+    #expect(report.activeCaptureState == .notAttempted)
+    #expect(report.activeCaptureChangeAxes == nil)
+    #expect(report.activeCaptureIncompleteReason == nil)
+    #expect(report.stopInvalidityClass == nil)
+  }
+
+  @Test func classificationFieldsAreOmittedWhenNilAndStayValueFree() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+    let capture = ProductM2ActiveCaptureOutcome(
+      snapshot: m2CaptureSnapshotFixture(
+        helperGeneration: m2RunningGeneration,
+        helperObservationState: .changedDuringCapture,
+        vendorProcesses: m2VendorProcessesFixture(charonProcessCount: 1)
+      ))
+
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        activeCaptureOutcome: capture
+      )
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+    let successFixture = try authenticatedSnapshot(
+      resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { successFixture.erase() }
+    let success = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: successFixture.snapshot,
+        trace: ProductM2TestTrace()
+      )
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+    let encodedSuccess = try #require(
+      String(bytes: JSONEncoder().encode(success), encoding: .utf8))
+    #expect(encodedSuccess.contains("\"activeCaptureState\":\"measured_complete\""))
+    #expect(!encodedSuccess.contains("activeCaptureChangeAxes"))
+    #expect(!encodedSuccess.contains("activeCaptureIncompleteReason"))
+    #expect(!encodedSuccess.contains("stopInvalidityClass"))
+    #expect(!encodedSuccess.contains("com.leadsec"))
+    #expect(!encodedSuccess.contains("aaaa"))
   }
 }

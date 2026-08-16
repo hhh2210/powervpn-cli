@@ -44,7 +44,7 @@ extension ProductPersistentTunnelCoordinator {
         execution.networkWindow,
         selection.selectedRoutes,
         budget.work
-      )
+      ).baseline
     else {
       if !applyWorkAbortIfNeeded(&execution, budget: budget) {
         execution.fail(

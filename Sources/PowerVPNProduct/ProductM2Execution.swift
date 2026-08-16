@@ -18,10 +18,14 @@ package struct ProductM2Execution {
   var unexpectedEventSignature: [String]?
   var vendorStatusEvidence = ProductM2VendorStatusEvidence.notAttempted
   var activeNetworkEvidence = ProductM2ActiveNetworkEvidence.unavailable
+  var activeCaptureState: ProductM2ActiveCaptureState? = nil
+  var activeCaptureChangeAxes: [ProductM2ActiveCaptureChangeAxis]? = nil
+  var activeCaptureIncompleteReason: ProductM2ActiveCaptureIncompleteReason? = nil
   var sshProof: ProductM2SSHProofOutcome = .notAttempted
   var sshProofEvidence: ProductM2FreshSSHProofEvidence?
   var cleanupPath: ProductM2CleanupPath = .notRequired
   var stopOutcome: ProductM2ControlOutcome = .notAttempted
+  var stopInvalidityClass: ProductM2StopInvalidityClass? = nil
   var emergencyStopOutcome: ProductM2ControlOutcome = .notAttempted
   var authorizationClose: ProductM2AuthorizationCloseOutcome = .notRequired
   var authorizationOwnedMaterialErased = true
@@ -85,6 +89,7 @@ package struct ProductM2Execution {
   mutating func apply(_ cleanup: ProductM2CleanupResult) {
     cleanupPath = cleanup.path
     stopOutcome = cleanup.stop.outcome
+    stopInvalidityClass = cleanup.stopInvalidityClass
     emergencyStopOutcome = cleanup.emergencyStop.outcome
     if cleanup.authorizationClose.outcome != .notRequired {
       authorizationClose = cleanup.authorizationClose.outcome
@@ -164,10 +169,14 @@ package struct ProductM2Execution {
       unexpectedEventSignature: unexpectedEventSignature,
       vendorStatusEvidence: vendorStatusEvidence,
       activeNetworkEvidence: activeNetworkEvidence,
+      activeCaptureState: activeCaptureState,
+      activeCaptureChangeAxes: activeCaptureChangeAxes,
+      activeCaptureIncompleteReason: activeCaptureIncompleteReason,
       sshProof: sshProof,
       sshProofEvidence: sshProofEvidence,
       cleanupPath: cleanupPath,
       stopOutcome: stopOutcome,
+      stopInvalidityClass: stopInvalidityClass,
       emergencyStopOutcome: emergencyStopOutcome,
       authorizationClose: authorizationClose,
       authorizationOwnedMaterialErased: authorizationOwnedMaterialErased,

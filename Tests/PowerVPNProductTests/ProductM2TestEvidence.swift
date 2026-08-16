@@ -50,6 +50,76 @@ func m2ObservedNetworkBaseline(
   return ProductM2NetworkBaseline(snapshot: snapshot)
 }
 
+/// Observed vendor-process inventory for capture-classification fixtures.
+/// All-zero counts are consistent with an inactive helper generation; a
+/// non-zero `ipsecProcessCount` or a charon count below the generation's
+/// active count reproduces the structural active-state inconsistency.
+func m2VendorProcessesFixture(
+  ipsecProcessCount: Int = 0,
+  charonProcessCount: Int = 0
+) -> NetworkCleanupVendorProcessSnapshot {
+  let itemCount = ipsecProcessCount + charonProcessCount
+  return NetworkCleanupVendorProcessSnapshot(
+    fingerprint: .observed(
+      count: itemCount,
+      sha256: String(repeating: "a", count: 64)
+    ),
+    officialGUIProcessCount: 0,
+    charonProcessCount: charonProcessCount,
+    ipsecProcessCount: ipsecProcessCount,
+    shellProcessCount: 0,
+    identityTokens: Set((0..<itemCount).map { Data([UInt8($0 + 1)]) })
+  )
+}
+
+/// Snapshot fixture for `ProductM2ActiveCaptureOutcome` mapping tests. The
+/// default shape (inactive helper, consistent zero-count vendor processes) is
+/// complete; each parameter bends exactly one completeness axis.
+func m2CaptureSnapshotFixture(
+  helperGeneration: VendorHelperGenerationSnapshot = m2ColdGeneration,
+  helperObservationState: NetworkCleanupObservationState = .observed,
+  vendorProcesses: NetworkCleanupVendorProcessSnapshot = m2VendorProcessesFixture(),
+  defaultRoute: NetworkCleanupFingerprint = .observed(
+    count: 0,
+    sha256: String(repeating: "a", count: 64)
+  )
+) -> NetworkCleanupSnapshot {
+  let fingerprint = NetworkCleanupFingerprint.observed(
+    count: 0,
+    sha256: String(repeating: "a", count: 64)
+  )
+  return NetworkCleanupSnapshot(
+    defaultRoute: defaultRoute,
+    dns: fingerprint,
+    interfaces: NetworkCleanupInterfaceSnapshot(
+      inventory: fingerprint,
+      utunCount: 0,
+      utunTokens: []
+    ),
+    ipv4Routes: NetworkCleanupRouteSnapshot(
+      structural: fingerprint,
+      persistent: fingerprint,
+      selectedRouteMatchCount: 0,
+      selectedRouteTokens: []
+    ),
+    ipv6Routes: NetworkCleanupRouteSnapshot(
+      structural: fingerprint,
+      persistent: fingerprint,
+      selectedRouteMatchCount: 0,
+      selectedRouteTokens: []
+    ),
+    surge: NetworkCleanupSurgeSnapshot(
+      fingerprint: fingerprint,
+      mainProcessCount: 0,
+      extensionProcessCount: 0,
+      helperProcessCount: 0
+    ),
+    vendorProcesses: vendorProcesses,
+    helperGeneration: helperGeneration,
+    helperObservationState: helperObservationState
+  )
+}
+
 func m2SSHEvidence(
   _ outcome: ProductM2SSHProofOutcome,
   target: ProductM2SSHTarget = .thu21

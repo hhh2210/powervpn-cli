@@ -87,7 +87,7 @@ extension ProductPersistentTunnelCoordinator {
         execution.networkWindow,
         nil,
         budget.work
-      )
+      ).baseline
     else {
       if applyWorkAbortIfNeeded(&execution, budget: budget) {
         return .failed(execution.report())

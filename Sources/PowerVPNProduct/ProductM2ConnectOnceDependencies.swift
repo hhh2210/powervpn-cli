@@ -12,7 +12,7 @@ package struct ProductM2ConnectOnceDependencies: Sendable {
       NetworkCleanupCaptureWindow,
       VendorCharonSelectedRouteMatcher?,
       ProductM2StageDeadline
-    ) async -> ProductM2NetworkBaseline?
+    ) async -> ProductM2ActiveCaptureOutcome
   package let baselineStable: @Sendable (ProductM2NetworkBaseline, ProductM2NetworkBaseline) -> Bool
   package let assessActiveConnection:
     @Sendable (
@@ -56,7 +56,7 @@ package struct ProductM2ConnectOnceDependencies: Sendable {
         NetworkCleanupCaptureWindow,
         VendorCharonSelectedRouteMatcher?,
         ProductM2StageDeadline
-      ) async -> ProductM2NetworkBaseline?,
+      ) async -> ProductM2ActiveCaptureOutcome,
     baselineStable:
       @escaping @Sendable (
         ProductM2NetworkBaseline,
@@ -139,7 +139,7 @@ package struct ProductM2ConnectOnceDependencies: Sendable {
           selectedRoutes: selectedRoutes,
           timeoutMilliseconds: deadline.remainingMilliseconds(cappedAt: 24_000) ?? 0
         )
-        return snapshot.complete ? ProductM2NetworkBaseline(snapshot: snapshot) : nil
+        return ProductM2ActiveCaptureOutcome(snapshot: snapshot)
       },
       baselineStable: ProductM2NetworkBaseline.stable,
       assessActiveConnection: { before, active in

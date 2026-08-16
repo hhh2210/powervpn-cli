@@ -23,6 +23,12 @@ package struct ProductPersistentTunnelOpenReport: Encodable, Equatable, Sendable
   package let authorizationOwnedMaterialErased: Bool
   package let cleanupVerified: Bool
   package let containsSecrets = false
+  /// Schema-10 diagnostic classification mirrored from the underlying M2
+  /// connect report; nil — omitted from JSON — when not applicable.
+  package var activeCaptureState: ProductM2ActiveCaptureState? = nil
+  package var activeCaptureChangeAxes: [ProductM2ActiveCaptureChangeAxis]? = nil
+  package var activeCaptureIncompleteReason: ProductM2ActiveCaptureIncompleteReason? = nil
+  package var stopInvalidityClass: ProductM2StopInvalidityClass? = nil
 
   package var opened: Bool {
     outcome == .opened && state == .active

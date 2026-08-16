@@ -123,6 +123,73 @@ public enum ProductM2SSHProofOutcome: String, Encodable, Equatable, Sendable {
   case cancelled
 }
 
+/// Closed-set classification of the active-network capture stage, mapped from
+/// the observer's `NetworkCleanupObservationState` tokens plus the synthetic
+/// not-attempted / measured-incomplete / measured-complete summary states.
+/// Purely diagnostic: it never feeds a gate.
+public enum ProductM2ActiveCaptureState: String, Encodable, Equatable, Sendable {
+  case notAttempted = "not_attempted"
+  case commandFailed = "command_failed"
+  case outputTooLarge = "output_too_large"
+  case invalidOutput = "invalid_output"
+  case changedDuringCapture = "changed_during_capture"
+  case measuredIncomplete = "measured_incomplete"
+  case measuredComplete = "measured_complete"
+}
+
+/// Axes of the active-capture snapshot that did not observe cleanly. The
+/// effective-route probe folds into `ipv4Routes` (it is part of that snapshot's
+/// `isObserved` predicate); helper process-set churn splits into
+/// `helperProcesses` (surge inventory) versus `vendorProcesses` (vendor
+/// inventory) exactly like the observer's A/B stability switches.
+public enum ProductM2ActiveCaptureChangeAxis: String, Encodable, Equatable, Sendable {
+  case helperGeneration = "helper_generation"
+  case helperProcesses = "helper_processes"
+  case defaultRoute = "default_route"
+  case dns
+  case interfaces
+  case ipv4Routes = "ipv4_routes"
+  case ipv6Routes = "ipv6_routes"
+  case vendorProcesses = "vendor_processes"
+}
+
+/// Why a fully-measured capture still failed the completeness predicate.
+public enum ProductM2ActiveCaptureIncompleteReason: String, Encodable, Equatable, Sendable {
+  case generationNotExact = "generation_not_exact"
+  case vendorProcessesInconsistent = "vendor_processes_inconsistent"
+  case subobservationFailed = "subobservation_failed"
+}
+
+/// Read-only classification of a stop whose XPC outcome was
+/// `connection_invalid`, comparing the pre-start cold generation with one
+/// bounded post-stop generation re-observation. Diagnostic only.
+public enum ProductM2StopInvalidityClass: String, Encodable, Equatable, Sendable {
+  case helperExitedSingleGeneration = "helper_exited_single_generation"
+  case helperRestarted = "helper_restarted"
+  case helperRunningSessionInvalid = "helper_running_session_invalid"
+  case unclassified
+
+  package init(
+    coldGeneration: VendorHelperGenerationSnapshot,
+    postStopGeneration: VendorHelperGenerationSnapshot
+  ) {
+    if ProductM2GenerationFence.singleExitedGeneration(coldGeneration, postStopGeneration) {
+      self = .helperExitedSingleGeneration
+    } else if ProductM2GenerationFence.singleRunningGeneration(
+      coldGeneration, postStopGeneration
+    ) {
+      self = .helperRunningSessionInvalid
+    } else if coldGeneration.exactInactive,
+      let coldRuns = coldGeneration.runs, coldRuns < Int.max,
+      let postRuns = postStopGeneration.runs, postRuns > coldRuns + 1
+    {
+      self = .helperRestarted
+    } else {
+      self = .unclassified
+    }
+  }
+}
+
 package struct ProductM2NetworkBaseline: Equatable, Sendable {
   private enum Storage: Equatable, Sendable {
     case observed(NetworkCleanupSnapshot)
@@ -249,7 +316,7 @@ public struct ProductM2ConnectRequest: Equatable, Sendable {
 }
 
 public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
-  public let schemaVersion = 9
+  public let schemaVersion = 10
   public let outcome: ProductM2ConnectOutcome
   public let finalState: ProductM2ConnectionState
   public let lastGoodState: ProductM2ConnectionState
@@ -269,10 +336,23 @@ public struct ProductM2ConnectReport: Encodable, Equatable, Sendable {
   public var unexpectedEventSignature: [String]? = nil
   public let vendorStatusEvidence: ProductM2VendorStatusEvidence
   public let activeNetworkEvidence: ProductM2ActiveNetworkEvidence
+  /// Diagnostic classification of the active-network capture stage
+  /// (schema 10). Nil — omitted from JSON — when the run never reached the
+  /// active-capture stage.
+  public var activeCaptureState: ProductM2ActiveCaptureState? = nil
+  /// Snapshot axes that did not observe cleanly during the active capture.
+  /// Nil when every axis observed (or the stage never ran).
+  public var activeCaptureChangeAxes: [ProductM2ActiveCaptureChangeAxis]? = nil
+  /// Why a fully-measured active capture still failed completeness.
+  public var activeCaptureIncompleteReason: ProductM2ActiveCaptureIncompleteReason? = nil
   public let sshProof: ProductM2SSHProofOutcome
   public let sshProofEvidence: ProductM2FreshSSHProofEvidence?
   public let cleanupPath: ProductM2CleanupPath
   public let stopOutcome: ProductM2ControlOutcome
+  /// Read-only classification of a `connection_invalid` stop via one bounded
+  /// post-stop generation re-observation (schema 10). Nil when the stop was
+  /// not `connection_invalid`.
+  public var stopInvalidityClass: ProductM2StopInvalidityClass? = nil
   public let emergencyStopOutcome: ProductM2ControlOutcome
   public let authorizationClose: ProductM2AuthorizationCloseOutcome
   public let authorizationOwnedMaterialErased: Bool

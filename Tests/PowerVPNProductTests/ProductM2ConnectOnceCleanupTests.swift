@@ -263,4 +263,178 @@ import Testing
     #expect(report.firstBadEvent == .authorizationCloseRejected)
     #expect(!report.cleanupVerified)
   }
+
+  @Test func acknowledgedStopNeedsNoInvalidityClassification() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(snapshot: fixture.snapshot, trace: trace)
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(report.stopOutcome == .transportAcknowledged)
+    #expect(report.stopInvalidityClass == nil)
+    #expect(trace.count("stop") == 1)
+    #expect(trace.count("emergency_stop") == 0)
+    #expect(trace.count("observe_generation") == 4)
+  }
+
+  @Test func invalidStopClassifiesSingleHelperExitWithOneBoundedObservation() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        plan: .acknowledgedStop(outcome: .connectionInvalid, requestSent: true),
+        onStop: { _ in trace.setGeneration(m2ExitedGeneration) }
+      )
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(report.stopOutcome == .connectionInvalid)
+    #expect(report.cleanupPath == .sameLeaseStop)
+    #expect(report.stopInvalidityClass == .helperExitedSingleGeneration)
+    let events = trace.events
+    let lastObserve = events.lastIndex(of: "observe_generation") ?? 0
+    #expect(m2EventIndex("stop", in: events) < lastObserve)
+    #expect(trace.count("begin_start") == 1)
+    #expect(trace.count("mutation_lease") == 1)
+    #expect(trace.count("observe_generation") == 5)
+  }
+
+  @Test func invalidStopWithSameRunningGenerationClassifiesSessionInvalid() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        plan: .acknowledgedStop(outcome: .connectionInvalid, requestSent: true)
+      )
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(report.stopOutcome == .connectionInvalid)
+    #expect(report.stopInvalidityClass == .helperRunningSessionInvalid)
+    #expect(trace.count("stop") == 1)
+    #expect(trace.count("emergency_stop") == 0)
+    #expect(trace.count("observe_generation") == 5)
+  }
+
+  @Test func invalidStopWithAdvancedRunCountClassifiesHelperRestart() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        plan: .acknowledgedStop(outcome: .connectionInvalid, requestSent: true),
+        onStop: { _ in trace.setGeneration(m2RestartedGeneration) }
+      )
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(report.stopOutcome == .connectionInvalid)
+    #expect(report.stopInvalidityClass == .helperRestarted)
+    #expect(trace.count("stop") == 1)
+    #expect(trace.count("emergency_stop") == 0)
+    #expect(trace.count("observe_generation") == 5)
+  }
+
+  @Test func invalidStopWithUnobservableGenerationStaysUnclassified() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        plan: .acknowledgedStop(outcome: .connectionInvalid, requestSent: true),
+        onStop: { _ in trace.setGeneration(m2UnavailableGeneration) }
+      )
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(report.stopOutcome == .connectionInvalid)
+    #expect(report.stopInvalidityClass == .unclassified)
+    #expect(trace.count("stop") == 1)
+    #expect(trace.count("emergency_stop") == 0)
+    #expect(trace.count("observe_generation") == 5)
+  }
+
+  @Test func unsentInvalidStopClassifiesFromExistingObservation() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        plan: .acknowledgedStop(outcome: .connectionInvalid, requestSent: false)
+      )
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(report.stopOutcome == .connectionInvalid)
+    #expect(report.cleanupPath == .authenticatedEmergencyStop)
+    #expect(report.stopInvalidityClass == .helperRunningSessionInvalid)
+    #expect(trace.count("stop") == 1)
+    #expect(trace.count("emergency_stop") == 1)
+  }
+
+  @Test func invalidStopClassificationSurvivesDeadlineInvalidatedRebuild() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let clock = ProductM2ManualClock()
+    let trace = ProductM2TestTrace()
+
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        plan: .acknowledgedStop(outcome: .connectionInvalid, requestSent: true),
+        onStop: { _ in
+          // The stop completes but consumes the control-cleanup stage, so the
+          // runner rebuilds the control cleanup via invalidatedByDeadline.
+          clock.set(milliseconds: 73_001)
+          trace.setGeneration(m2ExitedGeneration)
+        }
+      )
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21),
+      budget: .start(clock: clock.clock)
+    )
+
+    #expect(report.stopOutcome == .connectionInvalid)
+    #expect(report.cleanupPath == .cleanupUnproven)
+    #expect(!report.cleanupVerified)
+    #expect(report.outcome == .cleanupUnproven)
+    // The classification computed before the deadline invalidation must
+    // survive the ControlCleanup rebuild.
+    #expect(report.stopInvalidityClass == .helperExitedSingleGeneration)
+    #expect(trace.count("stop") == 1)
+    #expect(trace.count("emergency_stop") == 0)
+    // Classification spent exactly the one bounded read-only observation
+    // (report-budget fallback), and nothing else mutated afterwards.
+    #expect(trace.count("observe_generation") == 5)
+    #expect(trace.count("mutation_lease") == 1)
+    #expect(trace.count("begin_start") == 1)
+  }
 }

@@ -164,6 +164,48 @@ import Testing
     #expect(failure.serverContactRequested)
   }
 
+  @Test func openReportSurfacesActiveCaptureClassificationValueFree() async throws {
+    let trace = ProductM2TestTrace()
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let runtime = ProductPersistentTunnelRuntime(
+      dependencies: productM2TestDependencies(
+        snapshot: fixture.snapshot,
+        trace: trace,
+        activeCaptureOutcome: ProductM2ActiveCaptureOutcome(
+          snapshot: m2CaptureSnapshotFixture(
+            helperGeneration: m2RunningGeneration,
+            helperObservationState: .changedDuringCapture,
+            vendorProcesses: m2VendorProcessesFixture(charonProcessCount: 1)
+          ))
+      )
+    )
+
+    let result = await runtime.open(
+      request: ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21),
+      startupBudget: m2TestBudget()
+    )
+    guard case .failed(let report) = result else {
+      Issue.record("incomplete active capture opened the tunnel")
+      return
+    }
+
+    #expect(report.failure == .activeNetworkUnproven)
+    #expect(report.activeCaptureState == .changedDuringCapture)
+    #expect(report.activeCaptureChangeAxes == [.helperGeneration])
+    #expect(report.activeCaptureIncompleteReason == nil)
+    #expect(report.stopInvalidityClass == nil)
+    let encoded = try #require(
+      String(bytes: JSONEncoder().encode(report), encoding: .utf8))
+    #expect(encoded.contains("\"activeCaptureState\":\"changed_during_capture\""))
+    #expect(encoded.contains("\"activeCaptureChangeAxes\":[\"helper_generation\"]"))
+    #expect(!encoded.contains("activeCaptureIncompleteReason"))
+    #expect(!encoded.contains("stopInvalidityClass"))
+    #expect(!encoded.contains("Campus NC"))
+    #expect(!encoded.contains("thu21"))
+    #expect(!encoded.contains("com.leadsec"))
+  }
+
 }
 
 private func ipv4(

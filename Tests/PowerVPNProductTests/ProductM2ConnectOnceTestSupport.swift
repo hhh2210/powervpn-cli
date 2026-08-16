@@ -14,6 +14,7 @@ final class ProductM2TestTrace: @unchecked Sendable {
   private var storedNetworkWindowIDs: [ObjectIdentifier] = []
   private var storedMatcherPresence: [Bool] = []
   private var storedCleanupStartSent: [Bool] = []
+  private var activeCaptureCallIndex = 0
 
   init(
     generation: VendorHelperGenerationSnapshot = m2ColdGeneration,
@@ -62,6 +63,28 @@ final class ProductM2TestTrace: @unchecked Sendable {
     }
   }
 
+  /// Capture accessor for the shared connect-once dependencies. The M2 flow
+  /// captures in a fixed order (cold, pre-start, active), so an active-capture
+  /// override applies from the third capture on; earlier captures keep drawing
+  /// synthetic baselines.
+  func nextCaptureOutcome(
+    window: NetworkCleanupCaptureWindow,
+    selectedRoutes: VendorCharonSelectedRouteMatcher?,
+    activeOverride: ProductM2ActiveCaptureOutcome?
+  ) -> ProductM2ActiveCaptureOutcome {
+    lock.withLock {
+      storedEvents.append("baseline")
+      storedNetworkWindowIDs.append(ObjectIdentifier(window))
+      storedMatcherPresence.append(selectedRoutes != nil)
+      activeCaptureCallIndex += 1
+      if let activeOverride, activeCaptureCallIndex >= 3 {
+        return activeOverride
+      }
+      let baseline = storedBaselines.isEmpty ? nil : storedBaselines.removeFirst()
+      return ProductM2ActiveCaptureOutcome(baseline: baseline)
+    }
+  }
+
   func markVerified(
     _ baseline: ProductM2NetworkBaseline,
     window: NetworkCleanupCaptureWindow,
@@ -106,6 +129,7 @@ func productM2TestDependencies(
   dependencyAuthorizationSource: ProductM2AuthorizationSource = .nativePortal,
   acquisitionAuthorizationSource: ProductM2AuthorizationSource = .nativePortal,
   leaseAuthorizationSource: ProductM2AuthorizationSource = .nativePortal,
+  activeCaptureOutcome: ProductM2ActiveCaptureOutcome? = nil,
   authorizationPrepare: ProductM2AuthorizedResourceLease.Prepare? = nil,
   controlRuntimePreflightAccepted: Bool = true,
   cancelDuringAcquire: Bool = false,
@@ -176,8 +200,12 @@ func productM2TestDependencies(
     },
     preflightAccepted: { _, _ in trace.preflight() },
     captureNetworkBaseline: { window, selectedRoutes, deadline in
-      let result = trace.nextBaseline(window: window, selectedRoutes: selectedRoutes)
-      onCaptureBaseline(selectedRoutes, result, deadline)
+      let result = trace.nextCaptureOutcome(
+        window: window,
+        selectedRoutes: selectedRoutes,
+        activeOverride: activeCaptureOutcome
+      )
+      onCaptureBaseline(selectedRoutes, result.baseline, deadline)
       return result
     },
     baselineStable: { _, _ in
@@ -272,6 +300,10 @@ let m2ColdGeneration = VendorHelperGenerationSnapshot(
 let m2RunningGeneration = VendorHelperGenerationSnapshot(
   launchdObserved: true, running: true, inactiveConfirmed: false,
   activeCount: 1, pid: 41, runs: 20)
+
+let m2RestartedGeneration = VendorHelperGenerationSnapshot(
+  launchdObserved: true, running: true, inactiveConfirmed: false,
+  activeCount: 1, pid: 43, runs: 22)
 
 let m2ExitedGeneration = VendorHelperGenerationSnapshot(
   launchdObserved: true, running: false, inactiveConfirmed: true,

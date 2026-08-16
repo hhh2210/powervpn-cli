@@ -104,6 +104,24 @@ import Testing
     #expect(!String(describing: snapshot).contains(marker))
   }
 
+  @Test func helperPidChangeBetweenExactRunningProbesFailsClosed() async {
+    var responses = networkCleanupSuccessfulResponses()
+    responses[.helperGeneration] = [
+      networkCleanupSuccess(helperFixture(running: true, pid: 400, runs: 11)),
+      networkCleanupSuccess(helperFixture(running: true, pid: 401, runs: 11)),
+    ]
+    let snapshot = await InstalledNetworkCleanupObserver(
+      runner: FixtureNetworkCleanupRunner(responses)
+    ).capture(window: NetworkCleanupCaptureWindow())
+
+    // Both probes parse as exactRunning, but A≠B: the observer must surface
+    // the change instead of trusting either generation reading.
+    #expect(!snapshot.complete)
+    #expect(snapshot.helperObservationState == .changedDuringCapture)
+    #expect(snapshot.helperGeneration.exactRunning)
+    #expect(snapshot.helperGeneration.pid == 400)
+  }
+
   @Test func surgeOrHelperChangeInsideCaptureFailsClosed() async {
     var surgeResponses = networkCleanupSuccessfulResponses()
     surgeResponses[.surgeProcesses] = [
