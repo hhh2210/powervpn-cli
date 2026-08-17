@@ -4,8 +4,10 @@
 
 非官方 arm64 原生 macOS 客户端，替代已停更的 LeadSec PowerVPN 3.2.1 GUI。
 它不自带隧道栈，而是驱动官方安装的特权 helper
-（/Library/PrivilegedHelperTools/com.leadsec.charon-xpc）按原协议建隧道。
+（/Library/PrivilegedHelperTools/com.leadsec.charon-xpc）按原协议建隧道，优化长链接稳定性以及与 surge 类代理软件的耦合性
+
 不绕过认证；前提是这台机器仍装有官方 PowerVPN。
+<img width="700" height="112" alt="image" src="https://github.com/user-attachments/assets/2baf3ae8-d342-44de-a3ea-0c0da8c93265" />
 
 ## 平台与依赖
 
