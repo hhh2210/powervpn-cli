@@ -30,7 +30,7 @@ mkdir -p ~/.config/powervpn
 #    targets.json：cp docs/targets.example.json 改填真实值（portalOrigin
 #    与 targets 映射），权限 0600
 
-# 3. 配置 ~/.ssh/config 的 Host 块，见下文 Remote-SSH 配置
+# 3. 配置 ~/.ssh/config 的 Host 块（见下文 Remote-SSH 配置），然后 `ssh campus-host` 即可走隧道
 ```
 
 targets.json 缺失、目标不存在、字段非法时分别 fail-closed 为
@@ -73,6 +73,10 @@ powervpn m2 connect-once \
 ```
 
 代理访问（proxy）：
+
+日常不需要手动执行 proxy 命令——配好 ~/.ssh/config 的 Host 块后，直接 `ssh campus-host`，OpenSSH 会在 ProxyCommand 里自动调用 `powervpn proxy ssh`。
+
+底层命令（OpenSSH 自动调用，也可手动用于调试）：
 
 ```sh
 # OpenSSH ProxyCommand 模式（Remote-SSH 推荐路径）
@@ -117,7 +121,7 @@ argv、日志或报告。
 
 ## Remote-SSH 配置
 
-proxy ssh 就是一个 OpenSSH ProxyCommand：拿到一次批准的资源租约后，
+Host 块的 ProxyCommand 会自动调用 `powervpn proxy ssh`：拿到一次批准的资源租约后，
 exec 系统 /usr/bin/nc 连到数字 IPv4 + 端口，透传 stdin/stdout。
 VS Code / Cursor 的 Remote-SSH 起的就是同一个 ssh，不需要额外 SOCKS 跳板，
 http.proxy / remote.SSH.httpProxy 与这一跳无关。
@@ -139,6 +143,8 @@ Host campus-host
 - ProxyCommand 是一整行，不要整体加引号；只有含空格的单个参数（如资源
   显示名）才单独引起来。`<binary-path>` 用
   swift build --product powervpn --arch arm64 产物的绝对路径。
+
+配好后 `ssh campus-host` 就是日常用法；VS Code / Cursor Remote-SSH 选同一别名。
 
 ## 工程约束
 
