@@ -1,13 +1,12 @@
 name: catalog-replay
 
-# Runner: `xcode-27` — see ci.yml for the toolchain note.
+# Runner: `xcode-27` — see docs/ci.md for the toolchain matrix.
 
-# The bug-hunting job: deterministically replays every recorded portal
-# catalog-rejection shape (the ~1/8 intermittent server-side degradation,
-# see docs/ci.md) against the real acquisition pipeline — login accepted,
-# catalog rejected, exactly one fresh-login retry, truthful discriminator
-# tokens. CI never contacts the real portal; all fixtures are synthetic
-# value-free XML.
+# Deterministically replays synthetic portal catalog-rejection shapes against
+# the real client acquisition pipeline: login accepted, catalog rejected,
+# exactly one fresh-login retry, truthful discriminator tokens. It verifies
+# client behavior, not the unresolved server trigger. CI never contacts the
+# real portal; all fixtures are synthetic value-free XML.
 
 on:
   push:
@@ -23,8 +22,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: catalog-replay-${{ github.ref }}
-  cancel-in-progress: true
+  group: catalog-replay-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
 
 jobs:
   replay:
@@ -32,14 +31,7 @@ jobs:
     runs-on: xcode-27
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Cache .build
-        uses: actions/cache@v4
-        with:
-          path: .build
-          key: spm-macos14-${{ hashFiles('Package.swift') }}
-          restore-keys: spm-macos14-
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Run catalog replay suite
         run: swift test --filter CatalogReplay
@@ -51,20 +43,13 @@ jobs:
     timeout-minutes: 30
     strategy:
       fail-fast: false
-      # One leg per deterministic rotation of the shape matrix; seeds are
-      # structural rotations (11 shapes -> 11 distinct orders), never
-      # randomness, so a failure names its exact seed.
+      # One leg per stable seeded shuffle. The test suite pins distinctness
+      # and predecessor/successor coverage, so a failure names an exact,
+      # reproducible seed without relying on process randomness.
       matrix:
         seed: ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10']
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Cache .build
-        uses: actions/cache@v4
-        with:
-          path: .build
-          key: spm-macos14-${{ hashFiles('Package.swift') }}
-          restore-keys: spm-macos14-
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Replay with shuffled shape order
         env:

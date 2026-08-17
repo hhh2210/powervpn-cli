@@ -119,9 +119,11 @@ import Testing
     )
     let server = sockets.server
     let group = DispatchGroup()
+    let partialHeaderWritten = DispatchSemaphore(value: 0)
     group.enter()
     DispatchQueue.global().async {
       writeAll(server, Data([0x00, 0x00]))
+      partialHeaderWritten.signal()
       usleep(30_000)
       writeAll(server, Data([0x00, 0x04, 0x01]))
       usleep(70_000)
@@ -129,6 +131,7 @@ import Testing
       group.leave()
     }
 
+    #expect(partialHeaderWritten.wait(timeout: .now() + .seconds(1)) == .success)
     let started = ContinuousClock.now
     try expectTransportError(.timeout(.readPayload)) {
       try transport.receive()

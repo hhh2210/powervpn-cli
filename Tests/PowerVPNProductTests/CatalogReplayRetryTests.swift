@@ -5,7 +5,7 @@ import Testing
 @testable import PowerVPNPortal
 @testable import PowerVPNProduct
 
-/// Retry and exhaustion replay: every recorded catalog-rejection shape
+/// Retry and exhaustion replay: every synthetic catalog-rejection shape
 /// drives the real acquisition pipeline through login accepted → catalog
 /// rejected → exactly one fresh-login retry. The server-side trigger of
 /// the live intermittent rejection is unresolved (see docs/ci.md); these
@@ -13,10 +13,11 @@ import Testing
 /// behavior claim.
 @Suite struct CatalogReplayRetryTests {
 
-  @Test(arguments: CatalogReplayMatrix.shapes)
+  @Test(arguments: CatalogReplayMatrix.shapeIDs)
   func catalogReplayRetriesOnceWithFreshSessionThenSucceeds(
-    _ shape: CatalogReplayShape
+    _ shapeID: String
   ) async throws {
+    let shape = try #require(CatalogReplayMatrix.shape(id: shapeID))
     let report = try await replayCatalogShape(shape, secondCatalog: .healthy)
 
     #expect(report.outcome == .connectedAndCleanedUp)
@@ -26,10 +27,11 @@ import Testing
     try assertCatalogReplayValueFree(report, shape: shape)
   }
 
-  @Test(arguments: CatalogReplayMatrix.shapes)
+  @Test(arguments: CatalogReplayMatrix.shapeIDs)
   func catalogReplayExhaustsAfterExactlyOneRetryWithTruthfulTokens(
-    _ shape: CatalogReplayShape
+    _ shapeID: String
   ) async throws {
+    let shape = try #require(CatalogReplayMatrix.shape(id: shapeID))
     let report = try await replayCatalogShape(shape, secondCatalog: .rejected)
 
     #expect(report.outcome == .resourceCatalogRejected)

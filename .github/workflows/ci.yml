@@ -1,9 +1,8 @@
 name: ci
 
-# Runner: `xcode-27` (macOS 26 + Xcode 27, Swift 6.4) — the toolchain the
-# sources are developed against. macos-14 tops out at Xcode 16.2
-# (Swift 6.0.x), which rejects PortalRequestCancellation.swift:20
-# (member/local `task` shadowing); do not downgrade without a source fix.
+# The build matrix covers both the advertised minimum toolchain and the
+# current development toolchain. Keep both legs: a current-only green build
+# does not prove source installation on macOS 14.
 
 on:
   push:
@@ -14,21 +13,66 @@ on:
     # Weekly canary, Mondays 09:00 UTC.
     - cron: '0 9 * * 1'
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      checkout-ref:
+        description: Optional ref to verify (used by the tag release gate).
+        required: false
+        type: string
+        default: ''
+      expected-sha:
+        description: Optional exact commit expected after checkout.
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # A branch push may replace an older push, but it must not cancel the
+  # independent scheduled evidence run for the same default-branch ref.
+  group: ci-${{ github.event_name }}-${{ inputs.checkout-ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
   build-and-test:
-    name: build-and-test (swift test, all suites)
-    runs-on: xcode-27
+    name: build-and-test (${{ matrix.toolchain }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - toolchain: minimum-xcode-16.2
+            runner: macos-14
+            developer-dir: /Applications/Xcode_16.2.app/Contents/Developer
+          - toolchain: current-xcode-27
+            runner: xcode-27
+            developer-dir: ''
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout-ref }}
+
+      - name: Verify source identity
+        id: source
+        env:
+          EXPECTED_SHA: ${{ inputs.expected-sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ -n "$EXPECTED_SHA" && "$actual_sha" != "$EXPECTED_SHA" ]]; then
+            echo "Expected $EXPECTED_SHA, checked out $actual_sha" >&2
+            exit 1
+          fi
+          echo "sha=$actual_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Select minimum-supported Xcode
+        if: matrix.developer-dir != ''
+        env:
+          XCODE_PATH: ${{ matrix.developer-dir }}
+        run: echo "DEVELOPER_DIR=$XCODE_PATH" >> "$GITHUB_ENV"
 
       - name: Report toolchain
         run: |
@@ -36,11 +80,12 @@ jobs:
           xcodebuild -version
 
       - name: Cache .build
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .build
-          key: spm-macos14-${{ hashFiles('Package.swift') }}
-          restore-keys: spm-macos14-
+          # Exact source and toolchain identity make this safe but deliberately
+          # conservative: only retries of the same commit reuse build objects.
+          key: spm-debug-${{ runner.os }}-${{ runner.arch }}-${{ matrix.toolchain }}-${{ steps.source.outputs.sha }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
 
       - name: Build (debug, product powervpn)
         run: swift build --product powervpn -c debug
@@ -53,7 +98,20 @@ jobs:
     runs-on: xcode-27
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout-ref }}
+
+      - name: Verify source identity
+        env:
+          EXPECTED_SHA: ${{ inputs.expected-sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ -n "$EXPECTED_SHA" && "$actual_sha" != "$EXPECTED_SHA" ]]; then
+            echo "Expected $EXPECTED_SHA, checked out $actual_sha" >&2
+            exit 1
+          fi
 
       - name: Lint Sources and Tests
         run: xcrun swift-format lint --strict --recursive Sources Tests
@@ -65,9 +123,21 @@ jobs:
     env:
       GITLEAKS_VERSION: '8.30.1'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          ref: ${{ inputs.checkout-ref }}
+
+      - name: Verify source identity
+        env:
+          EXPECTED_SHA: ${{ inputs.expected-sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ -n "$EXPECTED_SHA" && "$actual_sha" != "$EXPECTED_SHA" ]]; then
+            echo "Expected $EXPECTED_SHA, checked out $actual_sha" >&2
+            exit 1
+          fi
 
       - name: Install pinned gitleaks
         run: |
@@ -91,19 +161,35 @@ jobs:
     runs-on: xcode-27
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout-ref }}
+
+      - name: Verify source identity
+        id: source
+        env:
+          EXPECTED_SHA: ${{ inputs.expected-sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ -n "$EXPECTED_SHA" && "$actual_sha" != "$EXPECTED_SHA" ]]; then
+            echo "Expected $EXPECTED_SHA, checked out $actual_sha" >&2
+            exit 1
+          fi
+          echo "sha=$actual_sha" >> "$GITHUB_OUTPUT"
 
       - name: Cache .build
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .build
-          key: spm-release-macos14-${{ hashFiles('Package.swift') }}
-          restore-keys: spm-release-macos14-
+          key: spm-release-${{ runner.os }}-${{ runner.arch }}-xcode-27-arm64-${{ steps.source.outputs.sha }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
 
       - name: Build release arm64
         run: swift build --product powervpn --arch arm64 -c release
 
       - name: Verify arch and report sha256
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
           bin="$(swift build --show-bin-path --arch arm64 -c release)/powervpn"
           file "$bin"
@@ -114,5 +200,5 @@ jobs:
             echo '## release-build'
             echo "- product: \`powervpn\` (arm64, release)"
             echo "- sha256: \`${sha}\`"
-            echo "- commit: \`${GITHUB_SHA}\`"
+            echo "- commit: \`${SOURCE_SHA}\`"
           } >> "$GITHUB_STEP_SUMMARY"

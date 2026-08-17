@@ -3,24 +3,19 @@ import Foundation
 @testable import PowerVPNPortal
 @testable import PowerVPNProduct
 
-/// Machine-readable provenance for one replay shape. Live catalog
-/// rejections were recorded on 2026-08-12 / 2026-08-15 / 2026-08-16 with
-/// the outcome token only — the finer classification was never recorded
-/// for any live reject (schema-8 predates it; proxy mode dropped it).
-/// Provenance therefore separates what was actually observed from what is
-/// enumerated from the classification code, and never presents a
-/// hypothesis as a conclusion.
-enum CatalogReplayProvenance: String, Sendable, CaseIterable {
-  /// Shape whose rejection outcome was recorded live. Because no live
-  /// class was ever recorded, an `observed_live` entry is the dossier's
-  /// designated best-fit stand-in for one specific recorded event, with
-  /// the dossier row cited in `evidence`.
-  case observedLive = "observed_live"
-  /// Shape in the same structural family as an observed live rejection,
-  /// but not itself the designated stand-in for any recorded event.
-  case derivedFromObserved = "derived_from_observed"
-  /// Shape enumerated from the failure-classification code to pin the
-  /// taxonomy; never seen live.
+/// Whether a live event outcome exists behind a fixture. Live events only
+/// recorded the coarse `resource_catalog_rejected` outcome; none captured
+/// the XML shape or fine-grained classification used by this replay.
+enum CatalogReplayEventProvenance: String, Sendable, CaseIterable {
+  case observedOutcome = "observed_outcome"
+  case noObservedEvent = "no_observed_event"
+}
+
+/// Where the concrete XML/classification pair came from. Every replay shape
+/// is synthetic, including best-fit stand-ins associated with live outcomes.
+enum CatalogReplayShapeProvenance: String, Sendable, CaseIterable {
+  case syntheticBestFit = "synthetic_best_fit"
+  case syntheticRelated = "synthetic_related"
   case syntheticTaxonomy = "synthetic_taxonomy"
 }
 
@@ -38,12 +33,14 @@ struct CatalogReplayShape: Sendable {
   /// The catalog-mapping detail the first selection attempt must report
   /// (`nil` for `catalog_empty`, which carries the class only).
   let expectedFailure: ProductResourceCatalogFailure?
-  /// Fixture-internal byte sequences that must never reach a report.
-  let sentinels: [String]
-  /// Where this shape comes from; see `CatalogReplayProvenance`.
-  let provenance: CatalogReplayProvenance
-  /// Dossier row / classifier reference backing the provenance claim.
-  /// Required for `.observedLive` and `.derivedFromObserved`.
+  /// Raw failure-causing byte sequences that must never reach a report.
+  let rawFailureValues: [String]
+  /// Whether a coarse live outcome is associated with this synthetic shape.
+  let eventProvenance: CatalogReplayEventProvenance
+  /// Where the concrete synthetic XML/classification pair came from.
+  let shapeProvenance: CatalogReplayShapeProvenance
+  /// Dossier row or classifier reference backing the association claim.
+  /// Required for best-fit/related shapes; absent for taxonomy-only shapes.
   let evidence: String?
 }
 
@@ -57,14 +54,15 @@ enum CatalogReplayMatrix {
   static let requestedDisplayName = "Campus NC"
 
   static let shapes: [CatalogReplayShape] = [
-    // Observed live (dossier-designated best-fit stand-ins).
+    // Synthetic best-fit stand-ins associated with observed coarse outcomes.
     CatalogReplayShape(
       label: "catalog_empty",
       resourceXML: m2ResourceXML([]),
       expectedClass: .catalogEmpty,
       expectedFailure: nil,
-      sentinels: [],
-      provenance: .observedLive,
+      rawFailureValues: [],
+      eventProvenance: .observedOutcome,
+      shapeProvenance: .syntheticBestFit,
       evidence:
         "catalog-investigation timeline row 31 (proxy-ssh-4-ide "
         + "2026-08-16): resource_catalog_rejected recorded, class not; "
@@ -76,15 +74,16 @@ enum CatalogReplayMatrix {
         + "</INTERGRATION_INFO></ROOT>",
       expectedClass: .catalogMapping,
       expectedFailure: .scope(.resourceListMissing),
-      sentinels: [],
-      provenance: .observedLive,
+      rawFailureValues: [],
+      eventProvenance: .observedOutcome,
+      shapeProvenance: .syntheticBestFit,
       evidence:
         "catalog-investigation timeline row 21 (m2-live-attempt7 "
         + "2026-08-15, schema 8): resource_catalog_rejected recorded, "
         + "class not; resource_list_missing is the failure-hunter §6b "
         + "best-fit stand-in"
     ),
-    // Same degraded-contentless-body family as the observed events.
+    // Synthetic sibling hypothesis from failure-hunter; no matching live event.
     CatalogReplayShape(
       label: "integration_info_missing",
       resourceXML: replayXML(
@@ -93,8 +92,9 @@ enum CatalogReplayMatrix {
       ),
       expectedClass: .catalogMapping,
       expectedFailure: .scope(.integrationInfoMissing),
-      sentinels: [],
-      provenance: .derivedFromObserved,
+      rawFailureValues: [],
+      eventProvenance: .noObservedEvent,
+      shapeProvenance: .syntheticRelated,
       evidence: "failure-hunter §3 row 2: 200 XML reply with no INTERGRATION_INFO"
     ),
     // Enumerated from the classification code; never seen live.
@@ -107,8 +107,9 @@ enum CatalogReplayMatrix {
       ),
       expectedClass: .catalogMapping,
       expectedFailure: .scope(.majorVersionMissing),
-      sentinels: [],
-      provenance: .syntheticTaxonomy,
+      rawFailureValues: [],
+      eventProvenance: .noObservedEvent,
+      shapeProvenance: .syntheticTaxonomy,
       evidence: nil
     ),
     CatalogReplayShape(
@@ -121,8 +122,9 @@ enum CatalogReplayMatrix {
       ),
       expectedClass: .catalogMapping,
       expectedFailure: .scope(.majorVersionDuplicate),
-      sentinels: [],
-      provenance: .syntheticTaxonomy,
+      rawFailureValues: [],
+      eventProvenance: .noObservedEvent,
+      shapeProvenance: .syntheticTaxonomy,
       evidence: nil
     ),
     CatalogReplayShape(
@@ -134,8 +136,9 @@ enum CatalogReplayMatrix {
       ),
       expectedClass: .catalogMapping,
       expectedFailure: .scope(.majorVersionMalformed),
-      sentinels: [],
-      provenance: .syntheticTaxonomy,
+      rawFailureValues: [],
+      eventProvenance: .noObservedEvent,
+      shapeProvenance: .syntheticTaxonomy,
       evidence: nil
     ),
     CatalogReplayShape(
@@ -150,8 +153,9 @@ enum CatalogReplayMatrix {
         stage: .scope, failureClass: .majorVersionInvalid,
         resourceOrdinal: nil, fieldPath: "common.majorVersion"
       ),
-      sentinels: ["2x"],
-      provenance: .syntheticTaxonomy,
+      rawFailureValues: ["2x"],
+      eventProvenance: .noObservedEvent,
+      shapeProvenance: .syntheticTaxonomy,
       evidence: nil
     ),
     CatalogReplayShape(
@@ -163,8 +167,9 @@ enum CatalogReplayMatrix {
         stage: .resource, failureClass: .integerInvalid,
         resourceOrdinal: 1, fieldPath: "common.ike_port"
       ),
-      sentinels: ["0x1f4"],
-      provenance: .syntheticTaxonomy,
+      rawFailureValues: ["0x1f4"],
+      eventProvenance: .noObservedEvent,
+      shapeProvenance: .syntheticTaxonomy,
       evidence: nil
     ),
     CatalogReplayShape(
@@ -179,8 +184,9 @@ enum CatalogReplayMatrix {
         stage: .resource, failureClass: .displayNameMissing,
         resourceOrdinal: 1, fieldPath: "TUNNEL.tunnel-name"
       ),
-      sentinels: [],
-      provenance: .syntheticTaxonomy,
+      rawFailureValues: [],
+      eventProvenance: .noObservedEvent,
+      shapeProvenance: .syntheticTaxonomy,
       evidence: nil
     ),
     CatalogReplayShape(
@@ -191,8 +197,9 @@ enum CatalogReplayMatrix {
         stage: .resource, failureClass: .displayNameInvalid,
         resourceOrdinal: 1, fieldPath: "TUNNEL.tunnel-name"
       ),
-      sentinels: [],
-      provenance: .syntheticTaxonomy,
+      rawFailureValues: [String(repeating: "a", count: 257)],
+      eventProvenance: .noObservedEvent,
+      shapeProvenance: .syntheticTaxonomy,
       evidence: nil
     ),
     CatalogReplayShape(
@@ -208,8 +215,9 @@ enum CatalogReplayMatrix {
         stage: .resource, failureClass: .duplicateField,
         resourceOrdinal: 1, fieldPath: "id"
       ),
-      sentinels: ["duplicate-helper-session"],
-      provenance: .syntheticTaxonomy,
+      rawFailureValues: ["duplicate-helper-session"],
+      eventProvenance: .noObservedEvent,
+      shapeProvenance: .syntheticTaxonomy,
       evidence: nil
     ),
   ]
@@ -218,27 +226,23 @@ enum CatalogReplayMatrix {
   /// shape (session ids, key material, map ids are all synthetic bytes).
   static let universalSentinels = [
     "helper-session-material", "psk-material", "resource-map",
+    "cookie-session-material",
   ]
 
-  /// Deterministic shape ordering for order-dependence replay. Seed 0 is
-  /// the recorded order; seed n rotates the matrix by n. Seeds never come
-  /// from randomness — CI selects them via `CATALOG_REPLAY_PERMUTATIONS`
-  /// (comma-separated), default "0"; the nightly matrix passes one seed
-  /// per matrix leg.
-  static func order(seed: Int) -> [CatalogReplayShape] {
-    guard !shapes.isEmpty else { return shapes }
-    let offset = ((seed % shapes.count) + shapes.count) % shapes.count
-    return Array(shapes[offset...] + shapes[..<offset])
+  static let shapeIDs = shapes.map(\.label)
+
+  static func shape(id: String) -> CatalogReplayShape? {
+    shapes.first { $0.label == id }
   }
 
-  static func permutationSeeds() -> [Int] {
-    let raw =
-      ProcessInfo.processInfo.environment["CATALOG_REPLAY_PERMUTATIONS"]
-      ?? "0"
-    return
-      raw
-      .split(separator: ",")
-      .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+  static func snapshotCookie(shapeID: String, attempt: String) -> String {
+    "catalog-replay-\(shapeID)-\(attempt)-cookie"
+  }
+
+  static func snapshotSentinels(shapeID: String) -> [String] {
+    ["first", "retry", "support"].map {
+      snapshotCookie(shapeID: shapeID, attempt: $0)
+    }
   }
 
   private static func replayXML(integrationInfo: String?, body: String) -> String {

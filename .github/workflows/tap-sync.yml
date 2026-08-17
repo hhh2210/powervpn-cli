@@ -1,40 +1,115 @@
 name: tap-sync
 
-# On a v* tag push this job prints the manual release checklist for the
-# Homebrew tap (hhh2210/homebrew-powervpn). The tap's scripts/release.sh
-# pins the tag tarball sha256 into Formula/powervpn.rb and pushes; it runs
-# on the maintainer machine because it rewrites and pushes the tap repo.
-# CI deliberately does not hold tap credentials.
+# A real vX.Y.Z tag is resolved first, then the reusable CI workflow checks
+# that exact commit. Only a fully green tag receives the manual Homebrew tap
+# checklist. CI deliberately holds no tap credentials.
 
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      version:
+        description: Existing stable SemVer tag without the leading v (for example, 0.1.1).
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 jobs:
+  resolve-release:
+    name: resolve existing release tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ref: ${{ steps.release.outputs.ref }}
+      sha: ${{ steps.verify.outputs.sha }}
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - name: Resolve and validate stable SemVer
+        id: release
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            [[ "$REF_TYPE" == "tag" ]] || {
+              echo "tap-sync push must be a tag event" >&2
+              exit 1
+            }
+            tag="$REF_NAME"
+          else
+            tag="v$DISPATCH_VERSION"
+          fi
+
+          if [[ ! "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Expected a stable SemVer tag in vX.Y.Z form; got: $tag" >&2
+            exit 1
+          fi
+
+          version="${tag#v}"
+          {
+            echo "ref=refs/tags/$tag"
+            echo "tag=$tag"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check out the exact release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.release.outputs.ref }}
+
+      - name: Prove the tag exists and resolve its commit
+        id: verify
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git show-ref --verify --quiet "refs/tags/$TAG"
+          tag_sha="$(git rev-parse "$TAG^{commit}")"
+          head_sha="$(git rev-parse HEAD)"
+          if [[ "$tag_sha" != "$head_sha" ]]; then
+            echo "Tag $TAG resolves to $tag_sha, but checkout is $head_sha" >&2
+            exit 1
+          fi
+          echo "sha=$head_sha" >> "$GITHUB_OUTPUT"
+
+  verify-tag:
+    name: verify exact release tag
+    needs: resolve-release
+    uses: ./.github/workflows/ci.yml
+    with:
+      checkout-ref: ${{ needs.resolve-release.outputs.ref }}
+      expected-sha: ${{ needs.resolve-release.outputs.sha }}
+
   checklist:
     name: tap release checklist (manual steps)
+    needs: [resolve-release, verify-tag]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Print manual tap release steps
+        env:
+          TAG: ${{ needs.resolve-release.outputs.tag }}
+          VERSION: ${{ needs.resolve-release.outputs.version }}
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          tag="${GITHUB_REF_NAME:-manual run}"
           {
             echo '## homebrew-powervpn release checklist'
             echo
-            echo "Tag pushed: \`${tag}\`"
+            echo "Verified tag: \`${TAG}\`"
             echo
             echo 'The tap is not updated automatically. Run once on the'
             echo 'maintainer machine (from the tap TAGGING.md):'
             echo
             echo '```sh'
             echo 'cd /path/to/homebrew-powervpn'
-            echo "./scripts/release.sh ${version:-<version>}"
+            echo "./scripts/release.sh $VERSION"
             echo '```'
             echo
             echo 'release.sh downloads the tag tarball, verifies it pins a'
@@ -49,4 +124,4 @@ jobs:
             echo 'brew reinstall hhh2210/powervpn/powervpn --build-from-source'
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "tap-sync checklist emitted for ${tag}"
+          echo "tap-sync checklist emitted for verified tag $TAG"

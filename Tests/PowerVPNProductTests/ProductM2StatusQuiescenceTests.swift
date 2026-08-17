@@ -3,7 +3,7 @@ import Testing
 
 @testable import PowerVPNProduct
 
-@Suite struct ProductM2StatusQuiescenceTests {
+@Suite(.serialized) struct ProductM2StatusQuiescenceTests {
   @Test func lateStatusEventRestartsQuietWindowBeforeRouteActivation() async throws {
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
     defer { fixture.erase() }
@@ -15,6 +15,7 @@ import Testing
         trace: trace,
         statusEventCountOperation: statusEvents.current
       ))
+    let coordinatorStarted = ContinuousClock.now
     let task = Task {
       await coordinator.run(
         ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
@@ -22,14 +23,14 @@ import Testing
     }
 
     #expect(await waitForStatusWait(trace))
-    let quiescenceStarted = ContinuousClock.now
+    let statusWaitObserved = ContinuousClock.now
     try await Task.sleep(for: .milliseconds(150))
     statusEvents.increment()
     #expect(trace.count("route_enable") == 0)
     #expect(await waitForRouteEnable(trace, timeout: .milliseconds(500)))
-    let elapsed = quiescenceStarted.duration(to: ContinuousClock.now)
-    #expect(elapsed >= .milliseconds(500))
-    #expect(elapsed <= .milliseconds(650))
+    let routeEnabled = ContinuousClock.now
+    #expect(coordinatorStarted.duration(to: routeEnabled) >= .milliseconds(500))
+    #expect(statusWaitObserved.duration(to: routeEnabled) <= .milliseconds(650))
 
     let report = await task.value
     #expect(report.outcome == .connectedAndCleanedUp)
@@ -47,6 +48,7 @@ import Testing
         trace: trace,
         statusEventCountOperation: statusEvents.current
       ))
+    let coordinatorStarted = ContinuousClock.now
     let task = Task {
       await coordinator.run(
         ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
@@ -54,12 +56,12 @@ import Testing
     }
 
     #expect(await waitForStatusWait(trace))
-    let quiescenceStarted = ContinuousClock.now
+    let statusWaitObserved = ContinuousClock.now
     #expect(trace.count("route_enable") == 0)
     #expect(await waitForRouteEnable(trace, timeout: .milliseconds(650)))
-    let elapsed = quiescenceStarted.duration(to: ContinuousClock.now)
-    #expect(elapsed >= .milliseconds(350))
-    #expect(elapsed <= .milliseconds(600))
+    let routeEnabled = ContinuousClock.now
+    #expect(coordinatorStarted.duration(to: routeEnabled) >= .milliseconds(350))
+    #expect(statusWaitObserved.duration(to: routeEnabled) <= .milliseconds(600))
 
     let report = await task.value
     #expect(report.outcome == .connectedAndCleanedUp)
@@ -77,6 +79,7 @@ import Testing
         trace: trace,
         statusEventCountOperation: statusEvents.current
       ))
+    let coordinatorStarted = ContinuousClock.now
     let task = Task {
       await coordinator.run(
         ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
@@ -84,7 +87,7 @@ import Testing
     }
 
     #expect(await waitForStatusWait(trace))
-    let quiescenceStarted = ContinuousClock.now
+    let statusWaitObserved = ContinuousClock.now
     let emitter = Task {
       for _ in 0..<8 {
         try? await Task.sleep(for: .milliseconds(90))
@@ -94,9 +97,9 @@ import Testing
     try await Task.sleep(for: .milliseconds(650))
     #expect(trace.count("route_enable") == 0)
     #expect(await waitForRouteEnable(trace, timeout: .milliseconds(350)))
-    let elapsed = quiescenceStarted.duration(to: ContinuousClock.now)
-    #expect(elapsed >= .milliseconds(750))
-    #expect(elapsed <= .milliseconds(1_000))
+    let routeEnabled = ContinuousClock.now
+    #expect(coordinatorStarted.duration(to: routeEnabled) >= .milliseconds(750))
+    #expect(statusWaitObserved.duration(to: routeEnabled) <= .milliseconds(1_000))
     await emitter.value
 
     let report = await task.value

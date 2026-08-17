@@ -32,40 +32,75 @@ import Testing
   /// `unclassified` is reachable only through opaque throws (no XML bytes
   /// produce it — pinned in `ProductPortalDryRunCatalogFailureTests`).
   @Test func duplicateResourceListIsRejectedAtMintBeforeAnyLease() {
-    var minted = false
-    do {
+    #expect(throws: AuthenticatedPortalSnapshotError.duplicateResourceList) {
       _ = try authenticatedSnapshot(
         resourceXML: "<ROOT><INTERGRATION_INFO><VERSION major=\"2\"/>"
           + "<RESOURCE_LIST/><RESOURCE_LIST/></INTERGRATION_INFO></ROOT>")
-      minted = true
-    } catch {}
-    #expect(!minted, "duplicate RESOURCE_LIST must be rejected by the mint gate")
+    }
   }
 
   // MARK: provenance inventory
 
-  /// Exactly one dossier-designated stand-in per recorded live catalog
-  /// rejection (timeline rows 21 and 31); every observed/derived shape
-  /// must cite its evidence. No live classification was ever recorded, so
-  /// `observed_live` claims are stand-ins by construction — the pinned
-  /// count keeps that honest.
+  /// Two coarse live outcomes (timeline rows 21 and 31) are associated with
+  /// synthetic best-fit stand-ins. No live event recorded a concrete shape
+  /// or classification, so the two provenance dimensions must never imply
+  /// otherwise.
   @Test func provenanceInventoryIsPinnedAndEvidenceBacked() {
-    let observed = CatalogReplayMatrix.shapes.filter { $0.provenance == .observedLive }
-    let derived = CatalogReplayMatrix.shapes.filter {
-      $0.provenance == .derivedFromObserved
+    let observedOutcomes = CatalogReplayMatrix.shapes.filter {
+      $0.eventProvenance == .observedOutcome
     }
-    #expect(observed.count == 2)
-    #expect(Set(observed.map(\.label)) == ["catalog_empty", "resource_list_missing"])
-    for shape in observed + derived {
+    let bestFits = CatalogReplayMatrix.shapes.filter {
+      $0.shapeProvenance == .syntheticBestFit
+    }
+    let related = CatalogReplayMatrix.shapes.filter {
+      $0.shapeProvenance == .syntheticRelated
+    }
+    #expect(observedOutcomes.count == 2)
+    #expect(
+      Set(observedOutcomes.map(\.label))
+        == ["catalog_empty", "resource_list_missing"])
+    #expect(Set(bestFits.map(\.label)) == Set(observedOutcomes.map(\.label)))
+    for shape in bestFits {
+      #expect(shape.eventProvenance == .observedOutcome)
+    }
+    for shape in related {
+      #expect(shape.eventProvenance == .noObservedEvent)
+    }
+    for shape in bestFits + related {
       #expect(
         !(shape.evidence?.isEmpty ?? true),
         "\(shape.label) must cite dossier evidence")
     }
     for shape in CatalogReplayMatrix.shapes
     where
-      shape.provenance == .syntheticTaxonomy
+      shape.shapeProvenance == .syntheticTaxonomy
     {
+      #expect(shape.eventProvenance == .noObservedEvent)
       #expect(shape.evidence == nil, "\(shape.label) must not claim evidence")
     }
+  }
+
+  @Test func sentinelInventoryPinsRawFailuresAndUniqueSnapshotSessions() {
+    let expectedRawValues: [String: Set<String>] = [
+      "major_version_invalid": ["2x"],
+      "resource_integer_invalid_ike_port": ["0x1f4"],
+      "resource_display_name_invalid": [String(repeating: "a", count: 257)],
+      "resource_duplicate_field": ["duplicate-helper-session"],
+    ]
+
+    for shape in CatalogReplayMatrix.shapes {
+      let expected = expectedRawValues[shape.label] ?? []
+      #expect(Set(shape.rawFailureValues) == expected)
+      for rawValue in shape.rawFailureValues {
+        #expect(shape.resourceXML.contains(rawValue))
+      }
+    }
+
+    let snapshotSessions = CatalogReplayMatrix.shapeIDs.flatMap {
+      CatalogReplayMatrix.snapshotSentinels(shapeID: $0)
+    }
+    #expect(snapshotSessions.count == CatalogReplayMatrix.shapeIDs.count * 3)
+    #expect(Set(snapshotSessions).count == snapshotSessions.count)
+    #expect(CatalogReplayMatrix.universalSentinels.contains("cookie-session-material"))
   }
 }

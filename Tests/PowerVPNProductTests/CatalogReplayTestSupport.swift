@@ -32,7 +32,11 @@ func replayCatalogShape(
   _ shape: CatalogReplayShape,
   secondCatalog: CatalogReplaySecondCatalog
 ) async throws -> ProductM2ConnectReport {
-  let first = try authenticatedSnapshot(resourceXML: shape.resourceXML)
+  let first = try authenticatedSnapshot(
+    cookie: CatalogReplayMatrix.snapshotCookie(
+      shapeID: shape.label, attempt: "first"),
+    resourceXML: shape.resourceXML
+  )
   let secondXML: String
   switch secondCatalog {
   case .healthy:
@@ -40,8 +44,16 @@ func replayCatalogShape(
   case .rejected:
     secondXML = shape.resourceXML
   }
-  let second = try authenticatedSnapshot(resourceXML: secondXML)
-  let support = try authenticatedSnapshot(resourceXML: m2ResourceXML(["support-only"]))
+  let second = try authenticatedSnapshot(
+    cookie: CatalogReplayMatrix.snapshotCookie(
+      shapeID: shape.label, attempt: "retry"),
+    resourceXML: secondXML
+  )
+  let support = try authenticatedSnapshot(
+    cookie: CatalogReplayMatrix.snapshotCookie(
+      shapeID: shape.label, attempt: "support"),
+    resourceXML: m2ResourceXML(["support-only"])
+  )
   defer {
     first.erase()
     second.erase()
@@ -137,7 +149,11 @@ func assertCatalogReplayValueFree(
   let encoded = try #require(
     String(data: JSONEncoder().encode(report), encoding: .utf8))
   let described = String(describing: report)
-  for sentinel in CatalogReplayMatrix.universalSentinels + shape.sentinels {
+  let sentinels =
+    CatalogReplayMatrix.universalSentinels
+    + CatalogReplayMatrix.snapshotSentinels(shapeID: shape.label)
+    + shape.rawFailureValues
+  for sentinel in sentinels {
     #expect(!encoded.contains(sentinel))
     #expect(!described.contains(sentinel))
   }
