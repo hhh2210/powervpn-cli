@@ -18,9 +18,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Deterministic toolchain reporting; no Xcode pin so the image default
-  # (16.x line, Swift 6) tracks the manifest's swift-tools-version: 6.0.
-  DEVELOPER_DIR: /Applications/Xcode.app
+  # macos-14 defaults to Xcode 15.4 (Swift 5.10); the manifest needs
+  # swift-tools-version 6.0, so pin the image's Xcode 16.2 (Swift 6.x).
+  DEVELOPER_DIR: /Applications/Xcode_16.2.app
 
 jobs:
   build-and-test:
