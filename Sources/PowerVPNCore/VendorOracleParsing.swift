@@ -107,15 +107,17 @@ public enum VendorOracleAnalyzer {
       modeConfig: OracleEvidenceMarker(markers: modeConfigMarkers),
       vici: OracleEvidenceMarker(markers: viciMarkers)
     )
-    let customPlugin: OracleClassificationState = leadsecbridgeMarkers.contains(
-      "custom_kernel_ipsec_feature"
-    ) ? .confirmed : .unknown
-    let privateWireExtension: OracleClassificationState = leadsecbridgeMarkers.contains(
-      "expandrule_symbols"
-    ) && (
-      leadsecbridgeMarkers.contains("quick_mode_addrule_log")
-        || leadsecbridgeMarkers.contains("expandrule_v1_log")
-    ) ? .confirmed : .unknown
+    let customPlugin: OracleClassificationState =
+      leadsecbridgeMarkers.contains(
+        "custom_kernel_ipsec_feature"
+      ) ? .confirmed : .unknown
+    let privateWireExtension: OracleClassificationState =
+      leadsecbridgeMarkers.contains(
+        "expandrule_symbols"
+      )
+        && (leadsecbridgeMarkers.contains("quick_mode_addrule_log")
+          || leadsecbridgeMarkers.contains("expandrule_v1_log"))
+      ? .confirmed : .unknown
 
     return VendorOracleFindings(
       loadedPlugins: loadedPlugins,
@@ -182,10 +184,11 @@ public enum StrongSwanVersionParser {
       return OracleVersionFinding(value: "unknown", evidence: "not_observed")
     }
     let range = NSRange(symbolText.startIndex..., in: symbolText)
-    let versions = Set(regex.matches(in: symbolText, range: range).compactMap { match -> String? in
-      guard let versionRange = Range(match.range(at: 1), in: symbolText) else { return nil }
-      return String(symbolText[versionRange])
-    })
+    let versions = Set(
+      regex.matches(in: symbolText, range: range).compactMap { match -> String? in
+        guard let versionRange = Range(match.range(at: 1), in: symbolText) else { return nil }
+        return String(symbolText[versionRange])
+      })
     guard versions.count == 1, let version = versions.first else {
       return OracleVersionFinding(
         value: "unknown",

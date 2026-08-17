@@ -1,0 +1,118 @@
+name: ci
+
+on:
+  push:
+    branches: [main, rescue-mvp]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly canary, Mondays 09:00 UTC.
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Deterministic toolchain reporting; no Xcode pin so the image default
+  # (16.x line, Swift 6) tracks the manifest's swift-tools-version: 6.0.
+  DEVELOPER_DIR: /Applications/Xcode.app
+
+jobs:
+  build-and-test:
+    name: build-and-test (swift test, all suites)
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Report toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Cache .build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-macos14-${{ hashFiles('Package.swift') }}
+          restore-keys: spm-macos14-
+
+      - name: Build (debug, product powervpn)
+        run: swift build --product powervpn -c debug
+
+      - name: Test (all suites, offline)
+        run: swift test
+
+  format:
+    name: format (swift-format strict, recursive)
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint Sources and Tests
+        run: xcrun swift-format lint --strict --recursive Sources Tests
+
+  secrets:
+    name: secrets (forbidden paths + gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GITLEAKS_VERSION: '8.30.1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pinned gitleaks
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          asset="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL "$base/$asset" -o "$tmp/$asset"
+          curl -fsSL "$base/gitleaks_${GITLEAKS_VERSION}_checksums.txt" -o "$tmp/checksums.txt"
+          # --ignore-missing skips the other-OS assets; ours must verify.
+          (cd "$tmp" && sha256sum --check --ignore-missing checksums.txt)
+          sudo tar -xzf "$tmp/$asset" -C /usr/local/bin gitleaks
+          gitleaks version
+
+      - name: Verify no secrets
+        run: scripts/verify_no_secrets.sh
+
+
+  release-build:
+    name: release-build (arm64 + sha256)
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache .build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-release-macos14-${{ hashFiles('Package.swift') }}
+          restore-keys: spm-release-macos14-
+
+      - name: Build release arm64
+        run: swift build --product powervpn --arch arm64 -c release
+
+      - name: Verify arch and report sha256
+        run: |
+          bin="$(swift build --show-bin-path --arch arm64 -c release)/powervpn"
+          file "$bin"
+          file "$bin" | grep -q 'arm64'
+          sha="$(shasum -a 256 "$bin" | awk '{print $1}')"
+          echo "release binary sha256: $sha"
+          {
+            echo '## release-build'
+            echo "- product: \`powervpn\` (arm64, release)"
+            echo "- sha256: \`${sha}\`"
+            echo "- commit: \`${GITHUB_SHA}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,70 @@
+name: catalog-replay
+
+# The bug-hunting job: deterministically replays every recorded portal
+# catalog-rejection shape (the ~1/8 intermittent server-side degradation,
+# see docs/ci.md) against the real acquisition pipeline — login accepted,
+# catalog rejected, exactly one fresh-login retry, truthful discriminator
+# tokens. CI never contacts the real portal; all fixtures are synthetic
+# value-free XML.
+
+on:
+  push:
+    branches: [main, rescue-mvp]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Nightly order-dependence sweep, 03:17 UTC (off the top of the hour).
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: catalog-replay-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  replay:
+    name: replay (all rejection shapes, full retry state machine)
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache .build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-macos14-${{ hashFiles('Package.swift') }}
+          restore-keys: spm-macos14-
+
+      - name: Run catalog replay suite
+        run: swift test --filter CatalogReplay
+
+  replay-order-matrix:
+    name: order-dependence (seed ${{ matrix.seed }})
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-14
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      # One leg per deterministic rotation of the shape matrix; seeds are
+      # structural rotations (11 shapes -> 11 distinct orders), never
+      # randomness, so a failure names its exact seed.
+      matrix:
+        seed: ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache .build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-macos14-${{ hashFiles('Package.swift') }}
+          restore-keys: spm-macos14-
+
+      - name: Replay with shuffled shape order
+        env:
+          CATALOG_REPLAY_PERMUTATIONS: ${{ matrix.seed }}
+        run: swift test --filter classificationIsInvariantToShapeServingOrder

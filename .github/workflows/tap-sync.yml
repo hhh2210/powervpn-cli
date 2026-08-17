@@ -1,0 +1,52 @@
+name: tap-sync
+
+# On a v* tag push this job prints the manual release checklist for the
+# Homebrew tap (hhh2210/homebrew-powervpn). The tap's scripts/release.sh
+# pins the tag tarball sha256 into Formula/powervpn.rb and pushes; it runs
+# on the maintainer machine because it rewrites and pushes the tap repo.
+# CI deliberately does not hold tap credentials.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checklist:
+    name: tap release checklist (manual steps)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Print manual tap release steps
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          tag="${GITHUB_REF_NAME:-manual run}"
+          {
+            echo '## homebrew-powervpn release checklist'
+            echo
+            echo "Tag pushed: \`${tag}\`"
+            echo
+            echo 'The tap is not updated automatically. Run once on the'
+            echo 'maintainer machine (from the tap TAGGING.md):'
+            echo
+            echo '```sh'
+            echo 'cd /path/to/homebrew-powervpn'
+            echo "./scripts/release.sh ${version:-<version>}"
+            echo '```'
+            echo
+            echo 'release.sh downloads the tag tarball, verifies it pins a'
+            echo 'real 64-hex sha256 into Formula/powervpn.rb (url / version'
+            echo '/ sha256), runs ruby -c, then commits and pushes only that'
+            echo 'formula.'
+            echo
+            echo 'Verify afterwards:'
+            echo
+            echo '```sh'
+            echo 'brew update'
+            echo 'brew reinstall hhh2210/powervpn/powervpn --build-from-source'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "tap-sync checklist emitted for ${tag}"

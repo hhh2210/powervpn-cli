@@ -9,9 +9,10 @@ import Testing
     prefix loaded plugins: charon openssl eap-mschapv2
     """
 
-  #expect(LoadedPluginParser.parse(log) == [
-    "leadsecbridge", "charon", "nonce", "openssl", "eap-mschapv2",
-  ])
+  #expect(
+    LoadedPluginParser.parse(log) == [
+      "leadsecbridge", "charon", "nonce", "openssl", "eap-mschapv2",
+    ])
 }
 
 @Test func extractsSingleStrongSwanDebugPathVersionWithoutGuessing() {
