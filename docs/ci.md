@@ -5,7 +5,8 @@
 CI 覆盖四件事：构建与全量测试、格式、密钥扫描、release 构建；外加一个
 专门针对 Portal catalog 间歇拒绝的确定性回放（catalog-replay）。
 所有 job 都只跑离线路径——CI 永不联系真实 Portal、永不触碰本机
-特权 helper、永不执行任何 live 动作。
+特权 helper、永不执行任何 live 动作，workflow 里没有任何凭据或
+内网目标值。
 
 ## 结构
 
@@ -15,7 +16,12 @@ CI 覆盖四件事：构建与全量测试、格式、密钥扫描、release 构
 | `catalog-replay.yml` | 每次 push（快）+ 每晚 03:17 UTC 顺序矩阵 | catalog 回放套件（`swift test --filter CatalogReplay`） |
 | `tap-sync.yml` | 推 `v*` tag | 打印 tap 手动发版清单（不自动改 tap） |
 
-- **build-and-test**（macos-14 arm64）：`swift build --product powervpn
+Runner 用 `xcode-27`（macOS 26 + Xcode 27，Swift 6.4）：源码即在此
+工具链下开发；macos-14 最高只有 Xcode 16.2（Swift 6.0.x），会在
+`PortalRequestCancellation.swift:20` 处编译失败（成员名被同名局部
+绑定遮蔽）。降级 runner 需要先改产品源码，不建议。
+
+- **build-and-test**（xcode-27 arm64）：`swift build --product powervpn
   -c debug` 后 `swift test` 跑全部套件；`.build` 用 actions/cache 缓存。
 - **format**：`xcrun swift-format lint --strict --recursive Sources Tests`，
   与仓库 checkpoint 脚本同一条命令，无豁免文件。
@@ -28,18 +34,21 @@ CI 覆盖四件事：构建与全量测试、格式、密钥扫描、release 构
   （见 tap 仓库 `scripts/release.sh`），这里的二进制 SHA 只用于
   追溯对应 commit 的产物。
 
-## catalog-replay：把 1/8 的间歇拒绝变成确定性回归
+## catalog-replay：把间歇拒绝变成确定性回归
 
-背景：Portal catalog 存在服务端间歇退化（live 记录 2026-08-12 /
-2026-08-15 / 2026-08-16，约 1/8 概率，登录被接受后 resource-list
-应答无法映射）。rank-1 假设是我们的 fresh-login-per-run 会话形态
-与官方客户端的一次登录 + 60s check/session 保活不一致（详见
-调查档案）。客户端已有两层缓解：单次 fresh-login 重试与
-value-free 失败判别 token（`selectionFailureClass` /
-`resourceCatalogFailure`）。
+背景（假设，未定论）：live 时间线记录了三次 catalog 拒绝
+（2026-08-12 / 08-15 / 08-16），样本频率约 1/8（3 次拒绝 / 22 次登录，
+样本极小）——**这是待验证假设的一部分，不是结论**；唯一证据源是
+scratch 时间线档案（`~/scratch-data/powervpn-catalog-investigation-2026-08-16/`
+的 timeline / failure-hunter / session-oracle 三份）。rank-1 假设是
+我们的 fresh-login-per-run 会话形态与官方客户端的一次登录 + 60s
+check/session 保活不一致；**没有任何 live 拒绝记录过更细的失败
+分类**（schema-8 时代没有该字段，proxy 模式当时丢弃了它）。客户端
+已有两层缓解：单次 fresh-login 重试与 value-free 失败判别 token
+（`selectionFailureClass` / `resourceCatalogFailure`）。
 
 CI 不能复现这个 bug 本身——它需要真实 Portal 的服务端状态。回放套件
-做的是次优但可证的事：把每一种已记录的拒绝形态离线喂进真实采集管线，
+做的是次优但可证的事：把每一种拒绝形态离线喂进真实采集管线，
 断言缓解逻辑本身不退化：
 
 - 每个形态都走真实路径：synthetic XML → 快照铸造 → `selectUnique`
@@ -50,14 +59,27 @@ CI 不能复现这个 bug 本身——它需要真实 Portal 的服务端状态�
   绝不重试；
 - 预算不足时跳过重试并保留首次分类；
 - 重试后仍拒绝的报告携带完整判别 token 且 value-free；
-- 形态覆盖钉住整个服务端可达分类学（`catalog_empty`、
-  scope 级 `integration_info_missing` / `resource_list_missing` /
-  四个 `major_version_*`、resource 级 `integer_invalid` /
+- 形态覆盖钉住整个服务端可达分类学（`catalog_empty`、scope 级
+  `integration_info_missing` / `resource_list_missing` / 四个
+  `major_version_*`、resource 级 `integer_invalid` /
   `display_name_missing` / `display_name_invalid` / `duplicate_field`；
-  `resource_list_duplicate` 在铸造阶段即被拒——测试也钉住了这一点）。
+  `resource_list_duplicate` 在铸造阶段即被拒——测试也钉住了这一点，
+  scope `unclassified` 只能由未知 throw 到达，没有任何 XML 字节能
+  产生它）。
 
-实现上它是 `Tests/PowerVPNProductTests/CatalogReplayTests.swift` +
-`CatalogReplayFixtures.swift`：复用该 target 既有的注入层
+每个形态带机器可读的来源标签（`CatalogReplayProvenance`）：
+
+- `observed_live`：对应一次实际记录的 live 拒绝事件的档案指定
+  best-fit 替身——`catalog_empty`（timeline row 31，proxy-ssh-4-ide）
+  与 `resource_list_missing`（timeline row 21，attempt-7）；两次的
+  细分类都未被记录，标签因此明确写为"best-fit stand-in"；
+- `derived_from_observed`：与观测事件同族的退化形态
+  （`integration_info_missing`）；
+- `synthetic_taxonomy`：从分类代码枚举、live 从未见过的形态。
+
+实现上是 `Tests/PowerVPNProductTests/CatalogReplay*.swift` 七个文件
+（fixtures + 共享 harness + retry / non-catalog / budget / order /
+coverage 五组套件），复用该 target 既有的注入层
 （`productM2TestDependencies` / `authenticatedSnapshot` /
 `testAuthorizationLease`），不另造平行基建。push 时跑全量回放
 （秒级）；每晚矩阵用确定性轮转（`CATALOG_REPLAY_PERMUTATIONS`

@@ -1,5 +1,10 @@
 name: ci
 
+# Runner: `xcode-27` (macOS 26 + Xcode 27, Swift 6.4) — the toolchain the
+# sources are developed against. macos-14 tops out at Xcode 16.2
+# (Swift 6.0.x), which rejects PortalRequestCancellation.swift:20
+# (member/local `task` shadowing); do not downgrade without a source fix.
+
 on:
   push:
     branches: [main, rescue-mvp]
@@ -17,15 +22,10 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  # macos-14 defaults to Xcode 15.4 (Swift 5.10); the manifest needs
-  # swift-tools-version 6.0, so pin the image's Xcode 16.2 (Swift 6.x).
-  DEVELOPER_DIR: /Applications/Xcode_16.2.app
-
 jobs:
   build-and-test:
     name: build-and-test (swift test, all suites)
-    runs-on: macos-14
+    runs-on: xcode-27
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -50,7 +50,7 @@ jobs:
 
   format:
     name: format (swift-format strict, recursive)
-    runs-on: macos-14
+    runs-on: xcode-27
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -88,7 +88,7 @@ jobs:
 
   release-build:
     name: release-build (arm64 + sha256)
-    runs-on: macos-14
+    runs-on: xcode-27
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4

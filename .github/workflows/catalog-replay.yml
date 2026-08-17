@@ -1,5 +1,7 @@
 name: catalog-replay
 
+# Runner: `xcode-27` — see ci.yml for the toolchain note.
+
 # The bug-hunting job: deterministically replays every recorded portal
 # catalog-rejection shape (the ~1/8 intermittent server-side degradation,
 # see docs/ci.md) against the real acquisition pipeline — login accepted,
@@ -20,11 +22,6 @@ on:
 permissions:
   contents: read
 
-env:
-  # macos-14 defaults to Xcode 15.4 (Swift 5.10); the manifest needs
-  # swift-tools-version 6.0, so pin the image's Xcode 16.2 (Swift 6.x).
-  DEVELOPER_DIR: /Applications/Xcode_16.2.app
-
 concurrency:
   group: catalog-replay-${{ github.ref }}
   cancel-in-progress: true
@@ -32,7 +29,7 @@ concurrency:
 jobs:
   replay:
     name: replay (all rejection shapes, full retry state machine)
-    runs-on: macos-14
+    runs-on: xcode-27
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -50,7 +47,7 @@ jobs:
   replay-order-matrix:
     name: order-dependence (seed ${{ matrix.seed }})
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: macos-14
+    runs-on: xcode-27
     timeout-minutes: 30
     strategy:
       fail-fast: false
