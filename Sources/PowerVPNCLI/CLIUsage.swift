@@ -3,7 +3,26 @@ func printCLIUsage() {
     """
     Usage: powervpn <command> [options]
 
-      status                 Show GUI, helper, crash, and tunnel state
+      up <target>            Start a reusable background THU session
+      down                   Stop the reusable session and verify cleanup
+      status [--json]        Show connected/disconnected product state
+      ssh <target> [-- command]
+                             Open ephemeral SSH and clean up afterward
+      doctor [--json]        Show readiness and the first actionable blocker
+      debug help             Show development and compatibility commands
+
+    Options:
+      --json                 Emit JSON
+    """)
+}
+
+func printCLIDebugUsage() {
+  print(
+    """
+    PowerVPN development and compatibility commands:
+
+      debug status [--json]  Show raw GUI/helper/crash/tunnel state
+      debug doctor --json    Show the legacy readiness report
       probe                  Blocked until an explicitly approved M2 transaction
       diagnose              Blocked until a local-only M3 diagnostic exists
       oracle [inventory]     Read-only vendor helper and protocol inventory
@@ -42,9 +61,5 @@ func printCLIUsage() {
                              Remote-SSH continues to use its normal route or ProxyJump
       targets config         ~/.config/powervpn/targets.json (regular file, mode 0600);
                              --ssh-target resolves an exact key from its targets object
-
-
-    Options:
-      --json                 Emit JSON
     """)
 }

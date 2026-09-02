@@ -1,6 +1,7 @@
 # PowerVPN Native Rescue
 
-状态：M1 被动查询 / M2 一次性连接 / proxy 持久访问，三阶段 live-proven。
+状态：面向用户的临时 SSH 与持久会话建立在同一套已验证的 Portal/helper/隧道
+runtime 上；底层研究命令保留为兼容调试面。
 
 非官方 arm64 原生 macOS 客户端，替代已停更的 LeadSec PowerVPN 3.2.1 GUI。
 它不自带隧道栈，而是驱动官方安装的特权 helper
@@ -30,7 +31,11 @@ mkdir -p ~/.config/powervpn
 #    targets.json：cp docs/targets.example.json 改填真实值（portalOrigin
 #    与 targets 映射），权限 0600
 
-# 3. 配置 ~/.ssh/config 的 Host 块（见下文 Remote-SSH 配置），然后 `ssh campus-host` 即可走隧道
+# 3. 配置 ~/.ssh/config 的 Host 块（见下文），然后选择一种工作流
+powervpn ssh lab-a -- hostname       # 临时：命令结束后清理隧道
+powervpn up lab-a                    # 持久：建立可复用后台会话
+ssh lab-a                            # 普通 SSH / IDE Remote-SSH 复用该会话
+powervpn down                        # 停止并验证清理
 ```
 
 targets.json 缺失、目标不存在、字段非法时分别 fail-closed 为
@@ -42,64 +47,51 @@ config_missing / target_unknown / target_invalid，不联系 Portal。
 powervpn doctor --json
 ```
 
-brew 安装时 ProxyCommand 里的 `<binary-path>` 写 brew 的真实路径
-/opt/homebrew/bin/powervpn；源码构建则用 build 产物的绝对路径。
-
 ## 当前状态
 
-- M1 被动查询：只读命令，不登录 Portal，不改 helper 状态。
-- M2 一次性连接：connect-once 全链 PASS，含新鲜 SSH banner 证明。
-- 持久代理访问：proxy ssh 经 OpenSSH ProxyCommand 直达远端主机，exit 0；
-  IDE 场景（Remote-SSH 走 Host 别名）同样 exit 0。
+- 临时 SSH：`powervpn ssh <target>` 自动建立隧道、运行系统 SSH、忠实返回远端
+  exit code，并在 SSH 结束后等待现有 runtime 验证清理。
+- 持久会话：`powervpn up <target>` 启动后台 OpenSSH ControlMaster；master 的
+  ProxyCommand 持有 PowerVPN lease，普通 SSH 和 Remote-SSH 复用同一 socket，
+  直到 `powervpn down`。
+- `powervpn status` 显示产品态；helper、launchd 和历史 crash 细节放在
+  `powervpn debug status`。
 
 ## 命令
 
-被动查询（M1）：
+临时 SSH（agent / 单条命令）：
 
 ```sh
-powervpn doctor --json
-powervpn helper status --json
-powervpn resources --json
-powervpn snapshot --dry-run --json
+powervpn ssh lab-a
+powervpn ssh lab-a -- hostname
+powervpn ssh lab-a -- 'some remote command'
 ```
 
-一次性连接（M2）：
+持久会话（human / IDE）：
 
 ```sh
-powervpn m2 connect-once \
-  --resource-display-name <resource> \
-  --ssh-target <ssh-target> \
-  --json
+powervpn up lab-a
+powervpn status
+ssh lab-a
+# VS Code / Cursor Remote-SSH 选择同一 Host 别名 lab-a
+powervpn down
 ```
 
-代理访问（proxy）：
-
-日常不需要手动执行 proxy 命令——配好 ~/.ssh/config 的 Host 块后，直接 `ssh campus-host`，OpenSSH 会在 ProxyCommand 里自动调用 `powervpn proxy ssh`。
-
-底层命令（OpenSSH 自动调用，也可手动用于调试）：
+调试命令不属于日常产品面；用下列命令查看：
 
 ```sh
-# OpenSSH ProxyCommand 模式（Remote-SSH 推荐路径）
-powervpn proxy ssh --resource-display-name <resource> --ssh-target <ssh-target> \
-  <numeric-ipv4> <port> --non-interactive
-
-# 前台 loopback SOCKS4/5，默认 127.0.0.1:1080，给浏览器等 TCP 客户端用
-powervpn proxy serve --resource-display-name <resource> --ssh-target <ssh-target> \
-  --listen-port 1080 --non-interactive --json
+powervpn debug help
 ```
-
-proxy serve 底层是系统 /usr/bin/ssh -D，不是自研 SOCKS 实现，也没有
-LaunchAgent/daemon。两个命令都在前台运行，SIGHUP/SIGINT/SIGTERM 停止，
-退出前会停掉 helper 租约并验证清理。
 
 ## 目标配置
 
 所有 current-machine 命令都先读取 `~/.config/powervpn/targets.json`。
-文件必须是当前用户拥有的普通文件且权限严格为 `0600`；`--ssh-target <key>`
-精确查找 `targets[key]`。配置缺失、目标不存在或字段非法时会分别返回
+文件必须是当前用户拥有的普通文件且权限严格为 `0600`；产品命令用 target key
+精确查找 `targets[key]`，并从同一项解析目标 IP、SSH 用户和 Portal `resource`，
+不会要求用户输入 M2/resource-display-name 等内部参数。配置缺失、目标不存在或字段非法时返回
 `config_missing`、`target_unknown`、`target_invalid`，不会联系 Portal 或
 请求 helper 变更。闭合 schema 示例见 `docs/targets.example.json`；先复制后
-替换 `portalOrigin`、目标数字 IPv4 和 SSH 用户名：
+替换 `portalOrigin`、目标数字 IPv4、SSH 用户名和对应的 Portal 资源显示名：
 
 ```sh
 mkdir -p ~/.config/powervpn
@@ -121,30 +113,30 @@ argv、日志或报告。
 
 ## Remote-SSH 配置
 
-Host 块的 ProxyCommand 会自动调用 `powervpn proxy ssh`：拿到一次批准的资源租约后，
-exec 系统 /usr/bin/nc 连到数字 IPv4 + 端口，透传 stdin/stdout。
-VS Code / Cursor 的 Remote-SSH 起的就是同一个 ssh，不需要额外 SOCKS 跳板，
-http.proxy / remote.SSH.httpProxy 与这一跳无关。
+Host 块只描述普通 SSH 目标和 ControlMaster socket。`powervpn up` 在启动 master
+时临时注入内部 ProxyCommand；后续 `ssh lab-a` 和 Remote-SSH 只复用这个 master，
+不会重复 Portal/helper startup。无需给 Host 块永久写入 PowerVPN ProxyCommand。
 
 ```text
-Host campus-host
+Host lab-a
   HostName <numeric-ipv4>
   User <remote-user>
   Port 22
-  ControlMaster no
-  ProxyCommand <binary-path> proxy ssh --resource-display-name <resource> --ssh-target <ssh-target> %h %p --non-interactive
+  ControlMaster auto
+  ControlPath ~/.ssh/cm-%C
+  ControlPersist 8h
 ```
 
 规则：
 
-- `%h` 展开后必须是数字 IPv4，主机名会被拒绝，所以 HostName 直接写数字地址。
-- `--non-interactive` 必须是最后一个参数；Remote-SSH 没有控制 TTY。
-- `ControlMaster no`：共享 socket 会让后续连接绕过隧道，必须关掉。
-- ProxyCommand 是一整行，不要整体加引号；只有含空格的单个参数（如资源
-  显示名）才单独引起来。`<binary-path>` 用
-  swift build --product powervpn --arch arm64 产物的绝对路径。
+- HostName 必须与 `targets.json` 的数字 IPv4 一致。
+- User 必须与 `targets.json` 一致。
+- `ControlMaster auto` 与绝对展开后的 `ControlPath` 是持久模式的复用边界；
+  `powervpn up` 会拒绝接管不是它创建的现有 master。
+- 临时 `powervpn ssh` 强制 `ControlMaster=no`，所以不会错误复用持久 lease。
 
-配好后 `ssh campus-host` 就是日常用法；VS Code / Cursor Remote-SSH 选同一别名。
+`powervpn up lab-a` 返回 READY 后，`ssh lab-a` 就是日常用法；VS Code / Cursor
+Remote-SSH 选择同一别名。
 
 ## 工程约束
 
@@ -179,7 +171,7 @@ swift build --product powervpn --arch arm64
 swift test
 ```
 
-测试 854 通过。
+当前 test inventory 为 882 项，`swift test` 全量通过。
 
 ```text
 Sources/

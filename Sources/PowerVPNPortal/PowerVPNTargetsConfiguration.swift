@@ -19,11 +19,18 @@ public struct PowerVPNTargetConfiguration: Equatable, Sendable {
   public let host: String
   public let ipv4: UInt32
   public let user: String
+  public let resourceDisplayName: String?
 
-  fileprivate init(host: String, ipv4: UInt32, user: String) {
+  fileprivate init(
+    host: String,
+    ipv4: UInt32,
+    user: String,
+    resourceDisplayName: String?
+  ) {
     self.host = host
     self.ipv4 = ipv4
     self.user = user
+    self.resourceDisplayName = resourceDisplayName
   }
 }
 
@@ -59,13 +66,16 @@ public struct PowerVPNTargetsConfiguration: Equatable, Sendable {
     var validated: [String: PowerVPNTargetConfiguration] = [:]
     validated.reserveCapacity(decoded.targets.count)
     for (key, target) in decoded.targets {
-      guard validKey(key), let ipv4 = parseIPv4(target.host), validUser(target.user) else {
+      guard validKey(key), let ipv4 = parseIPv4(target.host), validUser(target.user),
+        target.resourceDisplayName.map(validResourceDisplayName) ?? true
+      else {
         throw PowerVPNTargetsConfigurationError.invalid
       }
       validated[key] = PowerVPNTargetConfiguration(
         host: target.host,
         ipv4: ipv4,
-        user: target.user
+        user: target.user,
+        resourceDisplayName: target.resourceDisplayName
       )
     }
     return Self(portalOrigin: origin, targets: validated)
@@ -77,6 +87,12 @@ public struct PowerVPNTargetsConfiguration: Equatable, Sendable {
       throw PowerVPNTargetsConfigurationError.targetUnknown
     }
     return target
+  }
+
+  public var configuredTargetKeys: [String] { targets.keys.sorted() }
+
+  public var productTargetsComplete: Bool {
+    !targets.isEmpty && targets.values.allSatisfy { $0.resourceDisplayName != nil }
   }
 
   package var portalProfile: InstalledPortalProfile {
@@ -111,14 +127,20 @@ public struct PowerVPNTargetsConfiguration: Equatable, Sendable {
   private struct TargetSchema: Decodable {
     let host: String
     let user: String
+    let resourceDisplayName: String?
 
     init(from decoder: any Decoder) throws {
       let container = try decoder.container(keyedBy: ConfigurationCodingKey.self)
-      guard Set(container.allKeys.map(\.stringValue)) == ["host", "user"] else {
+      let keys = Set(container.allKeys.map(\.stringValue))
+      guard keys == ["host", "user"] || keys == ["host", "user", "resource"] else {
         throw PowerVPNTargetsConfigurationError.invalid
       }
       host = try container.decode(String.self, forKey: ConfigurationCodingKey("host"))
       user = try container.decode(String.self, forKey: ConfigurationCodingKey("user"))
+      resourceDisplayName = try container.decodeIfPresent(
+        String.self,
+        forKey: ConfigurationCodingKey("resource")
+      )
     }
   }
 
@@ -144,6 +166,14 @@ public struct PowerVPNTargetsConfiguration: Equatable, Sendable {
       && value.utf8.allSatisfy {
         (0x30...0x39).contains($0) || (0x41...0x5A).contains($0)
           || (0x61...0x7A).contains($0) || $0 == 0x2D || $0 == 0x5F || $0 == 0x2E
+      }
+  }
+
+  private static func validResourceDisplayName(_ value: String) -> Bool {
+    (1...256).contains(value.utf8.count)
+      && !value.unicodeScalars.contains {
+        CharacterSet.controlCharacters.contains($0)
+          || CharacterSet.newlines.contains($0)
       }
   }
 

@@ -9,7 +9,7 @@ import Testing
     let configuration = try PowerVPNTargetsConfiguration.decode(
       syntheticTargetsJSON(
         targets: """
-          "lab-a": {"host":"192.0.2.21","user":"synthetic-user"},
+          "lab-a": {"host":"192.0.2.21","user":"synthetic-user","resource":"Lab Login A"},
           "lab-b": {"host":"192.0.2.52","user":"synthetic-user"},
           "lab-third": {"host":"198.51.100.7","user":"third_user"}
           """))
@@ -19,6 +19,10 @@ import Testing
     #expect(third.host == "198.51.100.7")
     #expect(third.ipv4 == 0xC633_6407)
     #expect(third.user == "third_user")
+    #expect(third.resourceDisplayName == nil)
+    #expect(try configuration.target(named: "lab-a").resourceDisplayName == "Lab Login A")
+    #expect(configuration.configuredTargetKeys == ["lab-a", "lab-b", "lab-third"])
+    #expect(!configuration.productTargetsComplete)
     #expect(throws: PowerVPNTargetsConfigurationError.targetUnknown) {
       _ = try configuration.target(named: "absent")
     }
@@ -29,6 +33,7 @@ import Testing
       syntheticTargetsJSON(
         topLevelSuffix: ",\"PORTAL_PASSWORD\":\"must-not-be-accepted\""),
       syntheticTargetsJSON(targetSuffix: ",\"session\":\"must-not-be-accepted\""),
+      syntheticTargetsJSON(resource: "bad\nresource"),
       Data("{\"portalOrigin\":\"http://192.0.2.1:4443\",\"targets\":{}}".utf8),
       Data("{\"portalOrigin\":\"https://192.0.2.1:4443/path\",\"targets\":{}}".utf8),
       syntheticTargetsJSON(host: "lab.example"),
@@ -76,12 +81,15 @@ import Testing
 private func syntheticTargetsJSON(
   host: String = "192.0.2.21",
   user: String = "synthetic-user",
+  resource: String? = nil,
   targets: String? = nil,
   targetSuffix: String = "",
   topLevelSuffix: String = ""
 ) -> Data {
+  let resourceField = resource.map { ",\"resource\":\"\($0)\"" } ?? ""
   let targetObject =
-    targets ?? "\"lab-a\":{\"host\":\"\(host)\",\"user\":\"\(user)\"\(targetSuffix)}"
+    targets
+    ?? "\"lab-a\":{\"host\":\"\(host)\",\"user\":\"\(user)\"\(resourceField)\(targetSuffix)}"
   return Data(
     "{\"portalOrigin\":\"https://192.0.2.1:4443\",\"targets\":{\(targetObject)}\(topLevelSuffix)}"
       .utf8

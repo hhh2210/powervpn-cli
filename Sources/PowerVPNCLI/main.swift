@@ -23,6 +23,9 @@ struct PowerVPNCommand {
     } catch let error as ProductCommandError {
       FileHandle.standardError.write(Data("error: \(error)\n".utf8))
       Foundation.exit(64)
+    } catch let error as UserProductCommandError {
+      FileHandle.standardError.write(Data("error: \(error)\n".utf8))
+      Foundation.exit(64)
     } catch {
       FileHandle.standardError.write(Data("error: \(error)\n".utf8))
       Foundation.exit(1)
@@ -34,13 +37,31 @@ struct PowerVPNCommand {
     let json = arguments.contains("--json")
 
     switch command {
-    case "doctor", "helper", "resources", "snapshot":
+    case "helper", "resources", "snapshot":
       let result = try await runProductCommand(arguments)
       print(result.standardOutput)
       if result.exitCode != 0 {
         Foundation.exit(result.exitCode)
       }
-    case "status":
+    case "ssh", "up", "down", "status", "doctor", "internal-proxy", "internal-session-proxy":
+      writeUserProductCommandResult(
+        try await runCurrentMachineUserProductCommand(arguments)
+      )
+    case "debug":
+      if arguments == ["debug", "help"] {
+        printCLIDebugUsage()
+        return
+      }
+      if arguments == ["debug", "doctor", "--json"] {
+        let result = try await runProductCommand(["doctor", "--json"])
+        print(result.standardOutput)
+        if result.exitCode != 0 { Foundation.exit(result.exitCode) }
+        return
+      }
+      guard arguments == ["debug", "status"] || arguments == ["debug", "status", "--json"]
+      else {
+        throw CLIError.invalidArguments("usage: powervpn debug status [--json]")
+      }
       renderStatus(SystemInspector().status(), json: json)
     case "probe", "diagnose":
       let result = try runLegacyNetworkCommand(arguments)
@@ -81,6 +102,18 @@ struct PowerVPNCommand {
     }
   }
   private static func writeProxyCommandResult(_ result: ProxyCommandResult) {
+    if !result.standardOutput.isEmpty {
+      FileHandle.standardOutput.write(Data(result.standardOutput.utf8))
+    }
+    if !result.standardError.isEmpty {
+      FileHandle.standardError.write(Data(result.standardError.utf8))
+    }
+    if result.exitCode != 0 {
+      Foundation.exit(result.exitCode)
+    }
+  }
+
+  private static func writeUserProductCommandResult(_ result: UserProductCommandResult) {
     if !result.standardOutput.isEmpty {
       FileHandle.standardOutput.write(Data(result.standardOutput.utf8))
     }

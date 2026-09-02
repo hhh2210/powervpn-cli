@@ -3,11 +3,13 @@
   "targets": {
     "lab-a": {
       "host": "192.0.2.21",
-      "user": "synthetic-user"
+      "user": "synthetic-user",
+      "resource": "Lab Login A"
     },
     "lab-b": {
       "host": "192.0.2.52",
-      "user": "synthetic-user"
+      "user": "synthetic-user",
+      "resource": "Lab Login B"
     }
   }
 }
