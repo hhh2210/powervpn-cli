@@ -61,6 +61,9 @@ powervpn doctor --json
   matcher，并在独占 mutation lease 下做两次 bounded cold-state measurement；只有
   inspect PASS 后，`powervpn recovery clear --json` 才写入一份独立 recovery
   receipt 并解除 reconnect quarantine。该 receipt 明确不追认原 cleanup。
+- 2026-09-21 已对真实 `thu21` quarantine 完成该流程：cold recovery 全维 PASS，
+  随后的 `up`、普通 SSH ControlMaster 复用和 `down` 均成功，最终 cleanup verified；
+  原失败仍以独立 0600 archive 保留。
 
 ## 命令
 
