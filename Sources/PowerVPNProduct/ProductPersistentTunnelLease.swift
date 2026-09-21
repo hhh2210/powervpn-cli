@@ -65,7 +65,20 @@ actor ProductPersistentTunnelSession {
       )
       return .opened(ProductPersistentTunnelLease(session: self), report)
     case .failed(let failure):
-      let report = ProductPersistentTunnelOpenReport(
+      let shutdown = ProductPersistentTunnelShutdownReport(
+        state: .stopped,
+        cleanupPath: failure.cleanupPath,
+        stopOutcome: failure.stopOutcome,
+        emergencyStopOutcome: failure.emergencyStopOutcome,
+        authorizationClose: failure.authorizationClose,
+        authorizationOwnedMaterialErased: failure.authorizationOwnedMaterialErased,
+        cleanupEvidence: failure.cleanupEvidence,
+        cleanupVerified: failure.cleanupVerified,
+        cleanupCaptureState: failure.cleanupCaptureState,
+        cleanupCaptureRetryReason: failure.cleanupCaptureRetryReason,
+        cleanupCaptureAttemptCount: failure.cleanupCaptureAttemptCount
+      )
+      var report = ProductPersistentTunnelOpenReport(
         outcome: .rejected,
         failure: failure.outcome,
         firstBadEvent: failure.firstBadEvent,
@@ -86,19 +99,10 @@ actor ProductPersistentTunnelSession {
         stopInvalidityClass: failure.stopInvalidityClass,
         networkProofSource: failure.networkProofSource
       )
-      storage = .stopped(
-        ProductPersistentTunnelShutdownReport(
-          state: .stopped,
-          cleanupPath: failure.cleanupPath,
-          stopOutcome: failure.stopOutcome,
-          emergencyStopOutcome: failure.emergencyStopOutcome,
-          authorizationClose: failure.authorizationClose,
-          authorizationOwnedMaterialErased: failure.authorizationOwnedMaterialErased,
-          cleanupVerified: failure.cleanupVerified,
-          cleanupCaptureState: failure.cleanupCaptureState,
-          cleanupCaptureRetryReason: failure.cleanupCaptureRetryReason,
-          cleanupCaptureAttemptCount: failure.cleanupCaptureAttemptCount
-        ))
+      if failure.outcome == .cleanupUnproven || failure.helperMutationRequested {
+        report.cleanupReceipt = shutdown
+      }
+      storage = .stopped(shutdown)
       return .failed(report)
     }
   }
@@ -138,6 +142,7 @@ actor ProductPersistentTunnelSession {
           emergencyStopOutcome: cleanup.emergencyStop.outcome,
           authorizationClose: cleanup.authorizationClose.outcome,
           authorizationOwnedMaterialErased: cleanup.authorizationClose.ownedMaterialErased,
+          cleanupEvidence: cleanup.evidence,
           cleanupVerified: cleanup.verified,
           cleanupCaptureState: cleanup.captureState,
           cleanupCaptureRetryReason: cleanup.captureRetryReason,

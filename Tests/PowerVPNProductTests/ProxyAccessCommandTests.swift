@@ -117,6 +117,51 @@ import Testing
     }
   }
 
+  @Test func productCleanupReceiptReachesProxyResultWithEveryFailedDimension() async throws {
+    for evidence in m2SingleDimensionCleanupFailures {
+      let trace = ProductM2TestTrace()
+      let fixture = try authenticatedSnapshot(
+        resourceXML: m2ResourceXML(["Marker Resource"])
+      )
+      let runtime = ProductPersistentTunnelRuntime(
+        dependencies: productM2TestDependencies(
+          snapshot: fixture.snapshot,
+          trace: trace,
+          cleanup: evidence
+        )
+      )
+
+      let result = try await runProxySSHCommand(
+        proxySSHArguments,
+        authorizationAvailabilityFailure: { nil },
+        resolveTarget: { _ in .thu21 },
+        childRunner: ProxyTestChildRunner(),
+        runtime: { request, budget in
+          await openProductProxyTunnel(
+            runtime: runtime,
+            request: request,
+            budget: budget
+          )
+        }
+      )
+      fixture.erase()
+
+      #expect(result.exitCode == 74)
+      #expect(result.standardOutput.isEmpty)
+      #expect(result.standardError == "cleanup_unproven\n")
+      #expect(trace.count("stop") == 1)
+      #expect(trace.count("verify") == 1)
+      #expect(result.cleanupReceipt?.cleanupPath == .cleanupUnproven)
+      #expect(result.cleanupReceipt?.stopOutcome == .transportAcknowledged)
+      #expect(result.cleanupReceipt?.emergencyStopOutcome == .notAttempted)
+      #expect(result.cleanupReceipt?.authorizationClose == .accepted)
+      #expect(result.cleanupReceipt?.authorizationOwnedMaterialErased == true)
+      #expect(result.cleanupReceipt?.cleanupEvidence == evidence)
+      #expect(result.cleanupReceipt?.cleanupVerified == false)
+      #expect(result.cleanupReceipt?.cleanupCaptureAttemptCount == 1)
+    }
+  }
+
   @Test func truthfulOpenFailureIncludesClosedFailureDiagnostics() async throws {
     let generationFence = try await runProxySSHCommand(
       proxySSHArguments,

@@ -42,6 +42,9 @@ package struct ProductPersistentTunnelOpenReport: Encodable, Equatable, Sendable
   /// Schema-11 network-proof source mirrored from the underlying M2
   /// execution; nil — omitted from JSON — when not applicable.
   package var networkProofSource: ProductM2NetworkProofSource? = nil
+  /// Full value-free cleanup receipt for a failed open that reached cleanup.
+  /// Excluded from `CodingKeys` to preserve the public open-report schema.
+  package var cleanupReceipt: ProductPersistentTunnelShutdownReport? = nil
 
   private enum CodingKeys: String, CodingKey {
     case outcome
@@ -86,6 +89,8 @@ package struct ProductPersistentTunnelShutdownReport: Encodable, Equatable, Send
   package let emergencyStopOutcome: ProductM2ControlOutcome
   package let authorizationClose: ProductM2AuthorizationCloseOutcome
   package let authorizationOwnedMaterialErased: Bool
+  /// Closed, value-free restoration dimensions from the final bounded capture.
+  package let cleanupEvidence: ProductM2CleanupEvidence
   package let cleanupVerified: Bool
   /// Cleanup restoration booleans are measured only when this state is
   /// `measured_complete`; other false values are fail-closed placeholders.
@@ -93,6 +98,32 @@ package struct ProductPersistentTunnelShutdownReport: Encodable, Equatable, Send
   package var cleanupCaptureRetryReason: ProductM2CleanupCaptureRetryReason? = nil
   package var cleanupCaptureAttemptCount = 0
   package let containsSecrets = false
+
+  package init(
+    state: ProductPersistentTunnelState,
+    cleanupPath: ProductM2CleanupPath,
+    stopOutcome: ProductM2ControlOutcome,
+    emergencyStopOutcome: ProductM2ControlOutcome,
+    authorizationClose: ProductM2AuthorizationCloseOutcome,
+    authorizationOwnedMaterialErased: Bool,
+    cleanupEvidence: ProductM2CleanupEvidence = .unavailable,
+    cleanupVerified: Bool,
+    cleanupCaptureState: ProductM2CleanupCaptureState? = nil,
+    cleanupCaptureRetryReason: ProductM2CleanupCaptureRetryReason? = nil,
+    cleanupCaptureAttemptCount: Int = 0
+  ) {
+    self.state = state
+    self.cleanupPath = cleanupPath
+    self.stopOutcome = stopOutcome
+    self.emergencyStopOutcome = emergencyStopOutcome
+    self.authorizationClose = authorizationClose
+    self.authorizationOwnedMaterialErased = authorizationOwnedMaterialErased
+    self.cleanupEvidence = cleanupEvidence
+    self.cleanupVerified = cleanupVerified
+    self.cleanupCaptureState = cleanupCaptureState
+    self.cleanupCaptureRetryReason = cleanupCaptureRetryReason
+    self.cleanupCaptureAttemptCount = cleanupCaptureAttemptCount
+  }
 
   package var disconnected: Bool {
     state == .stopped && cleanupVerified

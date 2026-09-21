@@ -9,6 +9,9 @@ func printCLIUsage() {
       ssh <target> [-- command]
                              Open ephemeral SSH and clean up afterward
       doctor [--json]        Show readiness and the first actionable blocker
+      recovery inspect --json
+                             Measure quarantine recovery without changing it
+      recovery clear --json  Clear quarantine only after a measured cold baseline
       debug help             Show development and compatibility commands
 
     Options:

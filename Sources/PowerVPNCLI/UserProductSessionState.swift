@@ -14,7 +14,7 @@ enum UserProductSessionPhase: String, Codable, Equatable, Sendable {
 }
 
 struct UserProductSessionState: Codable, Equatable, Sendable {
-  let schemaVersion: Int
+  var schemaVersion: Int
   let sessionID: String
   let target: String
   let controlPath: String
@@ -22,6 +22,8 @@ struct UserProductSessionState: Codable, Equatable, Sendable {
   var ownerPID: Int?
   var cleanupVerified: Bool?
   var failure: String?
+  var originalCleanupReceipt: UserProductOriginalCleanupReceipt?
+  var recoveryReceipt: UserProductRecoveryReceipt?
 
   init(
     sessionID: String,
@@ -30,9 +32,11 @@ struct UserProductSessionState: Codable, Equatable, Sendable {
     phase: UserProductSessionPhase,
     ownerPID: Int? = nil,
     cleanupVerified: Bool? = nil,
-    failure: String? = nil
+    failure: String? = nil,
+    originalCleanupReceipt: UserProductOriginalCleanupReceipt? = nil,
+    recoveryReceipt: UserProductRecoveryReceipt? = nil
   ) {
-    schemaVersion = 1
+    schemaVersion = 2
     self.sessionID = sessionID
     self.target = target
     self.controlPath = controlPath
@@ -40,18 +44,35 @@ struct UserProductSessionState: Codable, Equatable, Sendable {
     self.ownerPID = ownerPID
     self.cleanupVerified = cleanupVerified
     self.failure = failure
+    self.originalCleanupReceipt = originalCleanupReceipt
+    self.recoveryReceipt = recoveryReceipt
   }
 
   var terminal: Bool { phase == .disconnected || phase == .failed }
 
   var valid: Bool {
-    schemaVersion == 1
+    (schemaVersion == 1 || schemaVersion == 2)
       && UUID(uuidString: sessionID)?.uuidString.lowercased() == sessionID.lowercased()
       && ProductM2SSHTarget(rawValue: target) != nil
       && controlPath.hasPrefix("/")
       && !controlPath.contains("\0")
       && !controlPath.contains("\n")
-      && ownerPID.map { $0 > 0 } ?? true
+      && (ownerPID.map { $0 > 0 } ?? true)
+      && (originalCleanupReceipt?.valid ?? true)
+      && (originalCleanupReceipt?.cleanupVerified == cleanupVerified
+        || originalCleanupReceipt == nil)
+      && (recoveryReceipt?.valid ?? true)
+      && (recoveryReceipt?.originalSessionID == sessionID || recoveryReceipt == nil)
+      && (recoveryReceipt?.target == target || recoveryReceipt == nil)
+      && (recoveryReceipt == nil
+        || (terminal && cleanupVerified == false
+          && recoveryReceipt?.originalFailure == failure))
+      && (schemaVersion == 2
+        || (originalCleanupReceipt == nil && recoveryReceipt == nil))
+  }
+
+  var reconnectPermitted: Bool {
+    cleanupVerified == true || recoveryReceipt?.permitsReconnect == true
   }
 }
 
@@ -77,14 +98,17 @@ struct UserProductSessionStateStore: Sendable {
   static let maximumStateBytes = 16 * 1_024
 
   let directory: URL
+  let directorySync: @Sendable (String) -> Bool
 
   init(
     directory: URL = FileManager.default.homeDirectoryForCurrentUser
       .appendingPathComponent(".local", isDirectory: true)
       .appendingPathComponent("state", isDirectory: true)
-      .appendingPathComponent("powervpn", isDirectory: true)
+      .appendingPathComponent("powervpn", isDirectory: true),
+    directorySync: @escaping @Sendable (String) -> Bool = Self.installedDirectorySync
   ) {
     self.directory = directory
+    self.directorySync = directorySync
   }
 
   var statePath: String {
@@ -125,13 +149,30 @@ struct UserProductSessionStateStore: Sendable {
   }
 
   @discardableResult
+  func compareAndUpdate(
+    expected: UserProductSessionState,
+    _ transform: (inout UserProductSessionState) -> Void
+  ) throws -> Bool {
+    try withStateLock {
+      guard var state = try loadUnlocked(), state == expected else { return false }
+      transform(&state)
+      guard state.valid else { throw UserProductSessionStoreError.invalidState }
+      try saveUnlocked(state)
+      return true
+    }
+  }
+
+  @discardableResult
   func remove(sessionID: String? = nil) throws -> Bool {
     try withStateLock {
       if let sessionID {
         guard let state = try loadUnlocked(), state.sessionID == sessionID else { return false }
       }
       let path = statePath
-      if Darwin.unlink(path) == 0 { return true }
+      if Darwin.unlink(path) == 0 {
+        guard syncDirectory() else { throw UserProductSessionStoreError.unsafeStateFile }
+        return true
+      }
       if errno == ENOENT { return false }
       throw UserProductSessionStoreError.unsafeStateFile
     }
@@ -255,8 +296,19 @@ struct UserProductSessionStateStore: Sendable {
       return offset
     }
     guard written == data.count, fsync(descriptor) == 0,
-      rename(temporary, statePath) == 0
+      rename(temporary, statePath) == 0, syncDirectory()
     else { throw UserProductSessionStoreError.unsafeStateFile }
     succeeded = true
+  }
+
+  private func syncDirectory() -> Bool {
+    directorySync(directory.path)
+  }
+
+  private static func installedDirectorySync(_ path: String) -> Bool {
+    let descriptor = Darwin.open(path, O_RDONLY | O_CLOEXEC | O_DIRECTORY)
+    guard descriptor >= 0 else { return false }
+    defer { Darwin.close(descriptor) }
+    return fsync(descriptor) == 0
   }
 }

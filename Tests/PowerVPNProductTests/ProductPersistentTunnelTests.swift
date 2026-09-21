@@ -129,6 +129,7 @@ import Testing
       return
     }
     #expect(!report.helperMutationRequested)
+    #expect(report.cleanupReceipt == nil)
     #expect(!report.serverContactRequested)
     #expect((await lease.shutdown(budget: .start())).cleanupVerified)
   }
@@ -157,6 +158,56 @@ import Testing
     #expect(!report.cleanupVerified)
     #expect(report.cleanupPath == .cleanupUnproven)
     #expect(!report.disconnected)
+  }
+
+  @Test func failedShutdownPreservesEveryCleanupEvidenceDimension() async throws {
+    for evidence in m2SingleDimensionCleanupFailures {
+      let trace = ProductM2TestTrace()
+      let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+      let runtime = ProductPersistentTunnelRuntime(
+        dependencies: productM2TestDependencies(
+          snapshot: fixture.snapshot,
+          trace: trace,
+          cleanup: evidence
+        )
+      )
+      let result = await runtime.open(
+        request: ProductM2ConnectRequest(
+          resourceDisplayName: "Campus NC",
+          sshTarget: .thu21
+        ),
+        startupBudget: m2TestBudget()
+      )
+      guard case .opened(let lease, _) = result else {
+        fixture.erase()
+        Issue.record("persistent tunnel did not open")
+        continue
+      }
+
+      let report = await lease.shutdown(budget: .start())
+      let cached = await lease.shutdown(budget: .start())
+      fixture.erase()
+
+      #expect(report == cached)
+      #expect(report.cleanupPath == .cleanupUnproven)
+      #expect(report.stopOutcome == .transportAcknowledged)
+      #expect(report.emergencyStopOutcome == .notAttempted)
+      #expect(report.authorizationClose == .accepted)
+      #expect(report.authorizationOwnedMaterialErased)
+      #expect(report.cleanupEvidence == evidence)
+      #expect(!report.cleanupVerified)
+      #expect(report.cleanupCaptureAttemptCount == 1)
+      #expect(report.cleanupCaptureRetryReason == nil)
+      let document = try #require(
+        String(data: JSONEncoder().encode(report), encoding: .utf8)
+      )
+      #expect(document.contains("\"cleanupEvidence\""))
+      #expect(document.contains("\"containsSecrets\":false"))
+      #expect(document.contains("\"containsRawRoutes\":false"))
+      #expect(document.contains("\"containsRawState\":false"))
+      #expect(!document.contains("Campus NC"))
+      #expect(!document.contains("thu21"))
+    }
   }
 
   @Test func startupFailureReturnsNoLeaseAndValueFreeReport() async throws {
@@ -215,6 +266,7 @@ import Testing
       return
     }
     #expect(failure.failure == .startRejected)
+    #expect(failure.cleanupReceipt == nil)
     #expect(failure.firstBadEvent == .startControlRejected)
     #expect(!failure.helperMutationRequested)
     #expect(failure.serverContactRequested)

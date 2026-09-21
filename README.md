@@ -56,6 +56,11 @@ powervpn doctor --json
   直到 `powervpn down`。
 - `powervpn status` 显示产品态；helper、launchd 和历史 crash 细节放在
   `powervpn debug status`。
+- 若 `down` 返回 74，原会话保持 `cleanup_unproven`，不会被删除或改写为成功。
+  `powervpn recovery inspect --json` 会重新取得当前授权 profile 的内存态 route
+  matcher，并在独占 mutation lease 下做两次 bounded cold-state measurement；只有
+  inspect PASS 后，`powervpn recovery clear --json` 才写入一份独立 recovery
+  receipt 并解除 reconnect quarantine。该 receipt 明确不追认原 cleanup。
 
 ## 命令
 
@@ -76,6 +81,20 @@ ssh lab-a
 # VS Code / Cursor Remote-SSH 选择同一 Host 别名 lab-a
 powervpn down
 ```
+
+清理失败恢复（只在 `status` 为 `cleanup_failed` 时）：
+
+```sh
+powervpn recovery inspect --json
+# 只有 outcome=measurement_passed 时执行：
+powervpn recovery clear --json
+```
+
+恢复 gate 要求当前授权 profile 的 selected/effective route 无残留、两次完整快照
+在 default route、DNS、interfaces/utun、persistent/structural routes、Surge 和
+vendor processes 上一致，且 helper 从初始 preflight 到最终测量始终是同一
+exact-inactive generation。任何 FAIL/UNKNOWN/取消都保留 quarantine；不会启动
+helper、SSH 或 tunnel。
 
 调试命令不属于日常产品面；用下列命令查看：
 

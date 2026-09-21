@@ -43,7 +43,8 @@ struct PowerVPNCommand {
       if result.exitCode != 0 {
         Foundation.exit(result.exitCode)
       }
-    case "ssh", "up", "down", "status", "doctor", "internal-proxy", "internal-session-proxy":
+    case "ssh", "up", "down", "status", "doctor", "recovery", "internal-proxy",
+      "internal-session-proxy":
       writeUserProductCommandResult(
         try await runCurrentMachineUserProductCommand(arguments)
       )

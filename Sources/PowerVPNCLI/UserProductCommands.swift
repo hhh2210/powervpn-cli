@@ -36,6 +36,15 @@ struct UserProductCommandDependencies: Sendable {
   let mutationLeaseAvailable: @Sendable () -> Bool
   let systemStatus: @Sendable () -> PowerVPNStatus
   let proxyRunner: @Sendable ([String]) async throws -> ProxyCommandResult
+  let recoveryRunner:
+    @Sendable (
+      ProductCleanupRecoveryRequest, PowerVPNTargetsConfiguration,
+      ProductCleanupRecoveryRuntime.CommitRecovered
+    ) async -> ProductCleanupRecoveryReport
+  let credentialFileSafe: @Sendable () -> Bool
+  let helperArtifactSafe: @Sendable () -> Bool
+  let vendorLogSafe: @Sendable () -> Bool
+  let signalMonitorFactory: CLISignalMonitorFactory
   let sleepMilliseconds: @Sendable (Int) async -> Void
   let cleanupPollLimit: Int
 
@@ -61,6 +70,32 @@ struct UserProductCommandDependencies: Sendable {
     proxyRunner: @escaping @Sendable ([String]) async throws -> ProxyCommandResult = {
       try await runCurrentMachineProxyCommand($0)
     },
+    recoveryRunner:
+      @escaping @Sendable (
+        ProductCleanupRecoveryRequest, PowerVPNTargetsConfiguration,
+        ProductCleanupRecoveryRuntime.CommitRecovered
+      ) async -> ProductCleanupRecoveryReport = { request, configuration, commit in
+        await ProductCleanupRecoveryRuntime(configuration: configuration).run(
+          request,
+          commitRecovered: commit
+        )
+      },
+    credentialFileSafe: @escaping @Sendable () -> Bool = {
+      protectedUserFileIsSafe(
+        ("~/.config/powervpn/credentials.env" as NSString).expandingTildeInPath
+      )
+    },
+    helperArtifactSafe: @escaping @Sendable () -> Bool = {
+      protectedRootExecutableIsSafe(
+        "/Library/PrivilegedHelperTools/com.leadsec.charon-xpc"
+      )
+    },
+    vendorLogSafe: @escaping @Sendable () -> Bool = {
+      protectedRootLogIsSafe("/var/log/vsgvpn.log")
+    },
+    signalMonitorFactory: @escaping CLISignalMonitorFactory = {
+      DarwinCLISignalMonitor()
+    },
     sleepMilliseconds: @escaping @Sendable (Int) async -> Void = { milliseconds in
       try? await Task.sleep(for: .milliseconds(milliseconds))
     },
@@ -73,6 +108,11 @@ struct UserProductCommandDependencies: Sendable {
     self.mutationLeaseAvailable = mutationLeaseAvailable
     self.systemStatus = systemStatus
     self.proxyRunner = proxyRunner
+    self.recoveryRunner = recoveryRunner
+    self.credentialFileSafe = credentialFileSafe
+    self.helperArtifactSafe = helperArtifactSafe
+    self.vendorLogSafe = vendorLogSafe
+    self.signalMonitorFactory = signalMonitorFactory
     self.sleepMilliseconds = sleepMilliseconds
     self.cleanupPollLimit = cleanupPollLimit
   }
@@ -102,25 +142,36 @@ private enum UserProductConnectionState: String, Encodable {
 }
 
 private struct UserProductStatusReport: Encodable {
-  let schemaVersion = 1
+  let schemaVersion = 2
   let state: UserProductConnectionState
   let target: String?
   let sessionActive: Bool
   let ownerPID: Int?
   let thuReady: Bool
+  let previousCleanupVerified: Bool?
+  let originalCleanupReceipt: UserProductOriginalCleanupReceipt?
+  let recoveryVerified: Bool
+  let recoveryBasis: String?
+  let recoveryReceipt: UserProductRecoveryReceipt?
   let warning: String?
   let containsSecrets = false
 }
 
 private struct UserProductDoctorReport: Encodable {
-  let schemaVersion = 1
+  let schemaVersion = 2
   let ready: Bool
   let targetConfigurationSafe: Bool
   let credentialFileSafe: Bool
   let helperInstalled: Bool
   let vendorLogSafe: Bool
   let sessionCleanupSafe: Bool
+  let previousCleanupVerified: Bool?
+  let originalCleanupReceipt: UserProductOriginalCleanupReceipt?
+  let recoveryVerified: Bool
+  let recoveryBasis: String?
+  let recoveryReceipt: UserProductRecoveryReceipt?
   let blocker: String?
+  let nextAction: String?
   let warning: String?
   let containsSecrets = false
 }
@@ -143,6 +194,8 @@ func runCurrentMachineUserProductCommand(
     return try await runUserProductStatus(arguments: arguments, dependencies: dependencies)
   case "doctor":
     return try runUserProductDoctor(arguments: arguments, dependencies: dependencies)
+  case "recovery":
+    return try await runUserProductRecovery(arguments: arguments, dependencies: dependencies)
   case "internal-proxy":
     return try await runInternalProductProxy(
       arguments: arguments,
@@ -215,7 +268,7 @@ private func runUserProductSSH(
           standardOutput: "", standardError: "", exitCode: result.exitCode)
         : .failure("PowerVPN: could not start /usr/bin/ssh.", exitCode: 70)
     }
-    if existing.terminal, existing.cleanupVerified == true {
+    if existing.terminal, existing.reconnectPermitted {
       _ = try dependencies.stateStore.remove(sessionID: existing.sessionID)
     } else {
       return .failure(
@@ -311,11 +364,11 @@ private func runUserProductUp(
         "PowerVPN: already connected to \(existing.target). Run `powervpn down` first."
       )
     }
-    if existing.terminal, existing.cleanupVerified == true {
+    if existing.terminal, existing.reconnectPermitted {
       _ = try dependencies.stateStore.remove(sessionID: existing.sessionID)
     } else if existing.terminal {
       return .failure(
-        "PowerVPN: the previous session did not prove cleanup. Run `powervpn doctor --json` before reconnecting.",
+        "PowerVPN: the previous session did not prove cleanup. Run `powervpn recovery inspect --json`.",
         exitCode: 74
       )
     } else if dependencies.mutationLeaseAvailable() {
@@ -325,7 +378,7 @@ private func runUserProductUp(
         $0.failure = "stale_session_cleanup_unverified"
       }
       return .failure(
-        "PowerVPN: a stale session was detected, but cleanup cannot be proven. Run `powervpn doctor --json` before reconnecting.",
+        "PowerVPN: a stale session was detected, but cleanup cannot be proven. Run `powervpn recovery inspect --json`.",
         exitCode: 74
       )
     } else {
@@ -379,8 +432,8 @@ private func runUserProductUp(
     }
     _ = try dependencies.stateStore.update(sessionID: sessionID) {
       $0.phase = .failed
-      $0.failure = "ssh_master_start_failed"
-      $0.cleanupVerified = dependencies.mutationLeaseAvailable()
+      $0.cleanupVerified = false
+      $0.failure = "ssh_master_start_cleanup_unverified"
     }
     return .failure(
       "PowerVPN: SSH master did not start. Check SSH keys and run `powervpn doctor --json`."
@@ -432,8 +485,13 @@ private func runUserProductDown(
       _ = try dependencies.stateStore.remove(sessionID: state.sessionID)
       return .success("PowerVPN: disconnected\nCleanup: verified\n")
     }
+    if state.recoveryReceipt?.permitsReconnect == true {
+      return .success(
+        "PowerVPN: disconnected\nRecovery: verified cold baseline\nOriginal cleanup: unverified\n"
+      )
+    }
     return .failure(
-      "PowerVPN: previous session ended but cleanup was not verified. Run `powervpn doctor --json`.",
+      "PowerVPN: previous session ended but cleanup was not verified. Run `powervpn recovery inspect --json`.",
       exitCode: 74
     )
   }
@@ -502,6 +560,13 @@ private func runUserProductStatus(
   guard arguments == ["status"] || arguments == ["status", "--json"] else {
     throw UserProductCommandError.invalidArguments("usage: powervpn status [--json]")
   }
+  let commandLock: UserProductSessionCommandLock?
+  do {
+    commandLock = try dependencies.stateStore.acquireCommandLock()
+  } catch UserProductSessionStoreError.busy {
+    commandLock = nil
+  }
+  defer { withExtendedLifetime(commandLock) {} }
   let json = arguments.last == "--json"
   let configurationReady = (try? dependencies.loadConfiguration().productTargetsComplete) == true
   let system = dependencies.systemStatus()
@@ -525,24 +590,39 @@ private func runUserProductStatus(
         sessionActive: true,
         ownerPID: userProductMasterPID(check.output) ?? state.ownerPID,
         thuReady: configurationReady,
+        previousCleanupVerified: state.cleanupVerified,
+        originalCleanupReceipt: state.originalCleanupReceipt,
+        recoveryVerified: state.recoveryReceipt?.permitsReconnect == true,
+        recoveryBasis: state.recoveryReceipt?.basis,
+        recoveryReceipt: state.recoveryReceipt,
         warning: nil
       )
-    } else if !dependencies.mutationLeaseAvailable() {
+    } else if commandLock == nil || !dependencies.mutationLeaseAvailable() {
       report = UserProductStatusReport(
         state: state.phase == .disconnecting ? .disconnecting : .connecting,
         target: state.target,
         sessionActive: false,
         ownerPID: state.ownerPID,
         thuReady: configurationReady,
+        previousCleanupVerified: state.cleanupVerified,
+        originalCleanupReceipt: state.originalCleanupReceipt,
+        recoveryVerified: state.recoveryReceipt?.permitsReconnect == true,
+        recoveryBasis: state.recoveryReceipt?.basis,
+        recoveryReceipt: state.recoveryReceipt,
         warning: "Session owner is starting or cleanup is still running."
       )
     } else {
-      if state.cleanupVerified != true {
-        warning = "Previous session ended unexpectedly; cleanup is not verified."
+      let recoveryVerified = state.recoveryReceipt?.permitsReconnect == true
+      if !state.reconnectPermitted {
+        warning =
+          "Previous session ended unexpectedly; cleanup is not verified. Run `powervpn recovery inspect --json`."
+      } else if state.cleanupVerified != true, recoveryVerified {
+        warning =
+          "Original cleanup remains unverified; a measured cold baseline permits recovery."
       }
       if state.cleanupVerified == true {
         _ = try dependencies.stateStore.remove(sessionID: state.sessionID)
-      } else if !state.terminal {
+      } else if !state.terminal && !recoveryVerified {
         _ = try dependencies.stateStore.update(sessionID: state.sessionID) {
           $0.phase = .failed
           $0.cleanupVerified = false
@@ -550,22 +630,32 @@ private func runUserProductStatus(
         }
       }
       report = UserProductStatusReport(
-        state: state.cleanupVerified == true ? .disconnected : .cleanupFailed,
-        target: nil,
+        state: state.reconnectPermitted ? .disconnected : .cleanupFailed,
+        target: recoveryVerified ? state.target : nil,
         sessionActive: false,
         ownerPID: nil,
         thuReady: configurationReady,
+        previousCleanupVerified: state.cleanupVerified,
+        originalCleanupReceipt: state.originalCleanupReceipt,
+        recoveryVerified: recoveryVerified,
+        recoveryBasis: state.recoveryReceipt?.basis,
+        recoveryReceipt: state.recoveryReceipt,
         warning: warning ?? historicalHelperWarning(system)
       )
     }
   } else {
-    if !dependencies.mutationLeaseAvailable() {
+    if commandLock == nil || !dependencies.mutationLeaseAvailable() {
       report = UserProductStatusReport(
         state: .disconnecting,
         target: nil,
         sessionActive: false,
         ownerPID: nil,
         thuReady: configurationReady,
+        previousCleanupVerified: nil,
+        originalCleanupReceipt: nil,
+        recoveryVerified: false,
+        recoveryBasis: nil,
+        recoveryReceipt: nil,
         warning: "A foreground session is still cleaning up."
       )
       return try encodeUserProductStatus(report, json: json)
@@ -576,6 +666,11 @@ private func runUserProductStatus(
       sessionActive: false,
       ownerPID: nil,
       thuReady: configurationReady,
+      previousCleanupVerified: nil,
+      originalCleanupReceipt: nil,
+      recoveryVerified: false,
+      recoveryBasis: nil,
+      recoveryReceipt: nil,
       warning: historicalHelperWarning(system)
     )
   }
@@ -597,7 +692,11 @@ private func encodeUserProductStatus(
   lines.append("THU: \(report.thuReady ? "ready" : "configuration required")")
   if let warning = report.warning {
     lines.append("Warning: \(warning)")
-    lines.append("Run `powervpn doctor --json` for details.")
+    lines.append(
+      report.state == .cleanupFailed
+        ? "Run `powervpn recovery inspect --json` for measured recovery."
+        : "Run `powervpn doctor --json` for details."
+    )
   }
   return .success(lines.joined(separator: "\n") + "\n")
 }
@@ -610,18 +709,15 @@ private func runUserProductDoctor(
     throw UserProductCommandError.invalidArguments("usage: powervpn doctor [--json]")
   }
   let configurationSafe = (try? dependencies.loadConfiguration().productTargetsComplete) == true
-  let credentialsSafe = protectedUserFileIsSafe(
-    ("~/.config/powervpn/credentials.env" as NSString).expandingTildeInPath
-  )
+  let credentialsSafe = dependencies.credentialFileSafe()
   let system = dependencies.systemStatus()
   let helperInstalled =
     system.appVersion != nil && system.appBuild != nil
-    && protectedRootExecutableIsSafe(
-      "/Library/PrivilegedHelperTools/com.leadsec.charon-xpc"
-    )
-  let logSafe = protectedRootLogIsSafe("/var/log/vsgvpn.log")
+    && dependencies.helperArtifactSafe()
+  let logSafe = dependencies.vendorLogSafe()
   let session = try dependencies.stateStore.load()
-  let sessionCleanupSafe = session?.cleanupVerified != false
+  let recoveryVerified = session?.recoveryReceipt?.permitsReconnect == true
+  let sessionCleanupSafe = session.map { !$0.terminal || $0.reconnectPermitted } ?? true
   let blocker: String?
   if !configurationSafe {
     blocker = "target_configuration_incomplete"
@@ -644,7 +740,14 @@ private func runUserProductDoctor(
     helperInstalled: helperInstalled,
     vendorLogSafe: logSafe,
     sessionCleanupSafe: sessionCleanupSafe,
+    previousCleanupVerified: session?.cleanupVerified,
+    originalCleanupReceipt: session?.originalCleanupReceipt,
+    recoveryVerified: recoveryVerified,
+    recoveryBasis: session?.recoveryReceipt?.basis,
+    recoveryReceipt: session?.recoveryReceipt,
     blocker: blocker,
+    nextAction: blocker == "previous_cleanup_unverified"
+      ? "powervpn recovery inspect --json" : nil,
     warning: warning
   )
   if arguments.last == "--json" {
@@ -658,6 +761,7 @@ private func runUserProductDoctor(
   }
   var lines = ["PowerVPN doctor: \(report.ready ? "ready" : "blocked")"]
   if let blocker { lines.append("Blocker: \(blocker)") }
+  if let nextAction = report.nextAction { lines.append("Next: \(nextAction)") }
   if let warning { lines.append("Warning: \(warning)") }
   return UserProductCommandResult(
     standardOutput: lines.joined(separator: "\n") + "\n",
@@ -700,13 +804,17 @@ private func runInternalProductProxy(
     && result.exitCode != 74
     && result.standardError.trimmingCharacters(in: .whitespacesAndNewlines) == "child_failed"
   let normalSessionClose = readySessionClosedWithCleanup || proxyStreamClosedWithCleanup
+  let cleanupReceipt = result.cleanupReceipt.map(UserProductOriginalCleanupReceipt.init)
+  let cleanupVerified = cleanupReceipt?.cleanupVerified ?? (result.exitCode != 74)
   let failure =
     result.exitCode == 0 || normalSessionClose
     ? nil : userProductProxyFailure(result.standardError)
   if let sessionID {
     _ = try? dependencies.stateStore.update(sessionID: sessionID) { state in
       state.phase = result.exitCode == 0 || normalSessionClose ? .disconnected : .failed
-      state.cleanupVerified = result.exitCode != 74
+      state.schemaVersion = 2
+      state.cleanupVerified = cleanupVerified
+      state.originalCleanupReceipt = cleanupReceipt
       state.failure = failure
     }
   }
@@ -842,15 +950,17 @@ private func userProductFailureMessage(_ failure: String?) -> String {
     return "PowerVPN: the configured THU resource is not currently available."
   case "cleanup_unproven":
     return
-      "PowerVPN: the session ended, but network cleanup could not be verified. Do not reconnect until `powervpn doctor --json` is clean."
+      "PowerVPN: the session ended, but network cleanup could not be verified. Run `powervpn recovery inspect --json`."
   case "runtime_unavailable":
     return "PowerVPN: Portal credentials or target configuration are unavailable."
   case "ssh_master_start_failed":
     return "PowerVPN: the persistent SSH owner could not start."
   case "stale_session_cleanup_unverified":
-    return "PowerVPN: a stale session was detected and quarantined because cleanup is unverified."
+    return
+      "PowerVPN: a stale session was quarantined because cleanup is unverified. Run `powervpn recovery inspect --json`."
   case "cleanup_receipt_missing":
-    return "PowerVPN: cleanup could not be verified because the session receipt is missing."
+    return
+      "PowerVPN: cleanup could not be verified because the session receipt is missing. Run `powervpn recovery inspect --json`."
   default:
     return "PowerVPN: connection failed. Run `powervpn doctor --json` for details."
   }
