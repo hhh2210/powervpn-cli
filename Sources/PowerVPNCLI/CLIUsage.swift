@@ -3,6 +3,12 @@ func printCLIUsage() {
     """
     Usage: powervpn <command> [options]
 
+      run <target> -- <command>
+                             Run one remote command (agents/scripts: use this).
+                             Reuses or starts the session, recovers a measured
+                             quarantine, retries one transient start failure.
+                             Exit: remote code | 75 retry later | 77 needs a human;
+                             PowerVPN failures end with `powervpn run:` + `next:`
       up <target>            Start a reusable background THU session
       down                   Stop the reusable session and verify cleanup
       status [--json]        Show connected/disconnected product state

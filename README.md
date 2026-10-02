@@ -67,7 +67,34 @@ powervpn doctor --json
 
 ## 命令
 
-临时 SSH（agent / 单条命令）：
+Agent / 脚本（推荐，唯一需要记住的命令）：
+
+```sh
+powervpn run lab-a -- 'nvidia-smi -L'
+```
+
+`run` 复用该目标已有的持久会话；没有就 `up` 一个并保留供后续复用（`powervpn down`
+停止）。遇到 cleanup quarantine 时自动跑一次 `recovery clear --json`，仍走同一
+measured cold-baseline gate，只有 PASS 才解除；启动的瞬时失败（如 vendor helper
+crash 后首次 `up` 返回 69）自动重试一次。远端命令走 ControlMaster，不持有会话命令锁，
+多个 `run` 可并发共享同一会话。
+
+退出码契约：
+
+| 退出码 | 含义 | 调用方动作 |
+|---|---|---|
+| 远端命令自身的码 | 命令已在远端执行 | 按命令语义处理 |
+| 75 | 可重试（会话忙、启动两次失败、会话中途断开） | 稍后原样重跑 |
+| 77 | 需要人（凭据/配置、recovery 被拒、连着别的目标） | 停下，把 `next:` 行报给人 |
+
+PowerVPN 侧失败的 stderr 末尾固定为 `powervpn run: <token>` 和 `next: <action>`
+两行，借此区分恰好以 75/77 退出的远端命令。其他产品命令（`up`/`ssh`/`down`/
+`recovery`）的失败输出最后一行同样是 `next: <action>`。
+
+给 coding agent 的 skill 在 `skills/powervpn/SKILL.md`，只教 `run` 这一条命令；
+用 `skillshare install skills/powervpn && skillshare sync` 分发。
+
+临时 SSH（单条命令，结束即清理隧道）：
 
 ```sh
 powervpn ssh lab-a

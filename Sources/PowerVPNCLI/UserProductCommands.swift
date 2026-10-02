@@ -23,9 +23,20 @@ struct UserProductCommandResult: Equatable, Sendable {
     Self(standardOutput: output, standardError: "", exitCode: 0)
   }
 
-  static func failure(_ error: String, exitCode: Int32 = 69) -> Self {
-    Self(standardOutput: "", standardError: error + "\n", exitCode: exitCode)
+  /// Every product failure ends with a `next:` line naming the one action to take.
+  /// Without an explicit `next`, the action is the message's own "Run `powervpn …`" hint.
+  static func failure(_ error: String, exitCode: Int32 = 69, next: String? = nil) -> Self {
+    let action = next ?? userProductNextAction(in: error)
+    let text = action.map { "\(error)\nnext: \($0)" } ?? error
+    return Self(standardOutput: "", standardError: text + "\n", exitCode: exitCode)
   }
+}
+
+func userProductNextAction(in message: String) -> String? {
+  guard let open = message.range(of: "run `powervpn ", options: .caseInsensitive),
+    let close = message[open.upperBound...].firstIndex(of: "`")
+  else { return nil }
+  return "powervpn " + message[open.upperBound..<close]
 }
 
 struct UserProductCommandDependencies: Sendable {
@@ -126,7 +137,7 @@ struct UserProductCommandDependencies: Sendable {
   }
 }
 
-private struct UserProductTarget: Sendable {
+struct UserProductTarget: Sendable {
   let key: String
   let host: String
   let user: String
@@ -184,6 +195,8 @@ func runCurrentMachineUserProductCommand(
     return try await runUserProductStatus(arguments: ["status"], dependencies: dependencies)
   }
   switch command {
+  case "run":
+    return try await runUserProductRun(arguments: arguments, dependencies: dependencies)
   case "ssh":
     return try await runUserProductSSH(arguments: arguments, dependencies: dependencies)
   case "up":
@@ -243,7 +256,9 @@ private func runUserProductSSH(
   do {
     commandLock = try dependencies.stateStore.acquireCommandLock()
   } catch UserProductSessionStoreError.busy {
-    return .failure("PowerVPN: another session command is already running.", exitCode: 75)
+    return .failure(
+      "PowerVPN: another session command is already running.", exitCode: 75,
+      next: "retry the same command in a few seconds")
   }
   defer { withExtendedLifetime(commandLock) {} }
 
@@ -313,7 +328,9 @@ private func runUserProductSSH(
         exitCode: result.exitCode
       )
     }
-    return .failure(userProductFailureMessage(final.failure), exitCode: 74)
+    return .failure(
+      userProductFailureMessage(final.failure), exitCode: 74,
+      next: userProductFailureNext(final.failure))
   }
   _ = try dependencies.stateStore.update(sessionID: sessionID) {
     $0.phase = .failed
@@ -326,7 +343,7 @@ private func runUserProductSSH(
   )
 }
 
-private func runUserProductUp(
+func runUserProductUp(
   arguments: [String],
   dependencies: UserProductCommandDependencies
 ) async throws -> UserProductCommandResult {
@@ -337,7 +354,9 @@ private func runUserProductUp(
   do {
     commandLock = try dependencies.stateStore.acquireCommandLock()
   } catch UserProductSessionStoreError.busy {
-    return .failure("PowerVPN: another session command is already running.", exitCode: 75)
+    return .failure(
+      "PowerVPN: another session command is already running.", exitCode: 75,
+      next: "retry the same command in a few seconds")
   }
   defer { withExtendedLifetime(commandLock) {} }
   let target = try resolveUserProductTarget(arguments[1], dependencies: dependencies)
@@ -348,7 +367,9 @@ private func runUserProductUp(
     )
   else {
     return .failure(
-      "PowerVPN: SSH target '\(target.key)' does not match targets.json or lacks ControlMaster configuration."
+      "PowerVPN: SSH target '\(target.key)' does not match targets.json or lacks ControlMaster configuration.",
+      next:
+        "fix `Host \(target.key)` in ~/.ssh/config (HostName/User as in targets.json, ControlMaster auto, ControlPath under ~/.ssh/)"
     )
   }
 
@@ -398,11 +419,14 @@ private func runUserProductUp(
   )
   if foreign.exitCode == 0 {
     return .failure(
-      "PowerVPN: an existing SSH ControlMaster for \(target.key) is not owned by PowerVPN. Close it before `powervpn up`."
+      "PowerVPN: an existing SSH ControlMaster for \(target.key) is not owned by PowerVPN. Close it before `powervpn up`.",
+      next: "ssh -S \(sshConfiguration.controlPath) -O exit \(target.key)"
     )
   }
   guard removeOwnedStaleControlSocket(sshConfiguration.controlPath) else {
-    return .failure("PowerVPN: the configured SSH control socket is unsafe or cannot be recovered.")
+    return .failure(
+      "PowerVPN: the configured SSH control socket is unsafe or cannot be recovered.",
+      next: "remove or fix \(sshConfiguration.controlPath), then retry")
   }
 
   let sessionID = UUID().uuidString.lowercased()
@@ -428,7 +452,9 @@ private func runUserProductUp(
     if let final = try dependencies.stateStore.load(), final.sessionID == sessionID,
       final.terminal
     {
-      return .failure(userProductFailureMessage(final.failure), exitCode: 69)
+      return .failure(
+        userProductFailureMessage(final.failure), exitCode: 69,
+        next: userProductFailureNext(final.failure))
     }
     _ = try dependencies.stateStore.update(sessionID: sessionID) {
       $0.phase = .failed
@@ -445,7 +471,9 @@ private func runUserProductUp(
     if let final = try dependencies.stateStore.load(), final.sessionID == sessionID,
       final.terminal
     {
-      return .failure(userProductFailureMessage(final.failure), exitCode: 69)
+      return .failure(
+        userProductFailureMessage(final.failure), exitCode: 69,
+        next: userProductFailureNext(final.failure))
     }
     return .failure(
       "PowerVPN: session startup has not reached READY. Run `powervpn status`."
@@ -474,7 +502,9 @@ private func runUserProductDown(
   do {
     commandLock = try dependencies.stateStore.acquireCommandLock()
   } catch UserProductSessionStoreError.busy {
-    return .failure("PowerVPN: another session command is already running.", exitCode: 75)
+    return .failure(
+      "PowerVPN: another session command is already running.", exitCode: 75,
+      next: "retry the same command in a few seconds")
   }
   defer { withExtendedLifetime(commandLock) {} }
   guard var state = try dependencies.stateStore.load() else {
@@ -524,7 +554,9 @@ private func runUserProductDown(
           _ = try dependencies.stateStore.remove(sessionID: current.sessionID)
           return .success("PowerVPN: disconnected\nCleanup: verified\n")
         }
-        return .failure(userProductFailureMessage(current.failure), exitCode: 74)
+        return .failure(
+          userProductFailureMessage(current.failure), exitCode: 74,
+          next: userProductFailureNext(current.failure))
       }
     } else {
       return .failure(
@@ -825,7 +857,7 @@ private func runInternalProductProxy(
   )
 }
 
-private func resolveUserProductTarget(
+func resolveUserProductTarget(
   _ key: String,
   dependencies: UserProductCommandDependencies
 ) throws -> UserProductTarget {
@@ -857,7 +889,7 @@ private func resolveUserProductTarget(
   )
 }
 
-private func effectiveSSHConfiguration(
+func effectiveSSHConfiguration(
   target: UserProductTarget,
   dependencies: UserProductCommandDependencies
 ) -> UserProductSSHEffectiveConfiguration? {
@@ -880,7 +912,7 @@ private func effectiveSSHConfiguration(
   return parsed
 }
 
-private func checkMaster(
+func checkMaster(
   _ state: UserProductSessionState,
   dependencies: UserProductCommandDependencies
 ) -> UserProductProcessResult {
@@ -963,6 +995,20 @@ private func userProductFailureMessage(_ failure: String?) -> String {
       "PowerVPN: cleanup could not be verified because the session receipt is missing. Run `powervpn recovery inspect --json`."
   default:
     return "PowerVPN: connection failed. Run `powervpn doctor --json` for details."
+  }
+}
+
+/// The action for failure tokens whose message carries no "Run `powervpn …`" hint.
+private func userProductFailureNext(_ failure: String?) -> String? {
+  switch failure {
+  case "portal_catalog_incomplete":
+    return "retry the same command in about 30 seconds"
+  case "target_resource_unavailable":
+    return "retry later; if it persists, check the target's resource in the THU Portal"
+  case "runtime_unavailable", "ssh_master_start_failed":
+    return "powervpn doctor --json"
+  default:
+    return userProductNextAction(in: userProductFailureMessage(failure))
   }
 }
 
