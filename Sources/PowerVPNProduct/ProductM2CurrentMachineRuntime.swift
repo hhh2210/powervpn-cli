@@ -34,6 +34,7 @@ package struct ProductM2CurrentMachineRuntime: Sendable {
   }
 
   init(
+    acquireMutationLease: @escaping @Sendable () throws -> any ProductMutationLeaseHolding,
     controlRuntimePreflightAccepted: @escaping @Sendable () -> Bool,
     generationObserver: any BoundedVendorHelperGenerationObserving,
     preflightChecker: any BoundedVendorXPCPreflightChecking,
@@ -46,6 +47,7 @@ package struct ProductM2CurrentMachineRuntime: Sendable {
     self.init(
       authorizationProvider: authorizationProvider,
       dependencies: ProductM2CurrentMachineComposition.dependencies(
+        acquireMutationLease: acquireMutationLease,
         controlRuntimePreflightAccepted: controlRuntimePreflightAccepted,
         generationObserver: generationObserver,
         preflightChecker: preflightChecker,
@@ -100,6 +102,8 @@ extension ProductPersistentTunnelRuntime {
 
 private enum ProductM2CurrentMachineComposition {
   static func dependencies(
+    acquireMutationLease: @escaping @Sendable () throws -> any ProductMutationLeaseHolding =
+      ProductMutationLease.acquireCurrentMachine,
     controlRuntimePreflightAccepted: @escaping @Sendable () -> Bool =
       ProductM2ControlAdapter.runtimePreflightAccepted,
     generationObserver: any BoundedVendorHelperGenerationObserving =
@@ -112,6 +116,7 @@ private enum ProductM2CurrentMachineComposition {
     freshSSHProver: ProductM2FreshSSHProver = ProductM2FreshSSHProver()
   ) -> ProductM2ConnectOnceDependencies {
     ProductM2ConnectOnceDependencies(
+      acquireMutationLease: acquireMutationLease,
       controlRuntimePreflightAccepted: controlRuntimePreflightAccepted,
       generationObserver: generationObserver,
       preflightChecker: preflightChecker,
