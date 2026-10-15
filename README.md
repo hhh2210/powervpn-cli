@@ -217,10 +217,12 @@ helper 是官方闭件，不可修改；以下缺陷都在客户端侧缓解：
 
 ```sh
 swift build --product powervpn --arch arm64
-swift test
+scripts/hermetic_swift_test.sh
 ```
 
-当前 test inventory 为 882 项，`swift test` 全量通过。
+当前 test inventory 为 919 项，全量通过。`scripts/hermetic_swift_test.sh`
+即 `swift test` 外加 `sandbox-exec` 隔离：测试不能读写本机真实的
+PowerVPN 状态、配置与厂商目录，所以有 live session 时也能放心跑。
 
 ```text
 Sources/

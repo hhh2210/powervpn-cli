@@ -23,7 +23,12 @@ CI 覆盖四件事：构建与全量测试、格式、密钥扫描、release 构
 源码修复，不能再用只跑新工具链的绿色结果替代最低支持证明。
 
 - **build-and-test**（minimum Xcode 16.2 + current Xcode 27）：两条 leg 都先
-  `swift build --product powervpn -c debug`，再用 `swift test` 跑全部套件；
+  `swift build --product powervpn -c debug`，再用
+  `scripts/hermetic_swift_test.sh` 跑全部套件：它在 `sandbox-exec` 里执行
+  `swift test`，拒绝访问本机真实的 `~/.local/state/powervpn`、
+  `~/.config/powervpn` 与厂商 `Application Support` 目录，测试一旦落到
+  生产默认（如真实 mutation lease）就确定性失败，而不是去抢 live session
+  的锁；
   `.build` cache 按 source SHA、toolchain、runner OS/arch 与 package
   manifest 精确隔离，只允许同一提交重跑复用。
 - **format**：`xcrun swift-format lint --strict --recursive Sources Tests`，

@@ -90,8 +90,8 @@ jobs:
       - name: Build (debug, product powervpn)
         run: swift build --product powervpn -c debug
 
-      - name: Test (all suites, offline)
-        run: swift test
+      - name: Test (all suites, offline, real PowerVPN state denied)
+        run: scripts/hermetic_swift_test.sh
 
   format:
     name: format (swift-format strict, recursive)
