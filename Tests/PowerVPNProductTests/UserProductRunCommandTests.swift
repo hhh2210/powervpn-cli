@@ -87,6 +87,84 @@ import Testing
     #expect(try store.load() == original)
   }
 
+  @Test func runNamesTheVendorLogRepairWhenOnlyThatPreflightFails() async throws {
+    let directory = recoveryTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = UserProductSessionStateStore(directory: directory)
+    try store.save(quarantinedRecoveryState())
+    let ssh = RunScriptedSSH(execExitCode: 0)
+    let rejection = ProductCleanupRecoveryReport(
+      failure: .preflightRejected,
+      source: .nativePortal,
+      preflight: VendorXPCPreflightEvidence(
+        guiProcessAbsent: true,
+        helperProcessAbsent: true,
+        otherVendorHelperProcessesAbsent: true,
+        helperLaunchdInactive: true,
+        dnsRecoveryFileAbsent: true,
+        vendorLogRotationSafe: false,
+        vendorLogFinding: .absent
+      ),
+      mutationLeaseAcquired: true
+    )
+
+    let result = try await runCurrentMachineUserProductCommand(
+      ["run", "thu21", "--", "hostname"],
+      dependencies: runDependencies(
+        ssh: ssh, store: store, recoveryPasses: false, rejection: rejection)
+    )
+
+    #expect(result.exitCode == 77)
+    #expect(result.standardError.contains("local preflight failed (vendor_log_absent)"))
+    #expect(result.standardError.hasSuffix("next: powervpn repair vendor-log --json\n"))
+    #expect(ssh.starts == 0)
+  }
+
+  @Test func runRetriesIntermittentCatalogSelectionThenStarts() async throws {
+    let directory = recoveryTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = UserProductSessionStateStore(directory: directory)
+    try store.save(quarantinedRecoveryState())
+    let ssh = RunScriptedSSH(execExitCode: 0)
+    let counter = RecoveryInvocationCounter()
+
+    let result = try await runCurrentMachineUserProductCommand(
+      ["run", "thu21", "--", "hostname"],
+      dependencies: runDependencies(
+        ssh: ssh, store: store, counter: counter,
+        rejection: ProductCleanupRecoveryReport(
+          failure: .selectionRejected, source: .nativePortal, mutationLeaseAcquired: true),
+        rejectionsBeforePass: 2)
+    )
+
+    #expect(counter.value == 3)
+    #expect(result.standardError.contains("powervpn run: quarantine_cleared"))
+    #expect(!result.standardError.contains("recovery_rejected"))
+  }
+
+  @Test func runStopsAfterThreeIntermittentSelectionFailures() async throws {
+    let directory = recoveryTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = UserProductSessionStateStore(directory: directory)
+    try store.save(quarantinedRecoveryState())
+    let ssh = RunScriptedSSH(execExitCode: 0)
+    let counter = RecoveryInvocationCounter()
+
+    let result = try await runCurrentMachineUserProductCommand(
+      ["run", "thu21", "--", "hostname"],
+      dependencies: runDependencies(
+        ssh: ssh, store: store, counter: counter,
+        rejection: ProductCleanupRecoveryReport(
+          failure: .selectionRejected, source: .nativePortal, mutationLeaseAcquired: true),
+        rejectionsBeforePass: 5)
+    )
+
+    #expect(counter.value == 3)
+    #expect(result.exitCode == 77)
+    #expect(result.standardError.contains("powervpn run: recovery_rejected"))
+    #expect(ssh.starts == 0)
+  }
+
   @Test func runRefusesWhileAnotherTargetIsConnected() async throws {
     let directory = recoveryTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
@@ -273,7 +351,10 @@ private func runDependencies(
   store: UserProductSessionStateStore = UserProductSessionStateStore(
     directory: recoveryTemporaryDirectory()),
   counter: RecoveryInvocationCounter = RecoveryInvocationCounter(),
-  recoveryPasses: Bool = true
+  recoveryPasses: Bool = true,
+  rejection: ProductCleanupRecoveryReport = ProductCleanupRecoveryReport(
+    failure: .coldBaselineRejected, source: .nativePortal, mutationLeaseAcquired: true),
+  rejectionsBeforePass: Int? = nil
 ) -> UserProductCommandDependencies {
   UserProductCommandDependencies(
     loadConfiguration: recoveryConfiguration,
@@ -285,15 +366,16 @@ private func runDependencies(
     proxyRunner: { _ in ProxyCommandResult(standardOutput: "", standardError: "", exitCode: 0) },
     recoveryRunner: { request, _, commit in
       counter.increment()
-      guard recoveryPasses else {
-        return ProductCleanupRecoveryReport(
-          failure: .coldBaselineRejected, source: .nativePortal, mutationLeaseAcquired: true)
+      if let rejectionsBeforePass {
+        guard counter.value > rejectionsBeforePass else { return rejection }
+      } else {
+        guard recoveryPasses else { return rejection }
       }
       return await syntheticRecoveryMeasurement(request: request, commit: commit)
     },
     credentialFileSafe: { true },
     helperArtifactSafe: { true },
-    vendorLogSafe: { true },
+    vendorLogFinding: { .bounded },
     signalMonitorFactory: { RecoveryNoopSignalMonitor() },
     sleepMilliseconds: { _ in },
     cleanupPollLimit: 1

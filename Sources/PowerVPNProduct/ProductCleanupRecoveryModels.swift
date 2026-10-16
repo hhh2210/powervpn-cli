@@ -45,6 +45,10 @@ package struct ProductCleanupRecoveryReport: Encodable, Equatable, Sendable {
   package let captureAssessment: NetworkColdRecoveryAssessment?
   package let captureAttemptCount: Int
   package let preflightSafe: Bool
+  /// Value-free names of the failed local preflight conditions; empty when none failed.
+  package let preflightFindings: [String]
+  /// Value-free reason the authorized catalog yielded no unique target resource.
+  package let selectionFailure: String?
   package let mutationLeaseAcquired: Bool
   package let originalCleanupRestored = false
   package let permitsReconnect: Bool
@@ -59,6 +63,8 @@ package struct ProductCleanupRecoveryReport: Encodable, Equatable, Sendable {
     assessment: NetworkColdRecoveryAssessment? = nil,
     attempts: Int = 0,
     preflightSafe: Bool = false,
+    preflight: VendorXPCPreflightEvidence? = nil,
+    selectionFailure: String? = nil,
     mutationLeaseAcquired: Bool
   ) {
     precondition((0...2).contains(attempts))
@@ -70,6 +76,8 @@ package struct ProductCleanupRecoveryReport: Encodable, Equatable, Sendable {
     captureAssessment = assessment
     captureAttemptCount = attempts
     self.preflightSafe = preflightSafe
+    preflightFindings = preflight?.failedChecks ?? []
+    self.selectionFailure = selectionFailure
     self.mutationLeaseAcquired = mutationLeaseAcquired
     let accepted =
       mutationLeaseAcquired && authorizationClose == .accepted
@@ -92,6 +100,8 @@ package struct ProductCleanupRecoveryReport: Encodable, Equatable, Sendable {
     captureAssessment = report.captureAssessment
     captureAttemptCount = report.captureAttemptCount
     preflightSafe = report.preflightSafe
+    preflightFindings = report.preflightFindings
+    selectionFailure = report.selectionFailure
     mutationLeaseAcquired = report.mutationLeaseAcquired
     permitsReconnect = false
   }
@@ -107,6 +117,8 @@ package struct ProductCleanupRecoveryReport: Encodable, Equatable, Sendable {
     captureAssessment = report.captureAssessment
     captureAttemptCount = report.captureAttemptCount
     preflightSafe = report.preflightSafe
+    preflightFindings = report.preflightFindings
+    selectionFailure = report.selectionFailure
     mutationLeaseAcquired = report.mutationLeaseAcquired
     permitsReconnect = false
   }

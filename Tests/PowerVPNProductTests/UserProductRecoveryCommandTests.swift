@@ -199,7 +199,7 @@ import Testing
         recoveryRunner: dependencies.recoveryRunner,
         credentialFileSafe: { true },
         helperArtifactSafe: { true },
-        vendorLogSafe: { true },
+        vendorLogFinding: { .bounded },
         cleanupPollLimit: 1
       )
     )
@@ -244,7 +244,7 @@ import Testing
       recoveryRunner: base.recoveryRunner,
       credentialFileSafe: { true },
       helperArtifactSafe: { true },
-      vendorLogSafe: { true },
+      vendorLogFinding: { .bounded },
       signalMonitorFactory: { RecoveryNoopSignalMonitor() },
       cleanupPollLimit: 1
     )
@@ -288,7 +288,7 @@ import Testing
       recoveryRunner: recoveryDependencies.recoveryRunner,
       credentialFileSafe: { true },
       helperArtifactSafe: { true },
-      vendorLogSafe: { true },
+      vendorLogFinding: { .bounded },
       cleanupPollLimit: 1
     )
     let result = try await runCurrentMachineUserProductCommand(
@@ -321,7 +321,7 @@ import Testing
       recoveryRunner: recoveryDependencies(store: store).recoveryRunner,
       credentialFileSafe: { true },
       helperArtifactSafe: { true },
-      vendorLogSafe: { true },
+      vendorLogFinding: { .bounded },
       cleanupPollLimit: 1
     )
 
@@ -428,7 +428,7 @@ import Testing
       },
       credentialFileSafe: { true },
       helperArtifactSafe: { true },
-      vendorLogSafe: { true },
+      vendorLogFinding: { .bounded },
       signalMonitorFactory: { monitor },
       cleanupPollLimit: 1
     )

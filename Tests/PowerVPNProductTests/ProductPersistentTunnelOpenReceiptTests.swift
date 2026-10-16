@@ -75,7 +75,7 @@ import Testing
       recoveryRunner: base.recoveryRunner,
       credentialFileSafe: { true },
       helperArtifactSafe: { true },
-      vendorLogSafe: { true },
+      vendorLogFinding: { .bounded },
       signalMonitorFactory: { RecoveryNoopSignalMonitor() },
       cleanupPollLimit: 1
     )

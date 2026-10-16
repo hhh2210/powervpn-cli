@@ -36,6 +36,33 @@ import Testing
     #expect(legacyRunner.timeouts == [2_000])
   }
 
+  @Test func absentVendorLogIsNamedInValueFreeFindings() async {
+    let paths = PreflightPathTrace([
+      InstalledBoundedVendorXPCPreflightChecker.dnsRecoveryPath: .absent,
+      InstalledBoundedVendorXPCPreflightChecker.vendorLogPath: .absent,
+    ])
+    let runner = PreflightCommandRunner([success(preflightPS("/usr/bin/other"))])
+    let evidence = await checker(runner: runner, paths: paths).check(
+      generation: preflightColdGeneration,
+      timeoutMilliseconds: 500
+    )
+
+    #expect(!evidence.safeToProbe)
+    #expect(evidence.vendorLogFinding == .absent)
+    #expect(evidence.failedChecks == ["vendor_log_absent"])
+    let threshold = InstalledBoundedVendorXPCPreflightChecker.vendorLogRotationThreshold
+    #expect(
+      InstalledBoundedVendorXPCPreflightChecker.vendorLogFinding(.regularFile(size: threshold))
+        == .bounded)
+    #expect(
+      InstalledBoundedVendorXPCPreflightChecker.vendorLogFinding(
+        .regularFile(size: threshold + 1)) == .oversized)
+    #expect(VendorLogFinding.absent.repairable)
+    #expect(VendorLogFinding.unsafePermissions.repairable)
+    #expect(!VendorLogFinding.oversized.repairable)
+    #expect(!VendorLogFinding.unsupported.repairable)
+  }
+
   @Test func exactExecutableNamesDetectGUIAndEveryVendorHelper() async {
     let output = [
       preflightPS("/Applications/PowerVPN.app/Contents/MacOS/PowerVPN", pid: 10),

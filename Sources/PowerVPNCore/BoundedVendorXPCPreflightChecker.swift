@@ -71,21 +71,36 @@ package struct InstalledBoundedVendorXPCPreflightChecker:
     let helperAbsent = presence.map { !$0.charon } ?? false
     let otherHelpersAbsent = presence.map { !$0.ipsec && !$0.shell } ?? false
     let dnsRecoveryAbsent = inspectPath(Self.dnsRecoveryPath) == .absent
-    let logSafe: Bool
-    switch inspectPath(Self.vendorLogPath) {
-    case .regularFile(let size):
-      logSafe = size <= Self.vendorLogRotationThreshold
-    case .absent, .unsafeOwnership, .unsafePermissions, .unsupported, .unavailable:
-      logSafe = false
-    }
+    let logFinding = Self.vendorLogFinding(inspectPath(Self.vendorLogPath))
+    let logSafe = logFinding == .bounded
     return VendorXPCPreflightEvidence(
       guiProcessAbsent: guiAbsent && !guiApplicationRunning(),
       helperProcessAbsent: helperAbsent,
       otherVendorHelperProcessesAbsent: otherHelpersAbsent,
       helperLaunchdInactive: generation.exactInactive,
       dnsRecoveryFileAbsent: dnsRecoveryAbsent,
-      vendorLogRotationSafe: logSafe
+      vendorLogRotationSafe: logSafe,
+      vendorLogFinding: logFinding
     )
+  }
+
+  package static func vendorLogFinding(
+    _ observation: VendorXPCPreflightPathObservation
+  ) -> VendorLogFinding {
+    switch observation {
+    case .regularFile(let size):
+      size <= vendorLogRotationThreshold ? .bounded : .oversized
+    case .absent: .absent
+    case .unsafeOwnership: .unsafeOwnership
+    case .unsafePermissions: .unsafePermissions
+    case .unsupported: .unsupported
+    case .unavailable: .unavailable
+    }
+  }
+
+  /// The installed vendor log, classified by the same rule the preflight applies.
+  package static func installedVendorLogFinding() -> VendorLogFinding {
+    vendorLogFinding(installedPathObservation(vendorLogPath))
   }
 
   private static func processPresence(

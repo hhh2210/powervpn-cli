@@ -18,6 +18,8 @@ func printCLIUsage() {
       recovery inspect --json
                              Measure quarantine recovery without changing it
       recovery clear --json  Clear quarantine only after a measured cold baseline
+      repair vendor-log --json
+                             Restore the root-only vendor log (one macOS admin approval)
       debug help             Show development and compatibility commands
 
     Options:

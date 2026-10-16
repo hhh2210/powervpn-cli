@@ -62,7 +62,7 @@ func runUserProductRun(
   }
 
   var notes: [String] = []
-  var recoveryAttempted = false
+  var recoveryAttempts = 0
   var startFailures = 0
   var busyWaits = 0
 
@@ -95,15 +95,15 @@ func runUserProductRun(
         return runBusy(rerun)
       }
       if state.terminal, !state.reconnectPermitted {
-        guard !recoveryAttempted else {
+        guard recoveryAttempts < runRecoveryAttemptLimit else {
           return runFailure(
             "quarantine_persists",
-            "PowerVPN: cleanup is still unverified after one measured recovery.",
+            "PowerVPN: cleanup is still unverified after a measured recovery.",
             exitCode: UserProductRunExit.needsHuman,
             next: "powervpn recovery inspect --json"
           )
         }
-        recoveryAttempted = true
+        recoveryAttempts += 1
         let recovery = try await runUserProductRecovery(
           arguments: ["recovery", "clear", "--json"],
           dependencies: dependencies
@@ -115,15 +115,26 @@ func runUserProductRun(
           )
           continue
         case 75:
-          recoveryAttempted = false
+          recoveryAttempts -= 1
           if await waitWhileBusy() { continue }
           return runBusy(rerun)
         default:
+          let detail = recoveryRejectionDetail(recovery.standardOutput)
+          // The Portal catalog intermittently yields no unique resource; a later measured
+          // attempt can pass, so only that class is retried. Local preflight failures are not.
+          if let failure = detail.failure, runRetryableRecoveryFailures.contains(failure),
+            recoveryAttempts < runRecoveryAttemptLimit
+          {
+            await dependencies.sleepMilliseconds(runRecoveryRetryDelayMilliseconds)
+            continue
+          }
           return runFailure(
             "recovery_rejected",
-            "PowerVPN: the measured cold-baseline check did not pass; reconnect stays quarantined.",
+            detail.findings.isEmpty
+              ? "PowerVPN: the measured cold-baseline check did not pass; reconnect stays quarantined."
+              : "PowerVPN: local preflight failed (\(detail.findings.joined(separator: ", "))); reconnect stays quarantined.",
             exitCode: UserProductRunExit.needsHuman,
-            next: "powervpn recovery inspect --json"
+            next: detail.nextAction ?? "powervpn recovery inspect --json"
           )
         }
       }
@@ -260,3 +271,23 @@ private func firstLine(of text: String) -> String {
   let line = text.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init)
   return line ?? "PowerVPN: the session could not start."
 }
+
+/// Reads the value-free fields a rejected `recovery clear` reports, so `run` can name the failed
+/// preflight condition and its specific next step instead of a generic inspect.
+private func recoveryRejectionDetail(
+  _ json: String
+) -> (failure: String?, findings: [String], nextAction: String?) {
+  guard
+    let object = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+  else { return (nil, [], nil) }
+  let measurement = object["measurement"] as? [String: Any]
+  return (
+    measurement?["failure"] as? String,
+    measurement?["preflightFindings"] as? [String] ?? [],
+    object["nextAction"] as? String
+  )
+}
+
+private let runRecoveryAttemptLimit = 3
+private let runRecoveryRetryDelayMilliseconds = 10_000
+private let runRetryableRecoveryFailures: Set<String> = ["selection_rejected"]

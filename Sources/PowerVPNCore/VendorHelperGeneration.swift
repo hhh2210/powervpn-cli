@@ -189,6 +189,24 @@ public struct VendorHelperGenerationAssessment: Equatable, Sendable {
   }
 }
 
+/// Value-free classification of `/var/log/vsgvpn.log`. Only `bounded` is safe: an absent log
+/// would be recreated by launchd with the helper's default `0644`, exposing plaintext session
+/// material, and an oversized one can be deleted by the helper on startup.
+public enum VendorLogFinding: String, Codable, Equatable, Sendable {
+  case bounded
+  case absent
+  case oversized
+  case unsafeOwnership = "unsafe_ownership"
+  case unsafePermissions = "unsafe_permissions"
+  case unsupported
+  case unavailable
+
+  /// Restoring root-only metadata or an empty root-only file never discards log contents.
+  public var repairable: Bool {
+    self == .absent || self == .unsafeOwnership || self == .unsafePermissions
+  }
+}
+
 public struct VendorXPCPreflightEvidence: Codable, Equatable, Sendable {
   public let guiProcessAbsent: Bool
   public let helperProcessAbsent: Bool
@@ -196,6 +214,7 @@ public struct VendorXPCPreflightEvidence: Codable, Equatable, Sendable {
   public let helperLaunchdInactive: Bool
   public let dnsRecoveryFileAbsent: Bool
   public let vendorLogRotationSafe: Bool
+  public let vendorLogFinding: VendorLogFinding?
 
   public init(
     guiProcessAbsent: Bool,
@@ -203,7 +222,8 @@ public struct VendorXPCPreflightEvidence: Codable, Equatable, Sendable {
     otherVendorHelperProcessesAbsent: Bool,
     helperLaunchdInactive: Bool,
     dnsRecoveryFileAbsent: Bool,
-    vendorLogRotationSafe: Bool
+    vendorLogRotationSafe: Bool,
+    vendorLogFinding: VendorLogFinding? = nil
   ) {
     self.guiProcessAbsent = guiProcessAbsent
     self.helperProcessAbsent = helperProcessAbsent
@@ -211,12 +231,27 @@ public struct VendorXPCPreflightEvidence: Codable, Equatable, Sendable {
     self.helperLaunchdInactive = helperLaunchdInactive
     self.dnsRecoveryFileAbsent = dnsRecoveryFileAbsent
     self.vendorLogRotationSafe = vendorLogRotationSafe
+    self.vendorLogFinding = vendorLogFinding
   }
 
   public var safeToProbe: Bool {
     guiProcessAbsent && helperProcessAbsent && otherVendorHelperProcessesAbsent
       && helperLaunchdInactive
       && dnsRecoveryFileAbsent && vendorLogRotationSafe
+  }
+
+  /// Value-free names of the failed conditions, in `safeToProbe` order.
+  public var failedChecks: [String] {
+    var failed: [String] = []
+    if !guiProcessAbsent { failed.append("vendor_gui_running") }
+    if !helperProcessAbsent { failed.append("vendor_helper_running") }
+    if !otherVendorHelperProcessesAbsent { failed.append("vendor_auxiliary_helper_running") }
+    if !helperLaunchdInactive { failed.append("vendor_helper_not_inactive") }
+    if !dnsRecoveryFileAbsent { failed.append("vendor_dns_recovery_file_present") }
+    if !vendorLogRotationSafe {
+      failed.append("vendor_log_\(vendorLogFinding?.rawValue ?? "unsafe")")
+    }
+    return failed
   }
 }
 

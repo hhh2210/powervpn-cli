@@ -54,7 +54,8 @@ struct UserProductCommandDependencies: Sendable {
     ) async -> ProductCleanupRecoveryReport
   let credentialFileSafe: @Sendable () -> Bool
   let helperArtifactSafe: @Sendable () -> Bool
-  let vendorLogSafe: @Sendable () -> Bool
+  let vendorLogFinding: @Sendable () -> VendorLogFinding
+  let vendorQuiescent: @Sendable () async -> Bool
   let signalMonitorFactory: CLISignalMonitorFactory
   let sleepMilliseconds: @Sendable (Int) async -> Void
   let cleanupPollLimit: Int
@@ -101,8 +102,19 @@ struct UserProductCommandDependencies: Sendable {
         "/Library/PrivilegedHelperTools/com.leadsec.charon-xpc"
       )
     },
-    vendorLogSafe: @escaping @Sendable () -> Bool = {
-      protectedRootLogIsSafe("/var/log/vsgvpn.log")
+    vendorLogFinding: @escaping @Sendable () -> VendorLogFinding = {
+      InstalledBoundedVendorXPCPreflightChecker.installedVendorLogFinding()
+    },
+    vendorQuiescent: @escaping @Sendable () async -> Bool = {
+      let generation = await InstalledBoundedVendorHelperGenerationObserver().observe(
+        timeoutMilliseconds: 2_000
+      )
+      let evidence = await InstalledBoundedVendorXPCPreflightChecker().check(
+        generation: generation,
+        timeoutMilliseconds: 2_000
+      )
+      return evidence.guiProcessAbsent && evidence.helperProcessAbsent
+        && evidence.otherVendorHelperProcessesAbsent && evidence.helperLaunchdInactive
     },
     signalMonitorFactory: @escaping CLISignalMonitorFactory = {
       DarwinCLISignalMonitor()
@@ -122,7 +134,8 @@ struct UserProductCommandDependencies: Sendable {
     self.recoveryRunner = recoveryRunner
     self.credentialFileSafe = credentialFileSafe
     self.helperArtifactSafe = helperArtifactSafe
-    self.vendorLogSafe = vendorLogSafe
+    self.vendorLogFinding = vendorLogFinding
+    self.vendorQuiescent = vendorQuiescent
     self.signalMonitorFactory = signalMonitorFactory
     self.sleepMilliseconds = sleepMilliseconds
     self.cleanupPollLimit = cleanupPollLimit
@@ -209,6 +222,8 @@ func runCurrentMachineUserProductCommand(
     return try runUserProductDoctor(arguments: arguments, dependencies: dependencies)
   case "recovery":
     return try await runUserProductRecovery(arguments: arguments, dependencies: dependencies)
+  case "repair":
+    return try await runUserProductRepair(arguments: arguments, dependencies: dependencies)
   case "internal-proxy":
     return try await runInternalProductProxy(
       arguments: arguments,
@@ -746,7 +761,8 @@ private func runUserProductDoctor(
   let helperInstalled =
     system.appVersion != nil && system.appBuild != nil
     && dependencies.helperArtifactSafe()
-  let logSafe = dependencies.vendorLogSafe()
+  let logFinding = dependencies.vendorLogFinding()
+  let logSafe = logFinding == .bounded
   let session = try dependencies.stateStore.load()
   let recoveryVerified = session?.recoveryReceipt?.permitsReconnect == true
   let sessionCleanupSafe = session.map { !$0.terminal || $0.reconnectPermitted } ?? true
@@ -758,7 +774,7 @@ private func runUserProductDoctor(
   } else if !helperInstalled {
     blocker = "vendor_helper_missing"
   } else if !logSafe {
-    blocker = "vendor_log_permissions_unsafe"
+    blocker = vendorLogBlocker(logFinding)
   } else if !sessionCleanupSafe {
     blocker = "previous_cleanup_unverified"
   } else {
@@ -779,7 +795,8 @@ private func runUserProductDoctor(
     recoveryReceipt: session?.recoveryReceipt,
     blocker: blocker,
     nextAction: blocker == "previous_cleanup_unverified"
-      ? "powervpn recovery inspect --json" : nil,
+      ? "powervpn recovery inspect --json"
+      : (!logSafe && logFinding.repairable ? vendorLogRepairCommand : nil),
     warning: warning
   )
   if arguments.last == "--json" {
@@ -941,16 +958,6 @@ private func protectedUserFileIsSafe(_ path: String) -> Bool {
     && metadata.st_mode & S_IFMT == S_IFREG
     && metadata.st_mode & 0o777 == 0o600
     && metadata.st_size > 0
-}
-
-private func protectedRootLogIsSafe(_ path: String) -> Bool {
-  var metadata = stat()
-  guard lstat(path, &metadata) == 0 else { return errno == ENOENT }
-  return metadata.st_uid == 0
-    && metadata.st_gid == 0
-    && metadata.st_mode & S_IFMT == S_IFREG
-    && metadata.st_mode & 0o777 == 0o600
-    && metadata.st_size <= 0x1E00_000
 }
 
 private func protectedRootExecutableIsSafe(_ path: String) -> Bool {

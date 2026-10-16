@@ -78,6 +78,52 @@ import Testing
     #expect(trace.commitCount == 0)
   }
 
+  @Test func preflightRejectionNamesTheFailedConditionWithoutValues() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let runtime = recoveryRuntime(
+      fixture: fixture,
+      trace: RecoveryTrace(),
+      leaseState: RecoveryLeaseState(),
+      preflight: VendorXPCPreflightEvidence(
+        guiProcessAbsent: true,
+        helperProcessAbsent: true,
+        otherVendorHelperProcessesAbsent: true,
+        helperLaunchdInactive: true,
+        dnsRecoveryFileAbsent: true,
+        vendorLogRotationSafe: false,
+        vendorLogFinding: .absent
+      )
+    )
+
+    let report = await runtime.run(recoveryRequest) { _ in true }
+
+    #expect(report.failure == .preflightRejected)
+    #expect(report.preflightFindings == ["vendor_log_absent"])
+    let json = String(decoding: try JSONEncoder().encode(report), as: UTF8.self)
+    #expect(json.contains("vendor_log_absent"))
+    #expect(!json.contains("vsgvpn"))
+  }
+
+  @Test func selectionRejectionNamesTheCatalogFailureWithoutValues() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Other Lab"]))
+    defer { fixture.erase() }
+    let runtime = recoveryRuntime(
+      fixture: fixture,
+      trace: RecoveryTrace(),
+      leaseState: RecoveryLeaseState(),
+      preflight: safeRecoveryPreflight
+    )
+
+    let report = await runtime.run(recoveryRequest) { _ in true }
+
+    #expect(report.failure == .selectionRejected)
+    #expect(report.selectionFailure == "resource_not_found")
+    let json = String(decoding: try JSONEncoder().encode(report), as: UTF8.self)
+    #expect(!json.contains("Other Lab"))
+    #expect(!json.contains("Campus NC"))
+  }
+
   @Test func failedReceiptCommitReturnsRejectedWithoutReclassifyingMeasurement() async throws {
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
     defer { fixture.erase() }

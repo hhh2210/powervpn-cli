@@ -1,4 +1,5 @@
 import Foundation
+import PowerVPNCore
 import PowerVPNPortal
 import PowerVPNProduct
 
@@ -177,7 +178,7 @@ func runUserProductRecovery(
       quarantineCleared: false,
       requiresHumanAction: true,
       nextAction: measurement.permitsReconnect
-        ? "powervpn recovery clear --json" : nil,
+        ? "powervpn recovery clear --json" : vendorLogRepairAction(measurement),
       exitCode: measurement.permitsReconnect ? 0 : 74
     )
   }
@@ -200,8 +201,19 @@ func runUserProductRecovery(
     measurement: measurement,
     quarantineCleared: cleared,
     requiresHumanAction: !measurement.permitsReconnect,
+    nextAction: measurement.permitsReconnect ? nil : vendorLogRepairAction(measurement),
     exitCode: measurement.permitsReconnect ? 0 : 74
   )
+}
+
+/// A preflight that failed only because the vendor log lost its root-only file is fixable by
+/// one approved repair; everything else keeps the generic recovery guidance.
+private func vendorLogRepairAction(_ measurement: ProductCleanupRecoveryReport) -> String? {
+  guard measurement.failure == .preflightRejected else { return nil }
+  let repairable = [VendorLogFinding.absent, .unsafeOwnership, .unsafePermissions]
+    .map { "vendor_log_\($0.rawValue)" }
+  return measurement.preflightFindings.contains(where: repairable.contains)
+    ? vendorLogRepairCommand : nil
 }
 
 private func runRecoverySignalTask(

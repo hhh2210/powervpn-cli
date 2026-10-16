@@ -56,6 +56,7 @@ extension ProductCleanupRecoveryDependencies {
 private struct ProductClosedRecoveryAuthorization: Sendable {
   let source: ProductM2AuthorizationSource
   let routes: VendorCharonSelectedRouteMatcher?
+  let selectionFailure: String?
   let close: ProductM2AuthorizationCloseReceipt
   let contacted: Bool
 }
@@ -102,7 +103,7 @@ package struct ProductCleanupRecoveryRuntime: Sendable {
       return report(.cancelled)
     }
     guard initialGeneration.exactInactive, initialPreflight.safeToProbe else {
-      return report(.preflightRejected)
+      return report(.preflightRejected, preflight: initialPreflight)
     }
 
     let measured: ProductCleanupRecoveryReport
@@ -148,6 +149,7 @@ package struct ProductCleanupRecoveryRuntime: Sendable {
     budget: ProductM2AbsoluteBudget
   ) async -> ProductClosedRecoveryAuthorization {
     let routes: VendorCharonSelectedRouteMatcher?
+    var selectionFailure: String?
     do {
       guard source == dependencies.authorizationSource,
         lease.source == source,
@@ -159,11 +161,13 @@ package struct ProductCleanupRecoveryRuntime: Sendable {
       ).selectedRoutes
     } catch {
       routes = nil
+      selectionFailure = ProductCleanupRecoverySelectionFailure.token(for: error)
     }
     let close = await lease.closeAndErase(deadline: budget.authorization.cleanup)
     return ProductClosedRecoveryAuthorization(
       source: source,
       routes: routes,
+      selectionFailure: selectionFailure,
       close: close,
       contacted: contacted || close.serverContactRequested
     )
@@ -234,7 +238,8 @@ package struct ProductCleanupRecoveryRuntime: Sendable {
       authorization: authorization,
       assessment: assessment,
       attempts: 2,
-      preflightSafe: preflight.safeToProbe
+      preflightSafe: preflight.safeToProbe,
+      preflight: preflight
     )
   }
 
@@ -258,6 +263,7 @@ package struct ProductCleanupRecoveryRuntime: Sendable {
     assessment: NetworkColdRecoveryAssessment? = nil,
     attempts: Int = 0,
     preflightSafe: Bool = false,
+    preflight: VendorXPCPreflightEvidence? = nil,
     mutationLeaseAcquired: Bool = true
   ) -> ProductCleanupRecoveryReport {
     ProductCleanupRecoveryReport(
@@ -269,7 +275,34 @@ package struct ProductCleanupRecoveryRuntime: Sendable {
       assessment: assessment,
       attempts: attempts,
       preflightSafe: preflightSafe,
+      preflight: preflight,
+      selectionFailure: authorization?.selectionFailure,
       mutationLeaseAcquired: mutationLeaseAcquired
     )
+  }
+}
+
+/// Value-free name of why the authorized catalog yielded no unique target resource.
+enum ProductCleanupRecoverySelectionFailure {
+  static func token(for error: any Error) -> String {
+    guard let failure = error as? ProductM2AuthorizedResourceSelectionError else {
+      return "unclassified"
+    }
+    switch failure {
+    case .leaseClosed: return "lease_closed"
+    case .selectionAlreadyIssued: return "selection_already_issued"
+    case .startAlreadyIssued: return "start_already_issued"
+    case .invalidSelection: return "invalid_selection"
+    case .preparedSelectionMismatch: return "prepared_selection_mismatch"
+    case .resourceNotFound: return "resource_not_found"
+    case .resourceAmbiguous: return "resource_ambiguous"
+    case .catalogMapping(let mapping): return "catalog_mapping_\(mapping.failureClass.rawValue)"
+    case .catalogEmpty: return "catalog_empty"
+    case .catalogInvariantInvalid: return "catalog_invariant_invalid"
+    case .prepareRemap(let mapping): return "prepare_remap_\(mapping.failureClass.rawValue)"
+    case .startSnapshotRejected: return "start_snapshot_rejected"
+    case .selectedRouteCoverageRejected: return "selected_route_coverage_rejected"
+    case .workAborted: return "work_aborted"
+    }
   }
 }
