@@ -107,7 +107,8 @@ public final class VICISession {
   public func streamedRequest(
     command: String,
     event: String,
-    message: VICIMessage = VICIMessage(elements: [])
+    message: VICIMessage = VICIMessage(elements: []),
+    observeEvent: ((VICIMessage) -> Void)? = nil
   ) throws -> VICIStreamResult {
     var traces: [VICIExchangeTrace] = []
     traces.append(try setEventRegistration(event, register: true))
@@ -139,6 +140,7 @@ public final class VICISession {
           guard actual == event else {
             throw VICISessionError.unexpectedEvent(expected: event, actual: actual)
           }
+          observeEvent?(message)
           events.append(message)
         case .commandResponse(let response):
           traces.append(try setEventRegistration(event, register: false))
@@ -163,6 +165,10 @@ public final class VICISession {
 
   public func close() {
     transport.close()
+  }
+
+  package func interruptionHandle() -> VICIInterruptHandle {
+    VICIInterruptHandle(transport: transport as? VICIUnixTransport)
   }
 
   private func setEventRegistration(_ event: String, register: Bool) throws -> VICIExchangeTrace {
@@ -209,6 +215,12 @@ public final class VICISession {
       throw VICISessionError.commandFailed(command)
     }
   }
+}
+
+/// The only session operation exposed across the cancellation boundary.
+package struct VICIInterruptHandle: @unchecked Sendable {
+  fileprivate let transport: VICIUnixTransport?
+  package func interrupt() { transport?.interrupt() }
 }
 
 extension VICIMessage {

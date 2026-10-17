@@ -6,6 +6,7 @@ let package = Package(
   name: "powervpn-cli",
   platforms: [.macOS(.v14)],
   products: [
+    .executable(name: "powervpn-native-trial", targets: ["PowerVPNNativeTrial"]),
     .executable(name: "powervpn", targets: ["PowerVPNCLI"]),
     .executable(
       name: "powervpn-tls-evidence",
@@ -13,6 +14,9 @@ let package = Package(
     ),
   ],
   targets: [
+    .executableTarget(
+      name: "PowerVPNNativeTrial",
+      dependencies: ["PowerVPNCore", "PowerVPNPortal", "PowerVPNProduct"]),
     .target(
       name: "CPortalCurl",
       linkerSettings: [.linkedLibrary("curl")]

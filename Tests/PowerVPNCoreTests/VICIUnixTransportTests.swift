@@ -188,6 +188,41 @@ import Testing
     transport.close()
     transport.close()
   }
+
+  @Test func cancellationInterruptsBlockedReadWithoutWaitingForItsTimeout() throws {
+    let sockets = try makeSocketPair()
+    let transport = try VICIUnixTransport(
+      connectedFileDescriptor: sockets.client, timeoutMilliseconds: 2_000)
+    let session = VICISession(transport: transport)
+    let handle = session.interruptionHandle()
+    defer {
+      session.close()
+      Darwin.close(sockets.server)
+    }
+    DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(20)) { handle.interrupt() }
+    let start = ContinuousClock.now
+    #expect(throws: VICITransportError.self) { try transport.receive() }
+    #expect(start.duration(to: .now) < .milliseconds(500))
+  }
+
+  @Test func interruptionAfterCloseCannotShutdownAReusedDescriptor() throws {
+    let first = try makeSocketPair()
+    let old = try VICIUnixTransport(connectedFileDescriptor: first.client, timeoutMilliseconds: 100)
+    let session = VICISession(transport: old)
+    let handle = session.interruptionHandle()
+    session.close()
+    let second = try makeSocketPair()
+    let current = try VICIUnixTransport(
+      connectedFileDescriptor: second.client, timeoutMilliseconds: 100)
+    defer {
+      Darwin.close(first.server)
+      Darwin.close(second.server)
+      current.close()
+    }
+    handle.interrupt()
+    writeAll(second.server, frame(Data([1])))
+    #expect(try current.receive().payload == Data([1]))
+  }
 }
 
 private struct SocketPair {
