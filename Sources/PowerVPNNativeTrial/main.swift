@@ -224,7 +224,7 @@ func collectChildDiagnostics(session: VICISession, name: String, allowUtun9: Boo
   recordChildCounters("child_counters_after_nc", session: session, name: name)
 }
 
-@main struct NativeTrial {
+struct NativeTrial {
   static func main() async {
     let cancellation = NativeTrialCancellation()
     let monitor = NativeTrialSignalMonitor(cancellation: cancellation)
@@ -592,3 +592,6 @@ func collectChildDiagnostics(session: VICISession, name: String, allowUtun9: Boo
     }
   }
 }
+
+// main.swift is top-level code; Swift 6.0 (Xcode 16.2) rejects @main here.
+await NativeTrial.main()

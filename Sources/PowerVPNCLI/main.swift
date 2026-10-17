@@ -3,7 +3,6 @@ import PowerVPNCore
 import PowerVPNPortal
 import PowerVPNProduct
 
-@main
 struct PowerVPNCommand {
   static func main() async {
     do {
@@ -286,3 +285,6 @@ private enum CLIError: Error, CustomStringConvertible {
     }
   }
 }
+
+// main.swift is top-level code; Swift 6.0 (Xcode 16.2) rejects @main here.
+await PowerVPNCommand.main()
