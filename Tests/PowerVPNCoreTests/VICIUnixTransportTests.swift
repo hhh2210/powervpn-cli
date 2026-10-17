@@ -115,18 +115,20 @@ import Testing
     let sockets = try makeSocketPair()
     let transport = try VICIUnixTransport(
       connectedFileDescriptor: sockets.client,
-      timeoutMilliseconds: 50
+      timeoutMilliseconds: 200
     )
     let server = sockets.server
     let group = DispatchGroup()
     let partialHeaderWritten = DispatchSemaphore(value: 0)
     group.enter()
+    // The header completes at ~100 ms and the payload never does. A total
+    // deadline fires at ~200 ms; one reset on progress would fire at ~300 ms.
     DispatchQueue.global().async {
       writeAll(server, Data([0x00, 0x00]))
       partialHeaderWritten.signal()
-      usleep(30_000)
+      usleep(100_000)
       writeAll(server, Data([0x00, 0x04, 0x01]))
-      usleep(70_000)
+      usleep(400_000)
       Darwin.close(server)
       group.leave()
     }
@@ -140,8 +142,8 @@ import Testing
     let milliseconds =
       elapsed.seconds * 1_000
       + elapsed.attoseconds / 1_000_000_000_000_000
-    #expect(milliseconds >= 40)
-    #expect(milliseconds < 80)
+    #expect(milliseconds >= 190)
+    #expect(milliseconds < 280)
     group.wait()
   }
 

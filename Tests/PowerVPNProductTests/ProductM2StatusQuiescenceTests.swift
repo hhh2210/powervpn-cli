@@ -27,10 +27,12 @@ import Testing
     try await Task.sleep(for: .milliseconds(150))
     statusEvents.increment()
     #expect(trace.count("route_enable") == 0)
-    #expect(await waitForRouteEnable(trace, timeout: .milliseconds(500)))
+    #expect(await waitForRouteEnable(trace, timeout: .seconds(1)))
     let routeEnabled = ContinuousClock.now
     #expect(coordinatorStarted.duration(to: routeEnabled) >= .milliseconds(500))
-    #expect(statusWaitObserved.duration(to: routeEnabled) <= .milliseconds(650))
+    // One restarted 400 ms window lands near 575 ms; at ~800 ms the wait ran to
+    // its hard cap instead. Leave the gap in between for runner jitter.
+    #expect(statusWaitObserved.duration(to: routeEnabled) < .milliseconds(780))
 
     let report = await task.value
     #expect(report.outcome == .connectedAndCleanedUp)

@@ -310,13 +310,17 @@ func controlTransport(
   RawVendorCharonControlTransport(driverFactory: factory.make)
 }
 
+// Bounded by wall time, not by a yield count: the condition usually waits on
+// work queued to a driver's DispatchQueue, which a loaded CI runner may not
+// schedule within any fixed number of yields.
 func waitForControl(
   _ condition: @escaping @Sendable () -> Bool,
-  attempts: Int = 2_000
+  timeout: Duration = .seconds(5)
 ) async -> Bool {
-  for _ in 0..<attempts {
+  let deadline = ContinuousClock.now.advanced(by: timeout)
+  while ContinuousClock.now < deadline {
     if condition() { return true }
-    await Task.yield()
+    try? await Task.sleep(for: .milliseconds(1))
   }
   return condition()
 }
