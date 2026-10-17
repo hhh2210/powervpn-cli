@@ -147,7 +147,7 @@ import Testing
   @Test func detachedBounderHasAnExplicitDeadline() async {
     let bounder = TimedDetachedPortalLogoutBounder(timeoutNanoseconds: 1_000_000)
     let finished = await bounder.run {
-      try? await Task.sleep(nanoseconds: UInt64.max)
+      try? await Task.sleep(for: .seconds(3_600))
     }
     #expect(!finished)
   }
