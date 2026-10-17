@@ -39,7 +39,7 @@ import Testing
         runtime: runtime.run
       )
     }
-    #expect(runtime.waitUntilStarted())
+    #expect(await runtime.waitUntilStarted())
     monitor.emit(times: 2)
     let result = try await command.value
 
@@ -64,7 +64,7 @@ import Testing
         runtime: runtime.run
       )
     }
-    #expect(runtime.waitUntilStarted())
+    #expect(await runtime.waitUntilStarted())
     await deadline.fire()
     let result = try await command.value
 

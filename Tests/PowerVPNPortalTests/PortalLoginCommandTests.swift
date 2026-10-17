@@ -57,7 +57,7 @@ import Testing
       )
     }
 
-    #expect(runtime.waitUntilStarted())
+    #expect(await runtime.waitUntilStarted())
     monitor.emit()
     let result = try await command.value
 
@@ -187,7 +187,7 @@ private final class ManualPortalLoginSignalMonitor: CLISignalMonitoring,
 
 private final class CancellationAwareRuntimeProbe: @unchecked Sendable {
   private let lock = NSLock()
-  private let started = DispatchSemaphore(value: 0)
+  private let started = AsyncTestSignal()
   private let report: PortalLoginReport
   private var invocations = 0
   private var cancellations = 0
@@ -207,8 +207,8 @@ private final class CancellationAwareRuntimeProbe: @unchecked Sendable {
     return report
   }
 
-  func waitUntilStarted() -> Bool {
-    started.wait(timeout: .now() + 2) == .success
+  func waitUntilStarted() async -> Bool {
+    await started.wait()
   }
 
   var invocationCount: Int { lock.withLock { invocations } }

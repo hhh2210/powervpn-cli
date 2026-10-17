@@ -363,7 +363,7 @@ import Testing
           runtime: runtime.open
         )
       }
-      #expect(runtime.waitUntilStarted())
+      #expect(await runtime.waitUntilStarted())
       monitor.emit()
       let result = try await command.value
 
@@ -390,7 +390,7 @@ import Testing
         runtime: proxyOpen(lease: lease)
       )
     }
-    #expect(child.waitUntilStarted())
+    #expect(await child.waitUntilStarted())
     monitor.emit(times: 2)
     let result = try await command.value
 
@@ -416,7 +416,7 @@ import Testing
       completion.record("returned")
       return result
     }
-    #expect(lease.waitUntilShutdownStarted())
+    #expect(await lease.waitUntilShutdownStarted())
     monitor.emit()
     await Task.yield()
     #expect(completion.events.isEmpty)

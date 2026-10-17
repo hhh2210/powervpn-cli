@@ -18,7 +18,7 @@ final class ProxyTestLease: ProxyTunnelLeasing, @unchecked Sendable {
   private let permitted: Bool
   private let verified: Bool
   private let blocksPostStopDrain: Bool
-  private let shutdownStarted = DispatchSemaphore(value: 0)
+  private let shutdownStarted = AsyncTestSignal()
   private let shutdownGate = ProxyTestShutdownGate()
   private var events: [String] = []
 
@@ -47,8 +47,8 @@ final class ProxyTestLease: ProxyTunnelLeasing, @unchecked Sendable {
   }
 
   var recordedEvents: [String] { lock.withLock { events } }
-  func waitUntilShutdownStarted() -> Bool {
-    shutdownStarted.wait(timeout: .now() + 2) == .success
+  func waitUntilShutdownStarted() async -> Bool {
+    await shutdownStarted.wait()
   }
 
   func releaseShutdown() async {
@@ -75,7 +75,7 @@ final class ProxyTestChildRunner: ProxyChildRunning, @unchecked Sendable {
   private let lock = NSLock()
   private let configuredOutcome: ProxyChildRunOutcome
   private let waitForCancellation: Bool
-  private let started = DispatchSemaphore(value: 0)
+  private let started = AsyncTestSignal()
   private var specifications: [ProxyChildSpecification] = []
   private var readinessValues: [ProxyChildReadiness] = []
 
@@ -114,8 +114,8 @@ final class ProxyTestChildRunner: ProxyChildRunning, @unchecked Sendable {
     return ProxyChildRunResult(outcome: configuredOutcome, becameReady: becameReady)
   }
 
-  func waitUntilStarted() -> Bool {
-    started.wait(timeout: .now() + 2) == .success
+  func waitUntilStarted() async -> Bool {
+    await started.wait()
   }
 
   var invocationCount: Int { lock.withLock { specifications.count } }
@@ -123,7 +123,7 @@ final class ProxyTestChildRunner: ProxyChildRunning, @unchecked Sendable {
   var readiness: ProxyChildReadiness? { lock.withLock { readinessValues.last } }
 }
 final class ProxyCancellationOpenRuntime: @unchecked Sendable {
-  private let started = DispatchSemaphore(value: 0)
+  private let started = AsyncTestSignal()
   private let failure: ProxyTunnelOpenFailure
 
   init(failure: ProxyTunnelOpenFailure) {
@@ -139,8 +139,8 @@ final class ProxyCancellationOpenRuntime: @unchecked Sendable {
     return .failed(failure)
   }
 
-  func waitUntilStarted() -> Bool {
-    started.wait(timeout: .now() + 2) == .success
+  func waitUntilStarted() async -> Bool {
+    await started.wait()
   }
 }
 

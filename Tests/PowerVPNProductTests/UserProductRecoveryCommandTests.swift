@@ -423,7 +423,7 @@ import Testing
       systemStatus: recoverySystemStatus,
       proxyRunner: base.proxyRunner,
       recoveryRunner: { request, _, commit in
-        gate.waitForCancellation()
+        await gate.waitForCancellation()
         return await syntheticRecoveryMeasurement(request: request, commit: commit)
       },
       credentialFileSafe: { true },
@@ -437,7 +437,7 @@ import Testing
       try await runCurrentMachineUserProductCommand(
         ["recovery", "clear", "--json"], dependencies: dependencies)
     }
-    #expect(gate.waitUntilStarted())
+    #expect(await gate.waitUntilStarted())
     monitor.trigger()
     let result = try await command.value
 

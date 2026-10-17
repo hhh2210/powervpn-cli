@@ -172,20 +172,24 @@ import Testing
     let state = ConcurrentSnapshotBorrowState()
     let releaseBorrow = DispatchSemaphore(value: 0)
 
-    let borrow = Task.detached {
-      try snapshot.withResourceTree { list in
-        state.append(.borrowEntered)
-        releaseBorrow.wait()
-        state.append(.borrowLeaving)
-        return list.name
+    let borrow = Task {
+      try await onDedicatedThread {
+        try snapshot.withResourceTree { list in
+          state.append(.borrowEntered)
+          releaseBorrow.wait()
+          state.append(.borrowLeaving)
+          return list.name
+        }
       }
     }
     let borrowDidEnter = await waitUntil { state.contains(.borrowEntered) }
     #expect(borrowDidEnter)
-    let erase = Task.detached {
-      state.append(.eraseStarted)
-      snapshot.erase()
-      state.append(.eraseFinished)
+    let erase = Task {
+      await onDedicatedThread {
+        state.append(.eraseStarted)
+        snapshot.erase()
+        state.append(.eraseFinished)
+      }
     }
     let eraseDidStart = await waitUntil { state.contains(.eraseStarted) }
     #expect(eraseDidStart)

@@ -6,7 +6,7 @@ name: ci
 
 on:
   push:
-    branches: [main, rescue-mvp]
+    branches: [main]
   pull_request:
     branches: [main]
   schedule:
@@ -91,7 +91,10 @@ jobs:
         run: swift build --product powervpn -c debug
 
       - name: Test (all suites, offline, real PowerVPN state denied)
-        run: scripts/hermetic_swift_test.sh
+        # Serial on purpose: the curl and PTY drivers block a cooperative
+        # thread by design, and parallel suites starved the small hosted
+        # runner's pool until the job hit its 45-minute timeout.
+        run: scripts/hermetic_swift_test.sh --no-parallel
 
   format:
     name: format (swift-format strict, recursive)

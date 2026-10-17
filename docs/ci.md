@@ -13,7 +13,7 @@ CI 覆盖四件事：构建与全量测试、格式、密钥扫描、release 构
 
 | workflow | 触发 | 内容 |
 |---|---|---|
-| `ci.yml` | push（main / rescue-mvp）、PR 到 main、每周一 09:00 UTC | 四个 job：双工具链 build-and-test、format、secrets、release-build |
+| `ci.yml` | push（main）、PR 到 main、每周一 09:00 UTC | 四个 job：双工具链 build-and-test、format、secrets、release-build |
 | `catalog-replay.yml` | 每次 push（快）+ 每晚 03:17 UTC 顺序矩阵 | catalog 回放套件（`swift test --filter CatalogReplay`） |
 | `tap-sync.yml` | 推稳定 `vX.Y.Z` tag，或手动指定已存在版本 | 解析并证明 exact tag commit，复用完整 CI；仅全绿后打印 tap 手动发版清单 |
 
@@ -28,7 +28,8 @@ CI 覆盖四件事：构建与全量测试、格式、密钥扫描、release 构
   `swift test`，拒绝访问本机真实的 `~/.local/state/powervpn`、
   `~/.config/powervpn` 与厂商 `Application Support` 目录，测试一旦落到
   生产默认（如真实 mutation lease）就确定性失败，而不是去抢 live session
-  的锁；
+  的锁。CI 加 `--no-parallel` 串行跑：curl 和 PTY 驱动按设计会占住一条协作线程，
+  并行时会把托管 runner 的小线程池占满，导致 job 卡到 45 分钟超时；
   `.build` cache 按 source SHA、toolchain、runner OS/arch 与 package
   manifest 精确隔离，只允许同一提交重跑复用。
 - **format**：`xcrun swift-format lint --strict --recursive Sources Tests`，

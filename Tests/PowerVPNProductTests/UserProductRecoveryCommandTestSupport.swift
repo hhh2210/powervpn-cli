@@ -83,25 +83,15 @@ final class RecoverySignalMonitor: CLISignalMonitoring, @unchecked Sendable {
 }
 
 final class RecoveryCancellationGate: @unchecked Sendable {
-  private let condition = NSCondition()
-  private var started = false
+  private let started = AsyncTestSignal()
 
-  func waitForCancellation() {
-    condition.lock()
-    started = true
-    condition.broadcast()
-    condition.unlock()
-    while !Task.isCancelled { usleep(10_000) }
+  func waitForCancellation() async {
+    started.signal()
+    while !Task.isCancelled { try? await Task.sleep(for: .milliseconds(10)) }
   }
 
-  func waitUntilStarted() -> Bool {
-    condition.lock()
-    defer { condition.unlock() }
-    let deadline = Date().addingTimeInterval(1)
-    while !started {
-      guard condition.wait(until: deadline) else { return started }
-    }
-    return true
+  func waitUntilStarted() async -> Bool {
+    await started.wait(timeout: .seconds(1))
   }
 }
 
