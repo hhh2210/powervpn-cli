@@ -41,6 +41,9 @@ struct UserProductCleanupEvidenceReceipt: Codable, Equatable, Sendable {
 struct UserProductOriginalCleanupReceipt: Codable, Equatable, Sendable {
   let schemaVersion: Int
   let cleanupPath: String
+  /// Control path actually taken; `cleanupPath` collapses to `cleanup_unproven`
+  /// whenever verification fails. Absent in receipts written before this field.
+  let controlCleanupPath: String?
   let stopOutcome: String
   let emergencyStopOutcome: String
   let authorizationClose: String
@@ -55,6 +58,7 @@ struct UserProductOriginalCleanupReceipt: Codable, Equatable, Sendable {
   init(_ report: ProductPersistentTunnelShutdownReport) {
     schemaVersion = 1
     cleanupPath = report.cleanupPath.rawValue
+    controlCleanupPath = report.controlCleanupPath?.rawValue
     stopOutcome = report.stopOutcome.rawValue
     emergencyStopOutcome = report.emergencyStopOutcome.rawValue
     authorizationClose = report.authorizationClose.rawValue
@@ -70,6 +74,7 @@ struct UserProductOriginalCleanupReceipt: Codable, Equatable, Sendable {
   var valid: Bool {
     schemaVersion == 1 && !containsSecrets
       && ProductM2CleanupPath(rawValue: cleanupPath) != nil
+      && (controlCleanupPath.map { ProductM2CleanupPath(rawValue: $0) != nil } ?? true)
       && ProductM2ControlOutcome(rawValue: stopOutcome) != nil
       && ProductM2ControlOutcome(rawValue: emergencyStopOutcome) != nil
       && ProductM2AuthorizationCloseOutcome(rawValue: authorizationClose) != nil

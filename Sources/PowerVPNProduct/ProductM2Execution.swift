@@ -156,12 +156,23 @@ package struct ProductM2Execution {
     cleanupCaptureAttemptCount = cleanup.captureAttemptCount
     let authorizationClosed =
       authorizationClose == .accepted || authorizationClose == .notRequired
-    cleanupVerified =
-      cleanup.verified && authorizationOwnedMaterialErased && authorizationClosed
     helperMutationRequested =
       helperMutationRequested
       || routeActivation.requestSent || routeDeactivation.requestSent
       || cleanup.stop.requestSent || cleanup.emergencyStop.requestSent
+    // No request (start, route activation, stop, emergency stop) was ever
+    // handed to the helper and cleanup needed no control path, so PowerVPN
+    // changed no network state and there is nothing to restore. An incomplete
+    // network capture (parse or command failure, deadline, drift caused by
+    // other software) is then missing evidence about something we never
+    // touched, not evidence of residue, and must not quarantine the session.
+    // `cleanupEvidence` and `cleanupCaptureState` stay in the report
+    // unchanged; control-path classification and authorization close/erase
+    // are still required. Once any request was sent this never applies.
+    let nothingToRestore = !helperMutationRequested && cleanup.path == .notRequired
+    cleanupVerified =
+      (cleanup.verified || (nothingToRestore && cleanup.controlAndAuthorizationSettled))
+      && authorizationOwnedMaterialErased && authorizationClosed
 
     guard cleanupVerified else {
       if firstBadEvent == nil {

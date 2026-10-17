@@ -27,14 +27,53 @@ import Testing
     #expect(!json.contains("selectedRouteTokens"))
   }
 
-  @Test func structuralRouteChangeFailsEvenWhenPersistentRoutesMatch() {
+  @Test func clonedRouteChurnBetweenBackToBackCapturesDoesNotFailStability() {
+    // Only the all-rows hash differs (cloned/expiring rows); configuration
+    // routes are identical.
     let first = coldRecoverySnapshot()
     let second = coldRecoverySnapshot(ipv4Structural: fingerprint("9"))
     let assessment = NetworkColdRecoveryAssessment(first: first, second: second)
 
+    #expect(first.ipv4Routes.structural != second.ipv4Routes.structural)
     #expect(assessment.persistentRoutesStable)
+    #expect(assessment.structuralRoutesStable)
+    #expect(assessment.passed)
+  }
+
+  @Test func clonedRouteChurnFromRealTablesDoesNotFailStability() throws {
+    let configuration = ["default 192.0.2.1 UGScg en0", "203.0.113.0/24 link#9 UGScI utun9"]
+    let first = coldRecoverySnapshot(
+      ipv4: try coldRoutes(configuration + ["198.51.100.10 link#9 UHWIi utun9"]))
+    let second = coldRecoverySnapshot(
+      ipv4: try coldRoutes(
+        configuration + [
+          "198.51.100.10 link#9 UHWIi utun9 4", "198.51.100.11 link#9 UHWIi utun9",
+        ]))
+    let assessment = NetworkColdRecoveryAssessment(first: first, second: second)
+
+    #expect(first.ipv4Routes.structural != second.ipv4Routes.structural)
+    #expect(assessment.structuralRoutesStable)
+    #expect(assessment.passed)
+  }
+
+  @Test func configurationRouteChangeBetweenCapturesStillFailsStability() throws {
+    let configuration = ["default 192.0.2.1 UGScg en0"]
+    let first = coldRecoverySnapshot(ipv4: try coldRoutes(configuration))
+    let second = coldRecoverySnapshot(
+      ipv4: try coldRoutes(configuration + ["203.0.113.0/24 link#9 UGScI utun9"]))
+    let assessment = NetworkColdRecoveryAssessment(first: first, second: second)
+
+    #expect(!assessment.persistentRoutesStable)
     #expect(!assessment.structuralRoutesStable)
     #expect(!assessment.passed)
+
+    let persistentOnly = NetworkColdRecoveryAssessment(
+      first: coldRecoverySnapshot(),
+      second: coldRecoverySnapshot(ipv4Persistent: fingerprint("9"))
+    )
+    #expect(!persistentOnly.persistentRoutesStable)
+    #expect(!persistentOnly.structuralRoutesStable)
+    #expect(!persistentOnly.passed)
   }
 
   @Test func selectedRouteResidueAndEffectiveBindingFailClosed() {
@@ -73,10 +112,23 @@ import Testing
   }
 }
 
+private func coldRoutes(_ rows: [String]) throws -> NetworkCleanupRouteSnapshot {
+  let table =
+    "Routing tables\n\nInternet:\nDestination Gateway Flags Netif Expire\n"
+    + rows.joined(separator: "\n") + "\n"
+  return try NetworkRouteCanonicalizer.canonicalize(
+    Data(table.utf8),
+    family: .inet,
+    effectiveSelectedRoute: .observed(selectedRouteToken: nil)
+  )
+}
+
 private func coldRecoverySnapshot(
   helperRuns: Int = 8,
   dns: NetworkCleanupFingerprint = fingerprint("b"),
   ipv4Structural: NetworkCleanupFingerprint = fingerprint("d"),
+  ipv4Persistent: NetworkCleanupFingerprint = fingerprint("e"),
+  ipv4: NetworkCleanupRouteSnapshot? = nil,
   selectedRouteTokens: Set<Data> = [],
   effectiveSelectedRoute: NetworkCleanupEffectiveRouteSnapshot? = .observed(
     selectedRouteToken: nil
@@ -90,13 +142,14 @@ private func coldRecoverySnapshot(
       utunCount: 1,
       utunTokens: [Data([1])]
     ),
-    ipv4Routes: NetworkCleanupRouteSnapshot(
-      structural: ipv4Structural,
-      persistent: fingerprint("e"),
-      selectedRouteMatchCount: selectedRouteTokens.count,
-      selectedRouteTokens: selectedRouteTokens,
-      effectiveSelectedRoute: effectiveSelectedRoute
-    ),
+    ipv4Routes: ipv4
+      ?? NetworkCleanupRouteSnapshot(
+        structural: ipv4Structural,
+        persistent: ipv4Persistent,
+        selectedRouteMatchCount: selectedRouteTokens.count,
+        selectedRouteTokens: selectedRouteTokens,
+        effectiveSelectedRoute: effectiveSelectedRoute
+      ),
     ipv6Routes: NetworkCleanupRouteSnapshot(
       structural: fingerprint("f"),
       persistent: fingerprint("0"),

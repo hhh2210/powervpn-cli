@@ -84,7 +84,13 @@ package enum ProductPersistentTunnelOpenResult: Sendable {
 
 package struct ProductPersistentTunnelShutdownReport: Encodable, Equatable, Sendable {
   package let state: ProductPersistentTunnelState
+  /// Verdict-shaped path: `.cleanupUnproven` whenever verification failed,
+  /// even if the control path itself was classified. Kept as is for the
+  /// persisted schema; see `controlCleanupPath` for the path actually taken.
   package let cleanupPath: ProductM2CleanupPath
+  /// The control cleanup path the runner actually took, never replaced by the
+  /// verification verdict. Nil only when a report did not record it.
+  package var controlCleanupPath: ProductM2CleanupPath? = nil
   package let stopOutcome: ProductM2ControlOutcome
   package let emergencyStopOutcome: ProductM2ControlOutcome
   package let authorizationClose: ProductM2AuthorizationCloseOutcome
@@ -102,6 +108,7 @@ package struct ProductPersistentTunnelShutdownReport: Encodable, Equatable, Send
   package init(
     state: ProductPersistentTunnelState,
     cleanupPath: ProductM2CleanupPath,
+    controlCleanupPath: ProductM2CleanupPath? = nil,
     stopOutcome: ProductM2ControlOutcome,
     emergencyStopOutcome: ProductM2ControlOutcome,
     authorizationClose: ProductM2AuthorizationCloseOutcome,
@@ -114,6 +121,7 @@ package struct ProductPersistentTunnelShutdownReport: Encodable, Equatable, Send
   ) {
     self.state = state
     self.cleanupPath = cleanupPath
+    self.controlCleanupPath = controlCleanupPath
     self.stopOutcome = stopOutcome
     self.emergencyStopOutcome = emergencyStopOutcome
     self.authorizationClose = authorizationClose

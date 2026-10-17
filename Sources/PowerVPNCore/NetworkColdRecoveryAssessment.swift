@@ -45,9 +45,12 @@ package struct NetworkColdRecoveryAssessment: Encodable, Equatable, Sendable {
     persistentRoutesStable =
       first.ipv4Routes.persistent == second.ipv4Routes.persistent
       && first.ipv6Routes.persistent == second.ipv6Routes.persistent
+    // Same projection as cleanup verification: cloned (`W`) and expiring rows
+    // are kernel caches that churn between back-to-back captures while a
+    // tunnel interface is up, so they must not decide stability.
     structuralRoutesStable =
-      first.ipv4Routes.structural == second.ipv4Routes.structural
-      && first.ipv6Routes.structural == second.ipv6Routes.structural
+      first.ipv4Routes.configurationRoutes == second.ipv4Routes.configurationRoutes
+      && first.ipv6Routes.configurationRoutes == second.ipv6Routes.configurationRoutes
     surgeStable = first.surge == second.surge
     firstSelectedRouteResidueCount = first.ipv4Routes.selectedRouteMatchCount
     secondSelectedRouteResidueCount = second.ipv4Routes.selectedRouteMatchCount

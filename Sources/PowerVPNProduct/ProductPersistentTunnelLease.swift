@@ -68,6 +68,7 @@ actor ProductPersistentTunnelSession {
       let shutdown = ProductPersistentTunnelShutdownReport(
         state: .stopped,
         cleanupPath: failure.cleanupPath,
+        controlCleanupPath: failure.cleanupPath,
         stopOutcome: failure.stopOutcome,
         emergencyStopOutcome: failure.emergencyStopOutcome,
         authorizationClose: failure.authorizationClose,
@@ -138,6 +139,7 @@ actor ProductPersistentTunnelSession {
         let report = ProductPersistentTunnelShutdownReport(
           state: .stopped,
           cleanupPath: cleanup.verified ? cleanup.path : .cleanupUnproven,
+          controlCleanupPath: cleanup.path,
           stopOutcome: cleanup.stop.outcome,
           emergencyStopOutcome: cleanup.emergencyStop.outcome,
           authorizationClose: cleanup.authorizationClose.outcome,

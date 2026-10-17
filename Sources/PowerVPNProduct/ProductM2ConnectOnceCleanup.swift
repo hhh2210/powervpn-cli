@@ -13,6 +13,13 @@ package struct ProductM2CleanupResult: Sendable {
   let captureRetryReason: ProductM2CleanupCaptureRetryReason?
   let captureAttemptCount: Int
   let verified: Bool
+  /// Everything `verified` requires except the network restoration proof
+  /// (bounded verification capture finished in time and every dimension
+  /// restored): control-path classification, authorization close and erase,
+  /// and the control/authorization deadlines. `ProductM2Execution.apply` uses
+  /// it to decide whether a missing network proof matters when no helper
+  /// request was ever sent.
+  let controlAndAuthorizationSettled: Bool
   let awaitPostStopDrain: @Sendable () async -> Void
 }
 
@@ -68,6 +75,11 @@ package struct ProductM2CleanupRunner: Sendable {
       || (authorizationClose.outcome == .accepted
         && authorizationClose.ownedMaterialErased)
     let controlClassified = control.path != .cleanupUnproven
+    let controlAndAuthorizationSettled =
+      controlCompletedWithinDeadline
+      && authorizationCompletedWithinDeadline
+      && authorizationClosed
+      && controlClassified
     return ProductM2CleanupResult(
       path: control.path,
       routeDeactivation: routeDeactivation,
@@ -79,12 +91,10 @@ package struct ProductM2CleanupRunner: Sendable {
       captureState: verification.state,
       captureRetryReason: verification.retryReason,
       captureAttemptCount: verification.attemptCount,
-      verified: controlCompletedWithinDeadline
-        && authorizationCompletedWithinDeadline
+      verified: controlAndAuthorizationSettled
         && verificationCompletedWithinDeadline
-        && authorizationClosed
-        && controlClassified
         && verification.evidence.allDimensionsRestored,
+      controlAndAuthorizationSettled: controlAndAuthorizationSettled,
       awaitPostStopDrain: control.awaitPostStopDrain
     )
   }
