@@ -213,6 +213,22 @@ helper 是官方闭件，不可修改；以下缺陷都在客户端侧缓解：
 - Portal catalog 偶发服务端退化（拒绝列举）。客户端做一次 fresh-login
   重试，再失败即如实上报失败判别 token。
 
+## Native strongSwan 后端（实验，数据面已打通）
+
+除了驱动厂商 helper，仓库里还有一条不依赖 helper 的路线：用补丁版 strongSwan
+6.0.7 自己的 charon（kernel-libipsec + VICI）直接连 NC 资源，原生 arm64，
+不经 Rosetta。2026-10-17 已在真实网关上验证：补上 `NEW CLIENT` Vendor ID
+（`charon.leadsec_new_client_vid = yes`）后，A/B 对照 6/6 对 0/6，随后连续 10/10，
+每次都 `ssh` 成功。
+
+- 补丁：`patches/strongswan-6.0.7/0004-*.patch`，清单 `native-series.json`，
+  需先应用 0001–0003。
+- Portal→VICI 映射与实验驱动：`NativeTrialMaterial`、`NativeTrialPortalBridge`、
+  `powervpn-native-trial`。
+- 根因、对照数据和排除过的方向：`docs/evidence/native-strongswan-backend.md`。
+
+它还没有接进 `powervpn run/up/ssh`，日常使用仍走厂商 helper。
+
 ## 构建与目录
 
 ```sh
@@ -230,6 +246,8 @@ Sources/
   PowerVPNPortal/  Portal 登录、凭据、cookie、catalog
   PowerVPNProduct/ M1/M2/proxy 产品编排与状态机
   PowerVPNCLI/     argv 解析与命令入口
+  PowerVPNNativeTrial/ native strongSwan 后端实验驱动
+patches/strongswan-6.0.7/ charon 补丁序列
 ```
 
 ## 历史证据
