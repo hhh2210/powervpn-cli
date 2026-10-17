@@ -90,11 +90,20 @@ jobs:
       - name: Build (debug, product powervpn)
         run: swift build --product powervpn -c debug
 
-      - name: Test (all suites, offline, real PowerVPN state denied)
+      - name: Test (deterministic suites, offline, real PowerVPN state denied)
         # Serial on purpose: the curl and PTY drivers block a cooperative
         # thread by design, and parallel suites starved the small hosted
         # runner's pool until the job hit its 45-minute timeout.
-        run: scripts/hermetic_swift_test.sh --no-parallel
+        #
+        # The skipped suites drive the fake XPC driver or a socket pair against
+        # real timers and assert on tens of milliseconds. A 3-vCPU hosted runner
+        # delays queue work by 100 ms or more, so they failed a different subset
+        # on every run without a product bug. Run them locally before changing
+        # the vendor control transport or VICI transport (docs/ci.md).
+        env:
+          TIMING_SUITES: >-
+            VendorCharon(AsyncGenerationValidation|ControlCommit|ControlFailure|ControlLifecycle|ControlStatusWait|NCRouteToggle|ProvisionalStopCapability)Tests|VICIUnixTransportTests|ProductM2StatusQuiescenceTests
+        run: scripts/hermetic_swift_test.sh --no-parallel --skip "$TIMING_SUITES"
 
   format:
     name: format (swift-format strict, recursive)

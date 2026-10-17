@@ -29,7 +29,12 @@ CI 覆盖四件事：构建与全量测试、格式、密钥扫描、release 构
   `~/.config/powervpn` 与厂商 `Application Support` 目录，测试一旦落到
   生产默认（如真实 mutation lease）就确定性失败，而不是去抢 live session
   的锁。CI 加 `--no-parallel` 串行跑：curl 和 PTY 驱动按设计会占住一条协作线程，
-  并行时会把托管 runner 的小线程池占满，导致 job 卡到 45 分钟超时；
+  并行时会把托管 runner 的小线程池占满，导致 job 卡到 45 分钟超时。
+  CI 跳过 `TIMING_SUITES` 里那几组测试（约 95 个）：它们用假 XPC driver
+  或 socket pair 配真实计时器，断言精度在几十毫秒；3 vCPU 的托管 runner
+  会把队列里的活拖慢 100 ms 以上，每次挂的都不是同一批，也都不是产品 bug。
+  改 vendor control transport 或 VICI transport 之前，在本机跑全量
+  `scripts/hermetic_swift_test.sh --no-parallel`（约 1 分钟）；
   `.build` cache 按 source SHA、toolchain、runner OS/arch 与 package
   manifest 精确隔离，只允许同一提交重跑复用。
 - **format**：`xcrun swift-format lint --strict --recursive Sources Tests`，
