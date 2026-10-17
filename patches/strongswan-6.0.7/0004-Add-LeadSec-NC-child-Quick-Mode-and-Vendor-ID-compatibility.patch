@@ -1,0 +1,461 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: hhh2210 <hzy2210@gmail.com>
+Date: Sat, 17 Oct 2026 20:30:00 +0800
+Subject: [PATCH] Add LeadSec NC child, Quick Mode and Vendor ID compatibility
+
+Make a native charon interoperate with the LeadSec PowerVPN gateway for
+NC (network-connection) resources, matching what the vendor helper puts
+on the wire:
+
+- child_cfg/vici: per-child private ADDRULE envelope
+  (leadsec_addrule) and Quick Mode proposal number
+  (leadsec_proposal_number), loaded over VICI.
+- quick_mode: send the ADDRULE payload under HASH(3) and use the
+  configured proposal number.
+- isakmp_vendor: for initiators whose children carry the ADDRULE
+  envelope, send the NC IPv4 vendor ID and, when
+  charon.leadsec_new_client_vid = yes, the "NEW CLIENT" vendor ID.
+  Without NEW CLIENT the gateway completes IKE and forwards inbound
+  traffic, but never returns ESP for the virtual IP (0/6 vs 6/6 A/B,
+  then 10/10 consecutive; see docs/evidence/native-strongswan-backend.md).
+- kernel_libipsec: never adopt a virtual IP already owned by another
+  interface.
+
+---
+diff --git a/src/libcharon/config/child_cfg.c b/src/libcharon/config/child_cfg.c
+index e1e2778..193a050 100644
+--- a/src/libcharon/config/child_cfg.c
++++ b/src/libcharon/config/child_cfg.c
+@@ -44,6 +44,10 @@ struct private_child_cfg_t {
+ 	 */
+ 	child_cfg_t public;
+ 
++	/** Immutable private payload supplied through the scoped VICI experiment. */
++	chunk_t leadsec_addrule;
++	uint8_t leadsec_proposal_number;
++
+ 	/**
+ 	 * Number of references hold by others to this child_cfg
+ 	 */
+@@ -191,6 +195,18 @@ METHOD(child_cfg_t, get_name, char*,
+ 	return this->name;
+ }
+ 
++METHOD(child_cfg_t, get_leadsec_addrule, chunk_t,
++	private_child_cfg_t *this)
++{
++	return this->leadsec_addrule;
++}
++
++uint8_t child_cfg_get_leadsec_proposal_number(child_cfg_t *public)
++{
++	private_child_cfg_t *this = (private_child_cfg_t*)public;
++	return this->leadsec_proposal_number;
++}
++
+ METHOD(child_cfg_t, has_option, bool,
+ 	private_child_cfg_t *this, child_cfg_option_t option)
+ {
+@@ -590,6 +606,9 @@ METHOD(child_cfg_t, equals, bool,
+ 		return FALSE;
+ 	}
+ 	return this->options == other->options &&
++		this->leadsec_proposal_number == other->leadsec_proposal_number &&
++		((!this->leadsec_addrule.len && !other->leadsec_addrule.len) ||
++		 chunk_equals(this->leadsec_addrule, other->leadsec_addrule)) &&
+ 		this->mode == other->mode &&
+ 		this->start_action == other->start_action &&
+ 		this->dpd_action == other->dpd_action &&
+@@ -637,6 +656,7 @@ METHOD(child_cfg_t, destroy, void,
+ 		free(this->updown);
+ 		free(this->interface);
+ 		free(this->name);
++		chunk_clear(&this->leadsec_addrule);
+ 		free(this);
+ 	}
+ }
+@@ -651,6 +671,7 @@ child_cfg_t *child_cfg_create(char *name, child_cfg_create_t *data)
+ 	INIT(this,
+ 		.public = {
+ 			.get_name = _get_name,
++			.get_leadsec_addrule = _get_leadsec_addrule,
+ 			.add_traffic_selector = _add_traffic_selector,
+ 			.get_traffic_selectors = _get_traffic_selectors,
+ 			.select_traffic_selectors = _select_traffic_selectors,
+@@ -685,6 +706,8 @@ child_cfg_t *child_cfg_create(char *name, child_cfg_create_t *data)
+ 			.get_copy_dscp = _get_copy_dscp,
+ 		},
+ 		.name = strdup(name),
++		.leadsec_addrule = chunk_clone(data->leadsec_addrule),
++		.leadsec_proposal_number = data->leadsec_proposal_number,
+ 		.options = data->options,
+ 		.updown = strdupnull(data->updown),
+ 		.reqid = data->reqid,
+diff --git a/src/libcharon/config/child_cfg.h b/src/libcharon/config/child_cfg.h
+index bdeebca..c9b4387 100644
+--- a/src/libcharon/config/child_cfg.h
++++ b/src/libcharon/config/child_cfg.h
+@@ -74,6 +74,9 @@ struct child_cfg_t {
+ 	 */
+ 	char *(*get_name) (child_cfg_t *this);
+ 
++	/** Borrow the validated private IKEv1 ADDRULE envelope (experiment only). */
++	chunk_t (*get_leadsec_addrule)(child_cfg_t *this);
++
+ 	/**
+ 	 * Add a proposal to the list.
+ 	 *
+@@ -430,6 +433,9 @@ enum child_cfg_option_t {
+  * Data passed to the constructor of a child_cfg_t object.
+  */
+ struct child_cfg_create_t {
++
++	/** Optional dialect byte plus canonical type-18 payload, cloned. */
++	chunk_t leadsec_addrule;
+ 	/** Options set for CHILD_SA */
+ 	child_cfg_option_t options;
+ 	/** Specific reqid to use for CHILD_SA, 0 for auto assignment */
+@@ -474,6 +480,8 @@ struct child_cfg_create_t {
+ 	hw_offload_t hw_offload;
+ 	/** How to handle the DS header field in tunnel mode */
+ 	dscp_copy_t copy_dscp;
++	/** Scoped diagnostic proposal number (0 or 1); used only with ADDRULE. */
++	uint8_t leadsec_proposal_number;
+ };
+ 
+ /**
+@@ -487,6 +495,9 @@ struct child_cfg_create_t {
+  */
+ child_cfg_t *child_cfg_create(char *name, child_cfg_create_t *data);
+ 
++/** Read the bounded diagnostic proposal number without changing the vtable. */
++uint8_t child_cfg_get_leadsec_proposal_number(child_cfg_t *this);
++
+ /**
+  * Select and narrow traffic selectors in the given traffic selector list.
+  * Refer to child_cfg_t::select_traffic_selectors() for details, the difference
+diff --git a/src/libcharon/plugins/kernel_libipsec/kernel_libipsec_ipsec.c b/src/libcharon/plugins/kernel_libipsec/kernel_libipsec_ipsec.c
+index 215eaa1..4ec3005 100644
+--- a/src/libcharon/plugins/kernel_libipsec/kernel_libipsec_ipsec.c
++++ b/src/libcharon/plugins/kernel_libipsec/kernel_libipsec_ipsec.c
+@@ -410,7 +410,11 @@ static bool install_route(private_kernel_libipsec_ipsec_t *this,
+ 	host_t *src_ip;
+ 	bool is_virtual;
+ 
+-	if (policy->direction != POLICY_OUT)
++	/* The coexistence runner owns the selected /32 OS route. Keep the
++	 * userspace IPsec policy but honor disabled automatic routing before
++	 * installing any traffic-selector route or peer exclusion. */
++	if (!lib->settings->get_bool(lib->settings, "%s.install_routes", TRUE,
++								lib->ns) || policy->direction != POLICY_OUT)
+ 	{
+ 		this->mutex->unlock(this->mutex);
+ 		return TRUE;
+diff --git a/src/libcharon/plugins/vici/vici_config.c b/src/libcharon/plugins/vici/vici_config.c
+index dd426df..5770691 100644
+--- a/src/libcharon/plugins/vici/vici_config.c
++++ b/src/libcharon/plugins/vici/vici_config.c
+@@ -41,6 +41,7 @@
+ #define _GNU_SOURCE
+ 
+ #include "vici_config.h"
++#include <encoding/payloads/expandrule_codec.h>
+ #include "vici_builder.h"
+ 
+ #include <daemon.h>
+@@ -608,6 +609,48 @@ static void free_child_data(child_data_t *data)
+ 	DESTROY_IF(data->cfg.label);
+ 	free(data->cfg.updown);
+ 	free(data->cfg.interface);
++	chunk_clear(&data->cfg.leadsec_addrule);
++}
++
++/* Private experiment format: explicit dialect selector (0 or 1), followed by
++ * a complete canonical type-18 payload. No inference from payload contents. */
++CALLBACK(parse_leadsec_proposal_number, bool,
++	uint8_t *out, chunk_t value)
++{
++	if (value.len != 1 || (value.ptr[0] != '0' && value.ptr[0] != '1'))
++	{
++		return FALSE;
++	}
++	*out = value.ptr[0] - '0';
++	return TRUE;
++}
++
++CALLBACK(parse_leadsec_addrule, bool,
++	chunk_t *out, chunk_t value)
++{
++	expandrule_message_t *decoded = NULL;
++	expandrule_error_t error;
++	expandrule_dialect_t dialect;
++	bool valid;
++
++	if (value.len < 5 || value.ptr[0] > 1 || out->len)
++	{
++		return FALSE;
++	}
++	dialect = value.ptr[0] == 0 ? EXPANDRULE_DIALECT_0 : EXPANDRULE_DIALECT_1;
++	valid = expandrule_codec_decode(EXPANDRULE_QM_ADD_SNAPSHOT, dialect,
++		chunk_skip(value, 1), &decoded, &error);
++	if (valid)
++	{
++		valid = expandrule_profile_validate(EXPANDRULE_QM_ADD_SNAPSHOT,
++			decoded, &error);
++		expandrule_message_destroy(decoded);
++	}
++	if (valid)
++	{
++		*out = chunk_clone(value);
++	}
++	return valid;
+ }
+ 
+ /**
+@@ -1929,6 +1972,8 @@ CALLBACK(child_kv, bool,
+ 	child_data_t *child, vici_message_t *message, char *name, chunk_t value)
+ {
+ 	parse_rule_t rules[] = {
++		{ "leadsec_addrule", parse_leadsec_addrule, &child->cfg.leadsec_addrule },
++		{ "leadsec_proposal_number", parse_leadsec_proposal_number, &child->cfg.leadsec_proposal_number },
+ 		{ "updown",				parse_string,		&child->cfg.updown					},
+ 		{ "hostaccess",			parse_opt_haccess,	&child->cfg.options					},
+ 		{ "mode",				parse_mode,			&child->cfg							},
+diff --git a/src/libcharon/sa/ikev1/tasks/isakmp_vendor.c b/src/libcharon/sa/ikev1/tasks/isakmp_vendor.c
+index a247613..81c4d38 100644
+--- a/src/libcharon/sa/ikev1/tasks/isakmp_vendor.c
++++ b/src/libcharon/sa/ikev1/tasks/isakmp_vendor.c
+@@ -270,6 +270,76 @@ static bool is_known_vid(chunk_t data, int i)
+ 										   vendor_ids[i].len));
+ }
+ 
++/**
++ * The vendor NC IPv4 initiator advertises the nine-byte string including NUL
++ * (helper 0x10016030a..0x100160431). Scope this extension to connections that
++ * explicitly configure the existing private ADDRULE envelope.
++ */
++static bool is_leadsec_nc_ipv4(private_isakmp_vendor_t *this)
++{
++	peer_cfg_t *peer;
++	child_cfg_t *child;
++	enumerator_t *enumerator;
++	bool ipv4 = FALSE;
++
++	if (!this->initiator ||
++		!(peer = this->ike_sa->get_peer_cfg(this->ike_sa)))
++	{
++		return FALSE;
++	}
++	enumerator = peer->create_child_cfg_enumerator(peer);
++	while (enumerator->enumerate(enumerator, &child))
++	{
++		chunk_t rule = child->get_leadsec_addrule(child);
++		if (rule.len >= 5 && rule.ptr[0] == 0 && rule.ptr[2] == 0)
++		{
++			ipv4 = TRUE;
++			break;
++		}
++	}
++	enumerator->destroy(enumerator);
++	return ipv4;
++}
++
++static void add_leadsec_nc_vid(private_isakmp_vendor_t *this, message_t *message)
++{
++	vendor_id_payload_t *payload;
++	static char vid[] = "1234IPV4";
++
++	if (is_leadsec_nc_ipv4(this))
++	{
++		DBG1(DBG_IKE, "sending LeadSec NC IPv4 vendor ID (9 bytes)");
++		payload = vendor_id_payload_create_data(PLV1_VENDOR_ID,
++			chunk_clone(chunk_create(vid, sizeof(vid))));
++		message->add_payload(message, &payload->payload_interface);
++	}
++}
++
++/**
++ * Leadsec's unconditional "NEW CLIENT" VID precedes NAT-T VIDs in MM1.
++ * Keep this experimental toggle confined to explicit NC IPv4 connections.
++ */
++static void add_leadsec_new_client_vid(private_isakmp_vendor_t *this,
++									 message_t *message)
++{
++	vendor_id_payload_t *payload;
++	static char vid[] = {
++		0x90, 0xfb, 0xa3, 0xcf, 0x65, 0xe3, 0x11, 0xf6,
++		0x29, 0xe7, 0x1f, 0x26, 0x03, 0x53, 0x0b, 0x87,
++	};
++
++	if (!is_leadsec_nc_ipv4(this) ||
++		!lib->settings->get_bool(lib->settings,
++								"%s.leadsec_new_client_vid", FALSE, lib->ns))
++	{
++		return;
++	}
++	DBG1(DBG_IKE, "sending Leadsec NEW CLIENT vendor ID (16 bytes)");
++	payload = vendor_id_payload_create_data(PLV1_VENDOR_ID,
++		chunk_clone(chunk_create(vid, sizeof(vid))));
++	message->add_payload(message, &payload->payload_interface);
++}
++
+ /**
+  * Add supported vendor ID payloads
+  */
+@@ -304,6 +374,7 @@ static void build(private_isakmp_vendor_t *this, message_t *message)
+ 			message->add_payload(message, &vid_payload->payload_interface);
+ 		}
+ 	}
++	add_leadsec_new_client_vid(this, message);
+ 	for (i = 0; i < countof(vendor_natt_ids); i++)
+ 	{
+ 		if ((this->initiator && vendor_natt_ids[i].send) ||
+@@ -316,6 +387,7 @@ static void build(private_isakmp_vendor_t *this, message_t *message)
+ 			message->add_payload(message, &vid_payload->payload_interface);
+ 		}
+ 	}
++	add_leadsec_nc_vid(this, message);
+ }
+ 
+ /**
+diff --git a/src/libcharon/sa/ikev1/tasks/quick_mode.c b/src/libcharon/sa/ikev1/tasks/quick_mode.c
+index bafe46a..792529f 100644
+--- a/src/libcharon/sa/ikev1/tasks/quick_mode.c
++++ b/src/libcharon/sa/ikev1/tasks/quick_mode.c
+@@ -44,10 +44,12 @@
+ #include <daemon.h>
+ #include <sa/ikev1/keymat_v1.h>
+ #include <encoding/payloads/sa_payload.h>
++#include <encoding/payloads/proposal_substructure.h>
+ #include <encoding/payloads/nonce_payload.h>
+ #include <encoding/payloads/ke_payload.h>
+ #include <encoding/payloads/id_payload.h>
+ #include <encoding/payloads/payload.h>
++#include <encoding/payloads/expandrule_payload.h>
+ #include <sa/ikev1/tasks/informational.h>
+ #include <sa/ikev1/tasks/quick_delete.h>
+ #include <processing/jobs/inactivity_job.h>
+@@ -823,6 +825,56 @@ static linked_list_t *get_proposals(private_quick_mode_t *this,
+ 	return list;
+ }
+ 
++/* Portal VIPs arrive before IKE, not through ModeConfig. Bind the scoped VIP
++ * to the IKE owner so stock teardown removes child routes before that VIP.
++ * This path is enabled only by the explicit private payload field. */
++static bool prepare_leadsec_vip(private_quick_mode_t *this)
++{
++	chunk_t configured = this->config->get_leadsec_addrule(this->config);
++	enumerator_t *enumerator;
++	host_t *vip, *current;
++	char *iface = NULL;
++	bool owned = FALSE, installed;
++
++	if (!configured.len)
++	{
++		return TRUE;
++	}
++	if (configured.len < 9 || configured.ptr[2] != 0)
++	{
++		return FALSE;
++	}
++	vip = host_create_from_chunk(AF_INET, chunk_create(configured.ptr + 5, 4), 0);
++	if (!vip || vip->is_anyaddr(vip))
++	{
++		DESTROY_IF(vip);
++		return FALSE;
++	}
++	enumerator = this->ike_sa->create_virtual_ip_enumerator(this->ike_sa, TRUE);
++	while (enumerator->enumerate(enumerator, &current))
++	{
++		owned |= vip->ip_equals(vip, current);
++	}
++	enumerator->destroy(enumerator);
++	if (owned)
++	{
++		vip->destroy(vip);
++		return TRUE;
++	}
++	/* Never adopt an address already owned by another interface/session. */
++	if (charon->kernel->get_interface(charon->kernel, vip, &iface))
++	{
++		free(iface);
++		vip->destroy(vip);
++		return FALSE;
++	}
++	this->ike_sa->add_virtual_ip(this->ike_sa, TRUE, vip);
++	installed = charon->kernel->get_interface(charon->kernel, vip, &iface);
++	free(iface);
++	vip->destroy(vip);
++	return installed;
++}
++
+ METHOD(task_t, build_i, status_t,
+ 	private_quick_mode_t *this, message_t *message)
+ {
+@@ -836,6 +888,12 @@ METHOD(task_t, build_i, status_t,
+ 			key_exchange_method_t group;
+ 			encap_t encap;
+ 
++			if (!prepare_leadsec_vip(this))
++			{
++				DBG1(DBG_IKE, "scoped Portal VIP preparation failed");
++				return FAILED;
++			}
++
+ 			this->mode = this->config->get_mode(this->config);
+ 			this->child.if_id_in_def = this->ike_sa->get_if_id(this->ike_sa,
+ 															   TRUE);
+@@ -920,6 +978,20 @@ METHOD(task_t, build_i, status_t,
+ 			sa_payload = sa_payload_create_from_proposals_v1(list,
+ 								this->lifetime, this->lifebytes, AUTH_NONE,
+ 								this->mode, encap, this->cpi_i);
++			if (!this->cpi_i && this->config->get_leadsec_addrule(this->config).len)
++			{
++				/* Captured vendor NC QM1 uses proposal number zero. The
++				 * selected-resource extension is the opt-in boundary. */
++				enumerator_t *enumerator;
++				proposal_substructure_t *substructure;
++				enumerator = sa_payload->create_substructure_enumerator(sa_payload);
++				while (enumerator->enumerate(enumerator, &substructure))
++				{
++					substructure->set_proposal_number(substructure,
++						child_cfg_get_leadsec_proposal_number(this->config));
++				}
++				enumerator->destroy(enumerator);
++			}
+ 			list->destroy_offset(list, offsetof(proposal_t, destroy));
+ 			message->add_payload(message, &sa_payload->payload_interface);
+ 
+@@ -960,6 +1032,7 @@ METHOD(task_t, build_i, status_t,
+ 		}
+ 		case QM_NEGOTIATED:
+ 		{
++			chunk_t configured = this->config->get_leadsec_addrule(this->config);
+ 			if (this->aborted)
+ 			{
+ 				this->ike_sa->queue_task(this->ike_sa,
+@@ -967,6 +1040,24 @@ METHOD(task_t, build_i, status_t,
+ 								this->proposal->get_protocol(this->proposal),
+ 								this->spi_i, TRUE, FALSE));
+ 			}
++			else if (configured.len)
++			{
++				/* VICI already validated the envelope. Only the initiator's
++				 * empty third Quick Mode packet is augmented. The existing
++				 * message context gate and unchanged keymat produce HASH(3). */
++				expandrule_payload_t *payload;
++				if (configured.len < 5)
++				{
++					return FAILED;
++				}
++				payload = expandrule_payload_create_data(PLV1_EXPANDRULE_ADD,
++					configured.ptr[2], chunk_clone(chunk_skip(configured, 5)));
++				if (!payload)
++				{
++					return FAILED;
++				}
++				message->add_payload(message, &payload->payload_interface);
++			}
+ 			return SUCCESS;
+ 		}
+ 		default:

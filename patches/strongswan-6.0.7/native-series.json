@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "version": "6.0.7",
+    "baseCommit": "5973ff8e41deef4e015e1138a2de688acedf6f75"
+  },
+  "lockedBase": {
+    "commit": "a81298234753f314dbf2c4f2867a9a144006bd8c",
+    "seriesManifests": [
+      "series.json",
+      "cp7b-series.json"
+    ],
+    "note": "apply 0001-0003 first"
+  },
+  "nativePatch": {
+    "sequence": 4,
+    "path": "0004-Add-LeadSec-NC-child-Quick-Mode-and-Vendor-ID-compatibility.patch",
+    "sha256": "d1132ebcb5230caeabe8271acef78ce709a25eeaa2188a5caecc54c4224c8af2",
+    "scope": "LeadSec NC child ADDRULE envelope and proposal number over VICI, Quick Mode ADDRULE under HASH(3), NC IPv4 and NEW CLIENT vendor IDs, VIP ownership guard in kernel-libipsec"
+  },
+  "runtimeSettings": {
+    "charon.leadsec_new_client_vid": "yes (required: without it the gateway never returns ESP for the virtual IP)"
+  },
+  "boundary": {
+    "serverTested": true,
+    "privilegedBackendTested": true,
+    "productCLIWired": false,
+    "evidence": "docs/evidence/native-strongswan-backend.md"
+  },
+  "excluded": {
+    "acceptanceQMPlaintextCapture": "opt-in Quick Mode plaintext logger used only by the 2026-10-17 acceptance runtime; not part of the patch"
+  },
+  "safety": {
+    "containsSecrets": false,
+    "containsReplayableCapture": false,
+    "containsVendorBinaryOrObject": false
+  }
+}
