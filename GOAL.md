@@ -1,7 +1,7 @@
 ---
 title: PowerVPN Native Rescue MVP
 goal_version: rescue-2-product-reset
-status: active
+status: archived
 updated: 2026-08-15
 repository: /Users/larry_1/Opensource/powervpn-cli
 strategy: product-first vertical slice over installed vendor helpers
@@ -10,7 +10,7 @@ immediate_next: obtain-explicit-approval-for-one-bounded-login21-thu21-transacti
 assurance_mode: development
 review_budget: one review pass per milestone
 evidence_branch: rescue-state-machine
-product_branch: rescue-mvp
+product_branch: main  # rescue-mvp merged into main in 2026-10
 ---
 
 # PowerVPN Native Rescue MVP
