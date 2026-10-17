@@ -4,6 +4,7 @@ import Foundation
 
 public final class VICIUnixTransport: VICIFrameTransport {
   private var descriptor: Int32
+  private let descriptorLifecycle = NSLock()
   private let timeoutMilliseconds: Int
 
   public init(socketPath: String, timeoutMilliseconds: Int = 2_000) throws {
@@ -94,9 +95,20 @@ public final class VICIUnixTransport: VICIFrameTransport {
   }
 
   public func close() {
-    if descriptor >= 0 {
-      Darwin.close(descriptor)
-      descriptor = -1
+    descriptorLifecycle.withLock {
+      if descriptor >= 0 {
+        Darwin.close(descriptor)
+        descriptor = -1
+      }
+    }
+  }
+
+  /// Interrupt a blocked read without closing/reusing its descriptor. The
+  /// lifetime lock prevents a concurrent close from redirecting shutdown to
+  /// an unrelated newly allocated descriptor.
+  package func interrupt() {
+    descriptorLifecycle.withLock {
+      if descriptor >= 0 { _ = Darwin.shutdown(descriptor, SHUT_RDWR) }
     }
   }
 

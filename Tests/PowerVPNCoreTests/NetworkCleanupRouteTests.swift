@@ -32,6 +32,33 @@ import Testing
     #expect(a.persistent.itemCount == 3)
   }
 
+  @Test func configurationRoutesIgnoreClonedAndExpiringRowsOnly() throws {
+    let base = routeFixture(
+      rows: [
+        "default 192.0.2.1 UGScg en0",
+        "203.0.113.0/24 link#9 UGScI utun9",
+        "198.51.100.10 192.0.2.1 UHWI en0 9",
+      ])
+    // Kernel-cache churn: another cloned host route, an ARP-style row, and a
+    // changed expiry. The all-rows hash moves, the configuration hash must not.
+    let churned =
+      base.replacingOccurrences(of: "en0 9", with: "en0 8")
+      + "198.51.100.11 link#9 UHWIi utun9\n192.0.2.7 aa:bb:cc:dd:ee:07 UHLWIi en0 44\n"
+    // Real configuration changes: a new non-cloned route, and a changed
+    // non-cloned route.
+    let added = base + "10.0.0.0/8 link#9 UGScI utun9\n"
+    let modified = base.replacingOccurrences(
+      of: "203.0.113.0/24 link#9", with: "203.0.113.0/24 192.0.2.1")
+
+    let a = try canonical(base)
+    let b = try canonical(churned)
+    #expect(a.structural != b.structural)
+    #expect(a.configurationRoutes == b.configurationRoutes)
+    #expect(a.configurationRoutes == a.persistent)
+    #expect(try canonical(added).configurationRoutes != a.configurationRoutes)
+    #expect(try canonical(modified).configurationRoutes != a.configurationRoutes)
+  }
+
   @Test func routeOrderingIsCanonicalAndDuplicatesRemainVisible() throws {
     let rows = [
       "default 192.0.2.1 UGScg en0",

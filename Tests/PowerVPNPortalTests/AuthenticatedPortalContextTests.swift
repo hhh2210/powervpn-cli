@@ -109,22 +109,26 @@ import Testing
     let state = ConcurrentContextBorrowState()
     let releaseBorrow = DispatchSemaphore(value: 0)
 
-    let borrow = Task.detached {
-      try snapshot.withPortalContext { context in
-        try context.withMajorVersionBytes { bytes in
-          state.append(.borrowEntered)
-          releaseBorrow.wait()
-          state.append(.borrowLeaving)
-          return bytes.count
+    let borrow = Task {
+      try await onDedicatedThread {
+        try snapshot.withPortalContext { context in
+          try context.withMajorVersionBytes { bytes in
+            state.append(.borrowEntered)
+            releaseBorrow.wait()
+            state.append(.borrowLeaving)
+            return bytes.count
+          }
         }
       }
     }
     let borrowDidEnter = await waitForContext { state.contains(.borrowEntered) }
     #expect(borrowDidEnter)
-    let erase = Task.detached {
-      state.append(.eraseStarted)
-      snapshot.erase()
-      state.append(.eraseFinished)
+    let erase = Task {
+      await onDedicatedThread {
+        state.append(.eraseStarted)
+        snapshot.erase()
+        state.append(.eraseFinished)
+      }
     }
     let eraseDidStart = await waitForContext { state.contains(.eraseStarted) }
     #expect(eraseDidStart)

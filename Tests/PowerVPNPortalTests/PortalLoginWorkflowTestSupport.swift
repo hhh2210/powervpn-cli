@@ -37,7 +37,9 @@ actor SyntheticPortalTransport: PortalTransporting {
     case .failure(let error):
       throw error
     case .suspendUntilCancelled:
-      try await Task.sleep(nanoseconds: UInt64.max)
+      // Not UInt64.max: the macOS 14 concurrency runtime treats it as a
+      // negative delay and returns at once (fixed upstream in swift#64304).
+      try await Task.sleep(for: .seconds(3_600))
       throw PortalTransportError.unavailable
     case .response(let status, let body, let setCookie):
       let secureCookie = try setCookie.map { try SecureBytes(copying: Array($0.utf8)) }
@@ -93,7 +95,7 @@ actor CancellableGatePortalSleeper: PortalSleeping {
 
   func sleep(seconds _: UInt64) async throws {
     entered = true
-    try await Task.sleep(nanoseconds: UInt64.max)
+    try await Task.sleep(for: .seconds(3_600))
   }
 
   func hasEntered() -> Bool { entered }

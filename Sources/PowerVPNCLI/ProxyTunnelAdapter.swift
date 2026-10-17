@@ -4,10 +4,37 @@ struct ProxyCommandResult: Equatable, Sendable {
   let standardOutput: String
   let standardError: String
   let exitCode: Int32
+  let cleanupReceipt: ProductPersistentTunnelShutdownReport?
+
+  init(
+    standardOutput: String,
+    standardError: String,
+    exitCode: Int32,
+    cleanupReceipt: ProductPersistentTunnelShutdownReport? = nil
+  ) {
+    self.standardOutput = standardOutput
+    self.standardError = standardError
+    self.exitCode = exitCode
+    self.cleanupReceipt = cleanupReceipt
+  }
 }
 
 struct ProxyTunnelShutdown: Equatable, Sendable {
   let cleanupVerified: Bool
+  let cleanupReceipt: ProductPersistentTunnelShutdownReport?
+
+  init(
+    cleanupVerified: Bool,
+    cleanupReceipt: ProductPersistentTunnelShutdownReport? = nil
+  ) {
+    self.cleanupVerified = cleanupVerified
+    self.cleanupReceipt = cleanupReceipt
+  }
+
+  init(receipt: ProductPersistentTunnelShutdownReport) {
+    cleanupVerified = receipt.cleanupVerified
+    cleanupReceipt = receipt
+  }
 }
 
 protocol ProxyTunnelLeasing: Sendable {
@@ -23,6 +50,7 @@ struct ProxyTunnelOpenFailure: Equatable, Sendable {
   let helperMutationRequested: Bool
   let serverContactRequested: Bool
   let cleanupVerified: Bool
+  var cleanupReceipt: ProductPersistentTunnelShutdownReport? = nil
 }
 
 enum ProxyTunnelOpenResult: Sendable {
@@ -58,7 +86,8 @@ func openProductProxyTunnel(
         resourceCatalogFailure: report.resourceCatalogFailure,
         helperMutationRequested: report.helperMutationRequested,
         serverContactRequested: report.serverContactRequested,
-        cleanupVerified: report.cleanupVerified
+        cleanupVerified: report.cleanupVerified,
+        cleanupReceipt: report.cleanupReceipt
       ))
   }
 }
@@ -71,6 +100,6 @@ private struct ProductProxyTunnelLease: ProxyTunnelLeasing {
 
   func shutdown(budget: ProductM2CleanupBudget) async -> ProxyTunnelShutdown {
     let report = await lease.shutdown(budget: budget)
-    return ProxyTunnelShutdown(cleanupVerified: report.cleanupVerified)
+    return ProxyTunnelShutdown(receipt: report)
   }
 }

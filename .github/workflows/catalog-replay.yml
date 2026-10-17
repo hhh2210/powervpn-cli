@@ -1,0 +1,57 @@
+name: catalog-replay
+
+# Runner: `xcode-27` — see docs/ci.md for the toolchain matrix.
+
+# Deterministically replays synthetic portal catalog-rejection shapes against
+# the real client acquisition pipeline: login accepted, catalog rejected,
+# exactly one fresh-login retry, truthful discriminator tokens. It verifies
+# client behavior, not the unresolved server trigger. CI never contacts the
+# real portal; all fixtures are synthetic value-free XML.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Nightly order-dependence sweep, 03:17 UTC (off the top of the hour).
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: catalog-replay-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+
+jobs:
+  replay:
+    name: replay (all rejection shapes, full retry state machine)
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run catalog replay suite
+        run: swift test --filter CatalogReplay
+
+  replay-order-matrix:
+    name: order-dependence (seed ${{ matrix.seed }})
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: xcode-27
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      # One leg per stable seeded shuffle. The test suite pins distinctness
+      # and predecessor/successor coverage, so a failure names an exact,
+      # reproducible seed without relying on process randomness.
+      matrix:
+        seed: ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Replay with shuffled shape order
+        env:
+          CATALOG_REPLAY_PERMUTATIONS: ${{ matrix.seed }}
+        run: swift test --filter classificationIsInvariantToShapeServingOrder

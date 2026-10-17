@@ -182,3 +182,126 @@ not modify `payload.h`, `payload.c`, `message.c`, Quick Mode, Informational,
 task manager, payload factory, HASH/order rules, VICI, SA, route, utun, or any
 network path. Those changes begin no earlier than CP6 after the CP4B semantic
 promotion gate.
+
+
+## 2026-10-17 NC semantic follow-up (static evidence)
+
+The syntax-only limits above describe the original CP4A checkpoint. The following
+findings add semantics for the installed macOS helper's dialect-0 NC path, based
+on `com.leadsec.charon-xpc` and `charon.dis` in the existing helper-RE directory.
+They do not by themselves establish native data-plane interoperability; that was
+established later the same day once the `NEW CLIENT` vendor ID was added (see
+`native-strongswan-backend.md`).
+
+- `_add_nc_expandrule` (`0x100125ff0`): `rflag == 0` inserts category 1 using
+  the tunnel's parsed address/prefix; nonzero rflag inserts category 2 using the
+  resource name. The "not immediately start up" message precedes insertion;
+  it does not establish a required follow-up Informational packet.
+- `_add_expandrule` (`0x100166bf0`): dialect-0 IPv4 primary records are exactly
+  four network-address octets and four mask octets. Counts and masks are big
+  endian. Category 2 carries one byte of name length followed by that many
+  bytes. A category-1 resource does not also emit its name. `mapid` is used by
+  dialect 1, not this dialect-0 serialization path.
+- QM3 contains type-18 ADDRULE after HASH. The snapshot enumerates enabled
+  manager records matching gateway/address family. A coexistence trial must
+  keep the declared resource scope to its selected resource; a complete vendor
+  snapshot is not a safe reason to claim the other live resource.
+- `_vpn_nc_create` (`0x100127960`) takes the new-connection path when no service
+  exists. The Informational delta path (`0x100127e45`) is reached only when an
+  existing service/address family is already active. Thus a fresh standalone
+  native NC connection does not need an unconditional INFO_ADD_DELTA.
+- The CIDR assigned in `_start_connection` is intermediate resource state.
+  `_set_adapter_name`, NC connection type 2, appends `0.0.0.0/0` at
+  `0x100122d69..0x100122d7b`. `_set_virtip` adds local VIP/32 at
+  `0x100122afd..0x100122b12`. `_create_child_cfg` consumes those lists as local
+  and remote TS. This invalidates the prior inference that the vendor NC CHILD
+  necessarily negotiates the selected resource /32 as its remote TS.
+
+The installed experimental `kernel-libipsec` called its automatic route installer
+unconditionally; the generic `charon.install_routes` value alone did not stop it.
+The scoped follow-up adds a guard in that existing plugin and sets the experimental
+configuration to `install_routes = no`. The existing runner remains responsible
+for the selected target's /32 OS route. Broad remote TS must not be tested with the
+old plugin, including when its configuration merely says `install_routes = no`.
+
+Live run `addrule-r2-all` tested a two-rule snapshot with /32 remote TS. It sent
+three encrypted SYN packets and received zero ESP packets before the runner
+aborted on vendor-helper exit. The crash report shows received CHILD deletion ->
+child_updown -> NotifyNCResourceStatus -> xpc_connection_send_message (SIGILL).
+This is a censored negative trial, not proof that all-rule ADDRULE works, nor proof
+that the crash was independent of the concurrent native trial. The vendor owner
+subsequently rebuilt its connection; an SSH command over the new thu21
+ControlMaster returned exit 0. No all-rule retry is planned.
+
+
+Follow-up run `addrule-r3-ncts` used selected-resource ADDRULE, remote TS
+`0.0.0.0/0`, and the guarded native route installer. It still produced out=3,
+in=0 after the TCP probe; SSH exited 255 after 5096 ms with a TCP connect timeout.
+Runner cleanup reported restored52=1, utun_baseline=1, route21_same=1,
+vendor_alive=1, thu21_master=1. Default and IKE-gateway routes matched before/after.
+The TS mismatch was real, but correcting it alone did not restore forwarding.
+
+A further static difference was found in vendor `isakmp_vendor.c` `_build`
+(`0x100160293..0x100160431`): an NC connection name ending in `4` causes an
+additional type-13 Vendor ID containing exactly nine bytes `31 32 33 34 49 50
+56 34 00` (`1234IPV4` including NUL). `_build_i` emits it on its first invocation,
+so it is in the initial Main Mode request. Upstream/native lacked this extension.
+The experimental patch adds it only for initiator connections with an explicitly
+configured dialect-0 IPv4 ADDRULE. This is a hypothesis about gateway NC setup,
+not yet a demonstrated cause of the no-ESP-reply symptom.
+
+
+Run `addrule-r4-ncvid` stopped before IKE due to the known transient Portal
+`integration_info_missing`. Its bounded retry `addrule-r4b-ncvid` logged the
+nine-byte NC IPv4 Vendor ID in the initial IKE request, established the CHILD,
+and still had out=3/in=0 after nc; SSH exited 255 after 5092 ms. Cleanup again
+reported all five checks true. Final read-only SSH checks returned exit 0 for
+thu21 through its existing ControlMaster and for thu52 through vendor directly.
+No native daemon remains. Native SSH is NOT working; these protocol-parity
+corrections are not a successful repair claim.
+
+Additional static comparison found the standard protocol|SPI|Ni|Nr CHILD seed,
+PRF expansion without an appended counter, standard SPI/sequence/IV/ICV ESP
+layout, and send_no_marker for encrypted ESP. No additional vendor-specific
+seed/header was identified in these inspected paths. This is not a runtime
+key-equivalence proof. The next discriminating evidence must explain gateway
+acceptance of QM3/ADDRULE or the handling of the first native ESP packet; the
+current local trace cannot identify the precise remote drop stage.
+
+
+## 2026-10-17 successful Quick Mode differential
+
+The later exclusive capture supersedes the earlier unresolved data-plane status.
+An isolated vendor helper copy connected only thu52 and completed SSH in 699 ms
+with exit 0. Its host DNS/gateway integrations were disabled and its VIP interface
+used /32; its negotiation/crypto code was unchanged. The original helper was not
+modified. Three Quick Mode plaintext payload chains were captured before encryption
+and after decryption in this copy, excluding Main Mode identities and key material.
+
+Vendor QM1/QM2 used proposal number 0 plus SA_LIFE_TYPE=seconds and
+SA_LIFE_DURATION=3600. Native used number 1 and omitted the two lifetime attributes.
+QM3 ADDRULE was already byte-identical after normalizing session VIP/HASH.
+
+| Native case | Stable payload difference from vendor | Outcome |
+| --- | --- | --- |
+| Initial | Missing lifetime attributes; proposal 1 | ESP in=0, SSH timeout |
+| Portal lifetime mapped | Only byte 40 in QM1/QM2: proposal 1 | ESP in=0, SSH timeout |
+| Lifetime mapped, scoped proposal 0 | None after HASH/nonce/SPI/VIP normalization | ESP in=4/out=4, SSH exit 0 in 718 ms |
+
+The protocol fix maps Portal ipsecLifetime to child life_time and sets the
+proposal number to zero only for initiator connections with the explicit private
+ADDRULE extension and no IPComp. The successful trace has identical normalized
+QM1/QM2/QM3 bytes. This identifies proposal numbering as the decisive compatibility
+change in the controlled sequence; the gateway's internal lookup implementation
+has not been observed.
+
+The native success window restored the target route, utun set, default route, and
+DNS to baseline. Twelve confirmed orphan capture processes from earlier admin
+scripts were stopped in one final root batch. The existing expiring runner now
+waits after TERM, uses KILL if needed, and reaps its capture children. The default
+mode is exclusive; no vendor/thu21/ControlMaster prerequisite remains. Future root
+updates must be batched; any repeated vendor capture must first be installed as a
+fixed runner mode, not executed via arbitrary root scripts/binaries.
+
+The formal installed CLI was not replaced. Long-duration rekey/reconnect behavior
+is outside this short-window interoperability acceptance.

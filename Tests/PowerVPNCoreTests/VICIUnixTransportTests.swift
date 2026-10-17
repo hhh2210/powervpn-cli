@@ -115,20 +115,25 @@ import Testing
     let sockets = try makeSocketPair()
     let transport = try VICIUnixTransport(
       connectedFileDescriptor: sockets.client,
-      timeoutMilliseconds: 50
+      timeoutMilliseconds: 200
     )
     let server = sockets.server
     let group = DispatchGroup()
+    let partialHeaderWritten = DispatchSemaphore(value: 0)
     group.enter()
+    // The header completes at ~100 ms and the payload never does. A total
+    // deadline fires at ~200 ms; one reset on progress would fire at ~300 ms.
     DispatchQueue.global().async {
       writeAll(server, Data([0x00, 0x00]))
-      usleep(30_000)
+      partialHeaderWritten.signal()
+      usleep(100_000)
       writeAll(server, Data([0x00, 0x04, 0x01]))
-      usleep(70_000)
+      usleep(400_000)
       Darwin.close(server)
       group.leave()
     }
 
+    #expect(partialHeaderWritten.wait(timeout: .now() + .seconds(1)) == .success)
     let started = ContinuousClock.now
     try expectTransportError(.timeout(.readPayload)) {
       try transport.receive()
@@ -137,8 +142,8 @@ import Testing
     let milliseconds =
       elapsed.seconds * 1_000
       + elapsed.attoseconds / 1_000_000_000_000_000
-    #expect(milliseconds >= 40)
-    #expect(milliseconds < 80)
+    #expect(milliseconds >= 190)
+    #expect(milliseconds < 280)
     group.wait()
   }
 
@@ -184,6 +189,41 @@ import Testing
     defer { Darwin.close(sockets.server) }
     transport.close()
     transport.close()
+  }
+
+  @Test func cancellationInterruptsBlockedReadWithoutWaitingForItsTimeout() throws {
+    let sockets = try makeSocketPair()
+    let transport = try VICIUnixTransport(
+      connectedFileDescriptor: sockets.client, timeoutMilliseconds: 2_000)
+    let session = VICISession(transport: transport)
+    let handle = session.interruptionHandle()
+    defer {
+      session.close()
+      Darwin.close(sockets.server)
+    }
+    DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(20)) { handle.interrupt() }
+    let start = ContinuousClock.now
+    #expect(throws: VICITransportError.self) { try transport.receive() }
+    #expect(start.duration(to: .now) < .milliseconds(500))
+  }
+
+  @Test func interruptionAfterCloseCannotShutdownAReusedDescriptor() throws {
+    let first = try makeSocketPair()
+    let old = try VICIUnixTransport(connectedFileDescriptor: first.client, timeoutMilliseconds: 100)
+    let session = VICISession(transport: old)
+    let handle = session.interruptionHandle()
+    session.close()
+    let second = try makeSocketPair()
+    let current = try VICIUnixTransport(
+      connectedFileDescriptor: second.client, timeoutMilliseconds: 100)
+    defer {
+      Darwin.close(first.server)
+      Darwin.close(second.server)
+      current.close()
+    }
+    handle.interrupt()
+    writeAll(second.server, frame(Data([1])))
+    #expect(try current.receive().payload == Data([1]))
   }
 }
 

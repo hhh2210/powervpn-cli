@@ -61,7 +61,7 @@ final class M2ManualSignalMonitor: CLISignalMonitoring, @unchecked Sendable {
 
 final class M2CancellationRuntime: @unchecked Sendable {
   private let lock = NSLock()
-  private let started = DispatchSemaphore(value: 0)
+  private let started = AsyncTestSignal()
   private var invocations = 0
   private var cancellations = 0
 
@@ -77,7 +77,7 @@ final class M2CancellationRuntime: @unchecked Sendable {
     return report(outcome: .cancelled, mutated: true)
   }
 
-  func waitUntilStarted() -> Bool { started.wait(timeout: .now() + 2) == .success }
+  func waitUntilStarted() async -> Bool { await started.wait() }
   var invocationCount: Int { lock.withLock { invocations } }
   var cancellationCount: Int { lock.withLock { cancellations } }
 }

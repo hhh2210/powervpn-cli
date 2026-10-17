@@ -76,7 +76,7 @@ import Testing
       authenticationGeneration: PortalAuthenticationGeneration(),
       vendorGateway: gateway
     )
-    weak let weakSnapshot = snapshot
+    weak var weakSnapshot = snapshot
 
     snapshot = nil
 

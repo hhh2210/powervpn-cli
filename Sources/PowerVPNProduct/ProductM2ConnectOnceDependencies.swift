@@ -104,9 +104,11 @@ package struct ProductM2ConnectOnceDependencies: Sendable {
   }
 
   /// Production adapter. Callers must explicitly supply the current-machine
-  /// observer/prover; constructing generic synthetic dependencies never runs
-  /// commands, SSH, Portal, or XPC.
+  /// mutation lease and observer/prover; constructing generic synthetic
+  /// dependencies never runs commands, SSH, Portal, or XPC.
   package init(
+    acquireMutationLease:
+      @escaping @Sendable () throws -> any ProductMutationLeaseHolding,
     controlRuntimePreflightAccepted: @escaping @Sendable () -> Bool,
     generationObserver: any BoundedVendorHelperGenerationObserving,
     preflightChecker: any BoundedVendorXPCPreflightChecking,
@@ -116,7 +118,7 @@ package struct ProductM2ConnectOnceDependencies: Sendable {
     freshSSHProver: ProductM2FreshSSHProver
   ) {
     self.init(
-      acquireMutationLease: ProductMutationLease.acquireCurrentMachine,
+      acquireMutationLease: acquireMutationLease,
       controlRuntimePreflightAccepted: controlRuntimePreflightAccepted,
       observeGeneration: { deadline in
         guard let timeout = deadline.remainingMilliseconds(cappedAt: 2_000) else {

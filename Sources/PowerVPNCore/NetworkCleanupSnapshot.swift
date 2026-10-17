@@ -78,6 +78,28 @@ package struct NetworkCleanupRouteSnapshot: Equatable, Sendable {
     )
   }
 
+  /// The fingerprint that cleanup verification and cold-recovery stability
+  /// compare when they ask whether the route table is structurally unchanged.
+  ///
+  /// This is deliberately the `persistent` projection, not the all-rows
+  /// `structural` hash. `structural` also covers RTF_WASCLONED (`W`) rows and
+  /// rows with an `Expire` value. Those are kernel caches, not configuration:
+  /// ARP/NDP entries and host routes cloned from a covering route, created per
+  /// destination or connection and aged out by the stack itself. A tunnel
+  /// interface that stays up across the window (Surge Enhanced Mode's TUN is
+  /// the measured case) clones a new host route for every new peer, so the
+  /// all-rows hash differs between captures taken 0.5 s apart and can never
+  /// match across a session. Every other row (any non-cloned, non-expiring
+  /// route, including `D`/`C`/`c` flags) is still compared exactly through
+  /// `persistent`.
+  ///
+  /// What stays fail-closed: selected-route residue is matched against all
+  /// rows, cloned ones included (`selectedRouteTokens`); the all-rows
+  /// `structural` hash is still captured, so a table that cannot be parsed or
+  /// hashed makes the snapshot incomplete; and a table with zero persistent
+  /// rows is rejected at canonicalization.
+  package var configurationRoutes: NetworkCleanupFingerprint { persistent }
+
   package var primitiveObservationStates: [NetworkCleanupObservationState] {
     var states = [structural.state, persistent.state]
     if let effectiveSelectedRoute {
@@ -238,9 +260,11 @@ package enum NetworkCleanupAssessment {
       surgeStateRestored: complete && before.surge == after.surge,
       vendorProcessesRestored: complete && before.vendorProcesses == after.vendorProcesses,
       helperGenerationRestored: complete && helperRestored,
+      // Compared over `configurationRoutes` (non-cloned, non-expiring rows),
+      // not the all-rows hash; see `NetworkCleanupRouteSnapshot` for why.
       structuralRouteTablesEqual: complete
-        && before.ipv4Routes.structural == after.ipv4Routes.structural
-        && before.ipv6Routes.structural == after.ipv6Routes.structural
+        && before.ipv4Routes.configurationRoutes == after.ipv4Routes.configurationRoutes
+        && before.ipv6Routes.configurationRoutes == after.ipv6Routes.configurationRoutes
     )
   }
 }

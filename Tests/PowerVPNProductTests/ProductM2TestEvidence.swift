@@ -164,14 +164,49 @@ let m2ProvenActiveNetwork = ProductM2ActiveNetworkEvidence(
   selectedResourcePathProven: true
 )
 
-let m2CompleteCleanup = ProductM2CleanupEvidence(
-  defaultRouteRestored: true,
-  dnsRestored: true,
-  interfacesRestored: true,
-  utunRestored: true,
-  surgeStateRestored: true,
-  helperGenerationRestored: true
-)
+func m2CleanupEvidence(
+  complete: Bool = true,
+  defaultRouteRestored: Bool = true,
+  dnsRestored: Bool = true,
+  interfacesRestored: Bool = true,
+  utunRestored: Bool = true,
+  persistentRoutesRestored: Bool = true,
+  selectedRouteResidueCount: Int = 0,
+  surgeStateRestored: Bool = true,
+  vendorProcessesRestored: Bool = true,
+  helperGenerationRestored: Bool = true,
+  structuralRouteTablesEqual: Bool = true
+) -> ProductM2CleanupEvidence {
+  ProductM2CleanupEvidence(
+    complete: complete,
+    defaultRouteRestored: defaultRouteRestored,
+    dnsRestored: dnsRestored,
+    interfacesRestored: interfacesRestored,
+    utunRestored: utunRestored,
+    persistentRoutesRestored: persistentRoutesRestored,
+    selectedRouteResidueCount: selectedRouteResidueCount,
+    surgeStateRestored: surgeStateRestored,
+    vendorProcessesRestored: vendorProcessesRestored,
+    helperGenerationRestored: helperGenerationRestored,
+    structuralRouteTablesEqual: structuralRouteTablesEqual
+  )
+}
+
+let m2CompleteCleanup = m2CleanupEvidence()
+
+let m2SingleDimensionCleanupFailures: [ProductM2CleanupEvidence] = [
+  m2CleanupEvidence(complete: false),
+  m2CleanupEvidence(defaultRouteRestored: false),
+  m2CleanupEvidence(dnsRestored: false),
+  m2CleanupEvidence(interfacesRestored: false),
+  m2CleanupEvidence(utunRestored: false),
+  m2CleanupEvidence(persistentRoutesRestored: false),
+  m2CleanupEvidence(selectedRouteResidueCount: 1),
+  m2CleanupEvidence(surgeStateRestored: false),
+  m2CleanupEvidence(vendorProcessesRestored: false),
+  m2CleanupEvidence(helperGenerationRestored: false),
+  m2CleanupEvidence(structuralRouteTablesEqual: false),
+]
 
 func m2Receipt(
   _ outcome: ProductM2ControlOutcome,

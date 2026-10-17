@@ -32,7 +32,7 @@ import Testing
 
     let firstTask = Task.detached { await credentialError(from: firstReader) }
     defer { firstTask.cancel() }
-    _ = try terminal.readUntil(
+    _ = try await terminal.readUntilOffPool(
       marker: SecureTerminalCredentialPrompt.username.rawValue,
       timeoutMilliseconds: 1_000
     )
@@ -45,7 +45,7 @@ import Testing
 
     firstTask.cancel()
     #expect(await firstTask.value == .cancelled)
-    _ = try terminal.readUntil(
+    _ = try await terminal.readUntilOffPool(
       marker: SecureTerminalCredentialPrompt.username.rawValue,
       timeoutMilliseconds: 1_000
     )
@@ -54,7 +54,7 @@ import Testing
     #expect(try terminal.state().c_lflag & tcflag_t(ECHO | ECHONL) == 0)
 
     try terminal.writeLine("second-user")
-    _ = try terminal.readUntil(
+    _ = try await terminal.readUntilOffPool(
       marker: SecureTerminalCredentialPrompt.password.rawValue,
       timeoutMilliseconds: 1_000
     )

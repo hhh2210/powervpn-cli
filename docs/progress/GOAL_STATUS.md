@@ -1887,3 +1887,52 @@ entry grants no attempt or retry.
 
 Approval required:
 yes.
+
+## 2026-09-21 — Evidence-gated cleanup recovery and live product closure
+
+Observed blocker: after a successful long-lived `powervpn up thu21` session was
+used for the CooperBench pilot, `powervpn down` returned exit 74. The persisted
+schema-1 session was terminal with `cleanupVerified=false` and
+`failure=cleanup_unproven`; the owner process and ControlMaster socket were
+gone. `status` reported `cleanup_failed` and `doctor` reported
+`previous_cleanup_unverified`. The old process had not persisted its network
+baseline, selected-route matcher, stop/authorization receipt or per-dimension
+cleanup evidence, so the original cleanup cannot be reconstructed or upgraded
+to PASS.
+
+Commit `9a4206f` adds two separate evidence tracks. Future Product shutdowns now
+carry their complete value-free cleanup receipt through Product, ProxyCommand
+and the schema-2 session file: control path, stop/emergency/auth-close classes,
+capture classification and all cleanup dimensions. The original boolean and
+failure token remain immutable. `powervpn recovery inspect --json` and
+`recovery clear --json` build a different recovery basis:
+`current_profile_cold_baseline`. Under one exclusive mutation lease, the
+runtime obtains the current authorized profile only to construct an in-memory
+selected-route matcher, closes/erases authorization, then performs two bounded
+captures plus bounded preflight. Clear requires one exact-inactive helper
+generation from initial preflight through both captures; no vendor process,
+selected-route or effective-route residue; and stable default route, DNS,
+interfaces/utun, persistent and structural routes, and Surge state. The
+receipt explicitly encodes `originalCleanupRestored=false` and is archived per
+session at mode 0600.
+
+Live recovery result: installed arm64 binary SHA-256
+`0bd5158429ca306d9b6040fa0867ce18c57a1be3eec56935027f00764933e480`.
+`recovery inspect` passed every gate without clearing quarantine. `recovery
+clear` repeated the measurement and atomically persisted measurement
+`52cea901-6af3-492c-a927-0fb0fcd62057`; the old session still recorded
+`cleanupVerified=false`, `cleanup_unproven`, while status became disconnected
+and doctor became ready from the separate recovery receipt.
+
+Product verification then ran one fresh ordinary session: `powervpn up thu21`
+returned connected, `/usr/bin/ssh thu21 -- /usr/bin/true` exited 0 through the
+ControlMaster, and `powervpn down` returned `Cleanup: verified`. Final status is
+disconnected, doctor is ready with `sessionCleanupSafe=true`, session.json is
+absent, the official App/helper are not running, and the old recovery archive
+remains. Debug still reports historical helper SIGILL/crash counters (runs 10,
+successive crashes 10); those counters are not attributed to one session, and
+the final network cleanup receipt is the decisive result.
+
+Verification: focused recovery/open-receipt tests and full `swift test` pass;
+the arm64 release build, strict Swift formatting, `git diff --check`, secret
+scan and independent P0/P1 review pass. No CooperBench or GLM job was rerun.

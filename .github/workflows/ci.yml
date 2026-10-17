@@ -1,0 +1,216 @@
+name: ci
+
+# The build matrix covers both the advertised minimum toolchain and the
+# current development toolchain. Keep both legs: a current-only green build
+# does not prove source installation on macOS 14.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly canary, Mondays 09:00 UTC.
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      checkout-ref:
+        description: Optional ref to verify (used by the tag release gate).
+        required: false
+        type: string
+        default: ''
+      expected-sha:
+        description: Optional exact commit expected after checkout.
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  # A branch push may replace an older push, but it must not cancel the
+  # independent scheduled evidence run for the same default-branch ref.
+  group: ci-${{ github.event_name }}-${{ inputs.checkout-ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: build-and-test (${{ matrix.toolchain }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - toolchain: minimum-xcode-16.2
+            runner: macos-14
+            developer-dir: /Applications/Xcode_16.2.app/Contents/Developer
+          - toolchain: current-xcode-27
+            runner: xcode-27
+            developer-dir: ''
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout-ref }}
+
+      - name: Verify source identity
+        id: source
+        env:
+          EXPECTED_SHA: ${{ inputs.expected-sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ -n "$EXPECTED_SHA" && "$actual_sha" != "$EXPECTED_SHA" ]]; then
+            echo "Expected $EXPECTED_SHA, checked out $actual_sha" >&2
+            exit 1
+          fi
+          echo "sha=$actual_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Select minimum-supported Xcode
+        if: matrix.developer-dir != ''
+        env:
+          XCODE_PATH: ${{ matrix.developer-dir }}
+        run: echo "DEVELOPER_DIR=$XCODE_PATH" >> "$GITHUB_ENV"
+
+      - name: Report toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Cache .build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build
+          # Exact source and toolchain identity make this safe but deliberately
+          # conservative: only retries of the same commit reuse build objects.
+          key: spm-debug-${{ runner.os }}-${{ runner.arch }}-${{ matrix.toolchain }}-${{ steps.source.outputs.sha }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
+
+      - name: Build (debug, product powervpn)
+        run: swift build --product powervpn -c debug
+
+      - name: Test (deterministic suites, offline, real PowerVPN state denied)
+        # Serial on purpose: the curl and PTY drivers block a cooperative
+        # thread by design, and parallel suites starved the small hosted
+        # runner's pool until the job hit its 45-minute timeout.
+        #
+        # The skipped suites drive the fake XPC driver or a socket pair against
+        # real timers and assert on tens of milliseconds. A 3-vCPU hosted runner
+        # delays queue work by 100 ms or more, so they failed a different subset
+        # on every run without a product bug. Run them locally before changing
+        # the vendor control transport or VICI transport (docs/ci.md).
+        env:
+          TIMING_SUITES: >-
+            VendorCharon(AsyncGenerationValidation|ControlCommit|ControlFailure|ControlLifecycle|ControlStatusWait|NCRouteToggle|ProvisionalStopCapability)Tests|VICIUnixTransportTests|ProductM2StatusQuiescenceTests
+        run: scripts/hermetic_swift_test.sh --no-parallel --skip "$TIMING_SUITES"
+
+  format:
+    name: format (swift-format strict, recursive)
+    runs-on: xcode-27
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout-ref }}
+
+      - name: Verify source identity
+        env:
+          EXPECTED_SHA: ${{ inputs.expected-sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ -n "$EXPECTED_SHA" && "$actual_sha" != "$EXPECTED_SHA" ]]; then
+            echo "Expected $EXPECTED_SHA, checked out $actual_sha" >&2
+            exit 1
+          fi
+
+      - name: Lint Sources and Tests
+        run: xcrun swift-format lint --strict --recursive Sources Tests
+
+  secrets:
+    name: secrets (forbidden paths + gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GITLEAKS_VERSION: '8.30.1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.checkout-ref }}
+
+      - name: Verify source identity
+        env:
+          EXPECTED_SHA: ${{ inputs.expected-sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ -n "$EXPECTED_SHA" && "$actual_sha" != "$EXPECTED_SHA" ]]; then
+            echo "Expected $EXPECTED_SHA, checked out $actual_sha" >&2
+            exit 1
+          fi
+
+      - name: Install pinned gitleaks
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          asset="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL "$base/$asset" -o "$tmp/$asset"
+          curl -fsSL "$base/gitleaks_${GITLEAKS_VERSION}_checksums.txt" -o "$tmp/checksums.txt"
+          # --ignore-missing skips the other-OS assets; ours must verify.
+          (cd "$tmp" && sha256sum --check --ignore-missing checksums.txt)
+          sudo tar -xzf "$tmp/$asset" -C /usr/local/bin gitleaks
+          gitleaks version
+
+      - name: Verify no secrets
+        run: scripts/verify_no_secrets.sh
+
+
+  release-build:
+    name: release-build (arm64 + sha256)
+    runs-on: xcode-27
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout-ref }}
+
+      - name: Verify source identity
+        id: source
+        env:
+          EXPECTED_SHA: ${{ inputs.expected-sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ -n "$EXPECTED_SHA" && "$actual_sha" != "$EXPECTED_SHA" ]]; then
+            echo "Expected $EXPECTED_SHA, checked out $actual_sha" >&2
+            exit 1
+          fi
+          echo "sha=$actual_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Cache .build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build
+          key: spm-release-${{ runner.os }}-${{ runner.arch }}-xcode-27-arm64-${{ steps.source.outputs.sha }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
+
+      - name: Build release arm64
+        run: swift build --product powervpn --arch arm64 -c release
+
+      - name: Verify arch and report sha256
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          bin="$(swift build --show-bin-path --arch arm64 -c release)/powervpn"
+          file "$bin"
+          file "$bin" | grep -q 'arm64'
+          sha="$(shasum -a 256 "$bin" | awk '{print $1}')"
+          echo "release binary sha256: $sha"
+          {
+            echo '## release-build'
+            echo "- product: \`powervpn\` (arm64, release)"
+            echo "- sha256: \`${sha}\`"
+            echo "- commit: \`${SOURCE_SHA}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

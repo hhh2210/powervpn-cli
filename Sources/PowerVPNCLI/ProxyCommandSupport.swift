@@ -6,7 +6,8 @@ enum ProxyExecution: Sendable {
     childExitCode: Int32,
     helperMutationRequested: Bool,
     serverContactRequested: Bool,
-    cleanupVerified: Bool
+    cleanupVerified: Bool,
+    cleanupReceipt: ProductPersistentTunnelShutdownReport? = nil
   )
   case failure(
     token: String,
@@ -14,7 +15,8 @@ enum ProxyExecution: Sendable {
     runtimeInvoked: Bool,
     helperMutationRequested: Bool,
     serverContactRequested: Bool,
-    cleanupVerified: Bool
+    cleanupVerified: Bool,
+    cleanupReceipt: ProductPersistentTunnelShutdownReport? = nil
   )
 }
 enum ProxyLeaseOperationResult: Sendable {
@@ -54,7 +56,8 @@ private func openFailureExecution(_ failure: ProxyTunnelOpenFailure) -> ProxyExe
       runtimeInvoked: true,
       helperMutationRequested: failure.helperMutationRequested,
       serverContactRequested: failure.serverContactRequested,
-      cleanupVerified: failure.cleanupVerified
+      cleanupVerified: failure.cleanupVerified,
+      cleanupReceipt: failure.cleanupReceipt
     )
   }
   if failure.failure == .cancelled {
@@ -64,7 +67,8 @@ private func openFailureExecution(_ failure: ProxyTunnelOpenFailure) -> ProxyExe
       runtimeInvoked: true,
       helperMutationRequested: failure.helperMutationRequested,
       serverContactRequested: failure.serverContactRequested,
-      cleanupVerified: failure.cleanupVerified
+      cleanupVerified: failure.cleanupVerified,
+      cleanupReceipt: failure.cleanupReceipt
     )
   }
   return .failure(
@@ -73,7 +77,8 @@ private func openFailureExecution(_ failure: ProxyTunnelOpenFailure) -> ProxyExe
     runtimeInvoked: true,
     helperMutationRequested: failure.helperMutationRequested,
     serverContactRequested: failure.serverContactRequested,
-    cleanupVerified: failure.cleanupVerified
+    cleanupVerified: failure.cleanupVerified,
+    cleanupReceipt: failure.cleanupReceipt
   )
 }
 
@@ -116,7 +121,8 @@ private func runOpenedLease(
       runtimeInvoked: true,
       helperMutationRequested: helperMutationRequested,
       serverContactRequested: serverContactRequested,
-      cleanupVerified: false
+      cleanupVerified: false,
+      cleanupReceipt: shutdown.cleanupReceipt
     )
   }
   let finalOperationResult: ProxyLeaseOperationResult =
@@ -129,7 +135,8 @@ private func runOpenedLease(
       runtimeInvoked: true,
       helperMutationRequested: helperMutationRequested,
       serverContactRequested: serverContactRequested,
-      cleanupVerified: true
+      cleanupVerified: true,
+      cleanupReceipt: shutdown.cleanupReceipt
     )
   case .preChildFailure(let token, let exitCode):
     return .failure(
@@ -138,13 +145,15 @@ private func runOpenedLease(
       runtimeInvoked: true,
       helperMutationRequested: helperMutationRequested,
       serverContactRequested: serverContactRequested,
-      cleanupVerified: true
+      cleanupVerified: true,
+      cleanupReceipt: shutdown.cleanupReceipt
     )
   case .child(let result):
     return childExecution(
       result,
       helperMutationRequested: helperMutationRequested,
-      serverContactRequested: serverContactRequested
+      serverContactRequested: serverContactRequested,
+      cleanupReceipt: shutdown.cleanupReceipt
     )
   }
 }
@@ -152,7 +161,8 @@ private func runOpenedLease(
 private func childExecution(
   _ result: ProxyChildRunResult,
   helperMutationRequested: Bool,
-  serverContactRequested: Bool
+  serverContactRequested: Bool,
+  cleanupReceipt: ProductPersistentTunnelShutdownReport?
 ) -> ProxyExecution {
   switch result.outcome {
   case .cancelled:
@@ -160,32 +170,37 @@ private func childExecution(
       token: "cancelled", exitCode: 130, runtimeInvoked: true,
       helperMutationRequested: helperMutationRequested,
       serverContactRequested: serverContactRequested,
-      cleanupVerified: true)
+      cleanupVerified: true,
+      cleanupReceipt: cleanupReceipt)
   case .spawnFailed:
     return .failure(
       token: "child_spawn_failed", exitCode: 70, runtimeInvoked: true,
       helperMutationRequested: helperMutationRequested,
       serverContactRequested: serverContactRequested,
-      cleanupVerified: true)
+      cleanupVerified: true,
+      cleanupReceipt: cleanupReceipt)
   case .readinessFailed:
     return .failure(
       token: "forward_not_ready", exitCode: 70, runtimeInvoked: true,
       helperMutationRequested: helperMutationRequested,
       serverContactRequested: serverContactRequested,
-      cleanupVerified: true)
+      cleanupVerified: true,
+      cleanupReceipt: cleanupReceipt)
   case .exited(let code):
     if code == 0 {
       return .success(
         childExitCode: 0,
         helperMutationRequested: helperMutationRequested,
         serverContactRequested: serverContactRequested,
-        cleanupVerified: true)
+        cleanupVerified: true,
+        cleanupReceipt: cleanupReceipt)
     }
     return .failure(
       token: "child_failed", exitCode: code, runtimeInvoked: true,
       helperMutationRequested: helperMutationRequested,
       serverContactRequested: serverContactRequested,
-      cleanupVerified: true)
+      cleanupVerified: true,
+      cleanupReceipt: cleanupReceipt)
   }
 }
 
@@ -266,18 +281,32 @@ func runProxySignalExecution(
 
 func proxyHumanResult(execution: ProxyExecution) -> ProxyCommandResult {
   switch execution {
-  case .success:
-    return ProxyCommandResult(standardOutput: "", standardError: "", exitCode: 0)
-  case .failure(let token, let exitCode, _, _, _, _):
-    return proxyHumanResult(error: token, exitCode: exitCode)
+  case .success(_, _, _, _, let cleanupReceipt):
+    return ProxyCommandResult(
+      standardOutput: "",
+      standardError: "",
+      exitCode: 0,
+      cleanupReceipt: cleanupReceipt
+    )
+  case .failure(let token, let exitCode, _, _, _, _, let cleanupReceipt):
+    return proxyHumanResult(
+      error: token,
+      exitCode: exitCode,
+      cleanupReceipt: cleanupReceipt
+    )
   }
 }
 
-func proxyHumanResult(error: String, exitCode: Int32) -> ProxyCommandResult {
+func proxyHumanResult(
+  error: String,
+  exitCode: Int32,
+  cleanupReceipt: ProductPersistentTunnelShutdownReport? = nil
+) -> ProxyCommandResult {
   ProxyCommandResult(
     standardOutput: "",
     standardError: "\(error)\n",
-    exitCode: exitCode
+    exitCode: exitCode,
+    cleanupReceipt: cleanupReceipt
   )
 }
 
@@ -301,8 +330,9 @@ func proxyServeResult(
   let report: ProxyServeReport
   let error: String
   let exitCode: Int32
+  let cleanupReceipt: ProductPersistentTunnelShutdownReport?
   switch execution {
-  case .success(_, let mutated, let contacted, let cleanupVerified):
+  case .success(_, let mutated, let contacted, let cleanupVerified, let receipt):
     report = ProxyServeReport(
       outcome: "child_exited",
       runtimeInvoked: true,
@@ -312,8 +342,10 @@ func proxyServeResult(
     )
     error = ""
     exitCode = 0
+    cleanupReceipt = receipt
   case .failure(
-    let token, let code, let runtimeInvoked, let mutated, let contacted, let cleanupVerified
+    let token, let code, let runtimeInvoked, let mutated, let contacted, let cleanupVerified,
+    let receipt
   ):
     report = ProxyServeReport(
       outcome: token,
@@ -324,6 +356,7 @@ func proxyServeResult(
     )
     error = "\(token)\n"
     exitCode = code
+    cleanupReceipt = receipt
   }
   let output: String
   if invocation.json {
@@ -340,6 +373,7 @@ func proxyServeResult(
   return ProxyCommandResult(
     standardOutput: output,
     standardError: error,
-    exitCode: exitCode
+    exitCode: exitCode,
+    cleanupReceipt: cleanupReceipt
   )
 }

@@ -115,7 +115,7 @@ import Testing
           runtime: runtime.open
         )
       }
-      #expect(runtime.waitUntilStarted())
+      #expect(await runtime.waitUntilStarted())
       monitor.emit()
       let result = try await command.value
 

@@ -25,7 +25,7 @@ import Testing
     }
     defer { readTask.cancel() }
 
-    let output = try terminal.readUntil(
+    let output = try await terminal.readUntilOffPool(
       marker: SecureTerminalCredentialPrompt.username.rawValue,
       timeoutMilliseconds: 1_000
     )
@@ -57,13 +57,13 @@ import Testing
     let readTask = Task.detached { try reader.readCredentials() }
     defer { readTask.cancel() }
 
-    _ = try terminal.readUntil(
+    _ = try await terminal.readUntilOffPool(
       marker: SecureTerminalCredentialPrompt.username.rawValue,
       timeoutMilliseconds: 1_000
     )
     #expect(try terminal.state().c_lflag & tcflag_t(ECHO | ECHONL) == 0)
     try terminal.writeLine("pty-user")
-    _ = try terminal.readUntil(
+    _ = try await terminal.readUntilOffPool(
       marker: SecureTerminalCredentialPrompt.password.rawValue,
       timeoutMilliseconds: 1_000
     )
@@ -100,7 +100,7 @@ import Testing
     }
     defer { readTask.cancel() }
 
-    _ = try terminal.readUntil(
+    _ = try await terminal.readUntilOffPool(
       marker: SecureTerminalCredentialPrompt.username.rawValue,
       timeoutMilliseconds: 1_000
     )
@@ -118,7 +118,7 @@ import Testing
   }
 }
 
-final class PseudoTerminal {
+final class PseudoTerminal: @unchecked Sendable {
   private(set) var master: Int32
   private(set) var slave: Int32
   let slavePath: String
@@ -146,6 +146,13 @@ final class PseudoTerminal {
       throw SecureTerminalCredentialError.unavailable
     }
     return value
+  }
+
+  /// Polls off the cooperative pool so the reader task under test can run.
+  func readUntilOffPool(marker: String, timeoutMilliseconds: Int32) async throws -> String {
+    try await onDedicatedThread {
+      try self.readUntil(marker: marker, timeoutMilliseconds: timeoutMilliseconds)
+    }
   }
 
   func readUntil(marker: String, timeoutMilliseconds: Int32) throws -> String {

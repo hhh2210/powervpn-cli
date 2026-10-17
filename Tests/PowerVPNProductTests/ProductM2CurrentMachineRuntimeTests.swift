@@ -19,6 +19,10 @@ import Testing
     let trace = CurrentMachineRuntimeTrace()
     let coordinatorTrace = ProductM2TestTrace()
     let runtime = ProductM2CurrentMachineRuntime(
+      acquireMutationLease: {
+        trace.record("mutation_lease")
+        return ProductM2TestMutationLease()
+      },
       controlRuntimePreflightAccepted: {
         trace.record("session_preflight")
         return true
@@ -48,7 +52,7 @@ import Testing
     )
 
     #expect(report.outcome == .preflightBlocked)
-    #expect(trace.events == ["session_preflight", "generation", "preflight"])
+    #expect(trace.events == ["session_preflight", "mutation_lease", "generation", "preflight"])
     #expect(trace.count("network") == 0)
     #expect(trace.count("portal") == 0)
     #expect(trace.count("ssh") == 0)
@@ -60,6 +64,10 @@ import Testing
     let trace = CurrentMachineRuntimeTrace()
     let coordinatorTrace = ProductM2TestTrace()
     let runtime = ProductM2CurrentMachineRuntime(
+      acquireMutationLease: {
+        trace.record("mutation_lease")
+        return ProductM2TestMutationLease()
+      },
       controlRuntimePreflightAccepted: {
         trace.record("session_preflight")
         return true

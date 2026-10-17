@@ -22,12 +22,14 @@ extension SystemInspector {
     let charonPath = Self.vendorHelperPaths.first {
       $0.hasSuffix("com.leadsec.charon-xpc") && FileManager.default.fileExists(atPath: $0)
     }
-    let symbolText = charonPath.flatMap {
-      try? runner.run("/usr/bin/nm", ["-a", "-j", $0])
-    } ?? ""
-    let printableStrings = charonPath.flatMap {
-      try? runner.run("/usr/bin/strings", ["-a", $0])
-    } ?? ""
+    let symbolText =
+      charonPath.flatMap {
+        try? runner.run("/usr/bin/nm", ["-a", "-j", $0])
+      } ?? ""
+    let printableStrings =
+      charonPath.flatMap {
+        try? runner.run("/usr/bin/strings", ["-a", $0])
+      } ?? ""
     let allowlistedLogText = AllowlistedLogReader.readLines(
       path: Self.logPath,
       maximumBytes: 2 * 1_024 * 1_024,

@@ -141,6 +141,92 @@ import Testing
     #expect(report.outcome == .cleanupUnproven)
   }
 
+  @Test func incompleteNetworkProofWithoutAnyHelperRequestIsNotQuarantined() async throws {
+    // "Other NC" is not in the catalog, so no start, route activation or stop
+    // is ever sent. The cleanup capture is unusable, but PowerVPN changed
+    // nothing, so that is not residue.
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Other NC"]))
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+    let dependencies = productM2TestDependencies(
+      snapshot: fixture.snapshot,
+      trace: trace,
+      cleanupAttempts: [
+        ProductM2CleanupCaptureAttempt(
+          evidence: .unavailable, state: .invalidOutput, captureInvoked: true)
+      ]
+    )
+
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: dependencies
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(report.outcome == .resourceNotFound)
+    #expect(!report.helperMutationRequested)
+    #expect(report.cleanupPath == .notRequired)
+    #expect(report.stopOutcome == .notAttempted)
+    #expect(report.cleanupVerified)
+    // The evidence itself is preserved, not rewritten to look restored.
+    #expect(report.cleanupCaptureState == .invalidOutput)
+    #expect(!report.cleanupEvidence.allDimensionsRestored)
+    #expect(trace.count("begin_start") == 0)
+    #expect(trace.count("stop") == 0)
+    #expect(trace.count("emergency_stop") == 0)
+    #expect(trace.count("logout") == 1)
+  }
+
+  @Test func incompleteNetworkProofWithoutHelperRequestStillRequiresAuthorizationClose()
+    async throws
+  {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Other NC"]))
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+    let dependencies = productM2TestDependencies(
+      snapshot: fixture.snapshot,
+      trace: trace,
+      cleanup: .unavailable,
+      logout: .rejected
+    )
+
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: dependencies
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(!report.helperMutationRequested)
+    #expect(report.authorizationClose == .rejected)
+    #expect(report.outcome == .cleanupUnproven)
+    #expect(!report.cleanupVerified)
+  }
+
+  @Test func incompleteNetworkProofAfterTheStartRequestWasSentStaysQuarantined() async throws {
+    let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
+    defer { fixture.erase() }
+    let trace = ProductM2TestTrace()
+    let dependencies = productM2TestDependencies(
+      snapshot: fixture.snapshot,
+      trace: trace,
+      cleanupAttempts: [
+        ProductM2CleanupCaptureAttempt(
+          evidence: .unavailable, state: .invalidOutput, captureInvoked: true)
+      ]
+    )
+
+    let report = await ProductM2ConnectOnceCoordinator(
+      dependencies: dependencies
+    ).run(
+      ProductM2ConnectRequest(resourceDisplayName: "Campus NC", sshTarget: .thu21)
+    )
+
+    #expect(report.helperMutationRequested)
+    #expect(report.outcome == .cleanupUnproven)
+    #expect(!report.cleanupVerified)
+    #expect(report.cleanupCaptureState == .invalidOutput)
+  }
+
   @Test func unsentLeaseStopWithExactRunningUsesOneEmergencyStop() async throws {
     let fixture = try authenticatedSnapshot(resourceXML: m2ResourceXML(["Campus NC"]))
     defer { fixture.erase() }

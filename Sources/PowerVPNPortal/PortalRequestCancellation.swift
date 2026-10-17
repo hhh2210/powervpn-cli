@@ -15,13 +15,13 @@ final class PortalRequestCancellation: @unchecked Sendable {
   }
 
   func cancel() {
-    let task = lock.withLock {
+    let installedTask = lock.withLock {
       cancelled = true
-      let installed = task
+      let installed = self.task
       self.task = nil
       return installed
     }
-    task?.cancel()
+    installedTask?.cancel()
   }
 }
 

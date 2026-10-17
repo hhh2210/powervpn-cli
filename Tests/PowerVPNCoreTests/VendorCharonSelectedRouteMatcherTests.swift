@@ -84,6 +84,25 @@ import Testing
     #expect(before.selectedRouteTokens == hostForm.selectedRouteTokens)
   }
 
+  @Test func clonedAndExpiringRowsStillCountAsSelectedRouteResidue() throws {
+    // The cleanup and cold-recovery route comparisons ignore cloned (`W`) and
+    // expiring rows; selected-route residue must not, because the matcher
+    // scans every parsed row.
+    let matcher = try selectedSnapshot(
+      family: 4,
+      routes: [("203.0.113.9", 32)]
+    ).makeSelectedRouteMatcher(requiredTargetIPv4: ipv4(203, 0, 113, 9))
+    let result = try canonicalRoute(
+      matcher,
+      rows: ["default 192.0.2.1 UGScg en0", "203.0.113.9 link#9 UHWIi utun9 5"]
+    )
+
+    #expect(result.persistent.itemCount == 1)
+    #expect(result.structural.itemCount == 2)
+    #expect(result.selectedRouteMatchCount == 1)
+    #expect(result.selectedRouteTokens.count == 1)
+  }
+
   @Test func unsupportedFamilyAndInvalidMaterialFailWithoutEcho() throws {
     let ipv6 = try selectedSnapshot(family: 6, routes: [("10.0.0.1", 32)])
     #expect(throws: VendorCharonSelectedRouteMatcherError.unsupportedFamily) {
