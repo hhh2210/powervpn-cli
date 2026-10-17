@@ -10,7 +10,7 @@ name: catalog-replay
 
 on:
   push:
-    branches: [main, rescue-mvp]
+    branches: [main]
   pull_request:
     branches: [main]
   schedule:

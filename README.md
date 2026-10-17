@@ -1,258 +1,166 @@
-# PowerVPN Native Rescue
+# powervpn
 
-状态：面向用户的临时 SSH 与持久会话建立在同一套已验证的 Portal/helper/隧道
-runtime 上；底层研究命令保留为兼容调试面。
+在 Apple Silicon Mac 上用命令行连清华 LeadSec PowerVPN 后面的服务器，代替已经停更的官方 GUI。
+第一次由你本人在终端里配置、登录、确认能 SSH 上去；之后的日常命令可以全部交给 coding agent 跑。
 
-非官方 arm64 原生 macOS 客户端，替代已停更的 LeadSec PowerVPN 3.2.1 GUI。
-它不自带隧道栈，而是驱动官方安装的特权 helper
-（/Library/PrivilegedHelperTools/com.leadsec.charon-xpc）按原协议建隧道。
-不绕过认证；前提是这台机器仍装有官方 PowerVPN。
+<img width="700" height="112" alt="image" src="https://github.com/user-attachments/assets/2baf3ae8-d342-44de-a3ea-0c0da8c93265" />
 
-## 平台与依赖
+它不自带加密隧道：默认驱动官方 PowerVPN 装好的特权 helper
+（`/Library/PrivilegedHelperTools/com.leadsec.charon-xpc`）按原协议建隧道，
+补上了官方客户端在长连接稳定性、和 Surge 这类代理共存方面的问题。
+认证照常走学校 Portal，不绕过任何登录。
 
-仅支持 macOS 14.4+ 的 arm64 机器（xpc_session 的 peer requirement 校验
-所需）。客户端驱动本机已安装的官方 x86_64 特权 helper，经 Rosetta 翻译
-运行；数据面在内核（utun + IPsec SA）。不存在 Windows/Linux 移植路径。
-构建需要 Xcode 工具链。
+## 需要什么
 
-## 快速开始
+- arm64 Mac，macOS 14.4 或更新。
+- 已安装官方 PowerVPN，并且用它成功连过一次（这样特权 helper 才会装好）。
+- 你自己的 Portal 账号，以及要连的服务器 IP、SSH 用户名，和它在 Portal 里对应的资源名。
+- 从源码构建需要完整的 Xcode（只装 Command Line Tools 不够）。
 
-前置：官方 PowerVPN 已安装，且至少完整运行过一次（特权 helper 已落位）。
+## 第一次使用（你本人在终端里做）
 
-```sh
-# 1. 安装
-brew tap hhh2210/powervpn
-brew install powervpn
-# 或源码构建：swift build --product powervpn --arch arm64
-
-# 2. 准备配置
-mkdir -p ~/.config/powervpn
-#    credentials.env：PORTAL_USERNAME / PORTAL_PASSWORD，权限 0600
-#    targets.json：cp docs/targets.example.json 改填真实值（portalOrigin
-#    与 targets 映射），权限 0600
-
-# 3. 配置 ~/.ssh/config 的 Host 块（见下文），然后选择一种工作流
-powervpn ssh lab-a -- hostname       # 临时：命令结束后清理隧道
-powervpn up lab-a                    # 持久：建立可复用后台会话
-ssh lab-a                            # 普通 SSH / IDE Remote-SSH 复用该会话
-powervpn down                        # 停止并验证清理
-```
-
-targets.json 缺失、目标不存在、字段非法时分别 fail-closed 为
-config_missing / target_unknown / target_invalid，不联系 Portal。
-
-首次验证：
+**1. 安装**
 
 ```sh
-powervpn doctor --json
+git clone https://github.com/hhh2210/powervpn-cli.git
+cd powervpn-cli
+swift build -c release --product powervpn --arch arm64
+mkdir -p ~/.local/bin && cp .build/release/powervpn ~/.local/bin/   # 或任何在 PATH 里的目录
 ```
 
-## 当前状态
+`brew install hhh2210/powervpn/powervpn` 也能装，但它装的是最近一个 release tag，可能比源码旧。
 
-- 临时 SSH：`powervpn ssh <target>` 自动建立隧道、运行系统 SSH、忠实返回远端
-  exit code，并在 SSH 结束后等待现有 runtime 验证清理。
-- 持久会话：`powervpn up <target>` 启动后台 OpenSSH ControlMaster；master 的
-  ProxyCommand 持有 PowerVPN lease，普通 SSH 和 Remote-SSH 复用同一 socket，
-  直到 `powervpn down`。
-- `powervpn status` 显示产品态；helper、launchd 和历史 crash 细节放在
-  `powervpn debug status`。
-- 若 `down` 返回 74，原会话保持 `cleanup_unproven`，不会被删除或改写为成功。
-  `powervpn recovery inspect --json` 会重新取得当前授权 profile 的内存态 route
-  matcher，并在独占 mutation lease 下做两次 bounded cold-state measurement；只有
-  inspect PASS 后，`powervpn recovery clear --json` 才写入一份独立 recovery
-  receipt 并解除 reconnect quarantine。该 receipt 明确不追认原 cleanup。
-- 2026-09-21 已对真实 `thu21` quarantine 完成该流程：cold recovery 全维 PASS，
-  随后的 `up`、普通 SSH ControlMaster 复用和 `down` 均成功，最终 cleanup verified；
-  原失败仍以独立 0600 archive 保留。
-
-## 命令
-
-Agent / 脚本（推荐，唯一需要记住的命令）：
-
-```sh
-powervpn run lab-a -- 'nvidia-smi -L'
-```
-
-`run` 复用该目标已有的持久会话；没有就 `up` 一个并保留供后续复用（`powervpn down`
-停止）。遇到 cleanup quarantine 时自动跑一次 `recovery clear --json`，仍走同一
-measured cold-baseline gate，只有 PASS 才解除；启动的瞬时失败（如 vendor helper
-crash 后首次 `up` 返回 69）自动重试一次。远端命令走 ControlMaster，不持有会话命令锁，
-多个 `run` 可并发共享同一会话。
-
-退出码契约：
-
-| 退出码 | 含义 | 调用方动作 |
-|---|---|---|
-| 远端命令自身的码 | 命令已在远端执行 | 按命令语义处理 |
-| 75 | 可重试（会话忙、启动两次失败、会话中途断开） | 稍后原样重跑 |
-| 77 | 需要人（凭据/配置、recovery 被拒、连着别的目标） | 停下，把 `next:` 行报给人 |
-
-PowerVPN 侧失败的 stderr 末尾固定为 `powervpn run: <token>` 和 `next: <action>`
-两行，借此区分恰好以 75/77 退出的远端命令。其他产品命令（`up`/`ssh`/`down`/
-`recovery`）的失败输出最后一行同样是 `next: <action>`。
-
-给 coding agent 的 skill 在 `skills/powervpn/SKILL.md`，只教 `run` 这一条命令；
-用 `skillshare install skills/powervpn && skillshare sync` 分发。
-
-临时 SSH（单条命令，结束即清理隧道）：
-
-```sh
-powervpn ssh lab-a
-powervpn ssh lab-a -- hostname
-powervpn ssh lab-a -- 'some remote command'
-```
-
-持久会话（human / IDE）：
-
-```sh
-powervpn up lab-a
-powervpn status
-ssh lab-a
-# VS Code / Cursor Remote-SSH 选择同一 Host 别名 lab-a
-powervpn down
-```
-
-清理失败恢复（只在 `status` 为 `cleanup_failed` 时）：
-
-```sh
-powervpn recovery inspect --json
-# 只有 outcome=measurement_passed 时执行：
-powervpn recovery clear --json
-```
-
-恢复 gate 要求当前授权 profile 的 selected/effective route 无残留、两次完整快照
-在 default route、DNS、interfaces/utun、persistent/structural routes、Surge 和
-vendor processes 上一致，且 helper 从初始 preflight 到最终测量始终是同一
-exact-inactive generation。任何 FAIL/UNKNOWN/取消都保留 quarantine；不会启动
-helper、SSH 或 tunnel。
-
-调试命令不属于日常产品面；用下列命令查看：
-
-```sh
-powervpn debug help
-```
-
-## 目标配置
-
-所有 current-machine 命令都先读取 `~/.config/powervpn/targets.json`。
-文件必须是当前用户拥有的普通文件且权限严格为 `0600`；产品命令用 target key
-精确查找 `targets[key]`，并从同一项解析目标 IP、SSH 用户和 Portal `resource`，
-不会要求用户输入 M2/resource-display-name 等内部参数。配置缺失、目标不存在或字段非法时返回
-`config_missing`、`target_unknown`、`target_invalid`，不会联系 Portal 或
-请求 helper 变更。闭合 schema 示例见 `docs/targets.example.json`；先复制后
-替换 `portalOrigin`、目标数字 IPv4、SSH 用户名和对应的 Portal 资源显示名：
+**2. 写账号密码**
 
 ```sh
 mkdir -p ~/.config/powervpn
+cat > ~/.config/powervpn/credentials.env <<'EOF'
+PORTAL_USERNAME=你的账号
+PORTAL_PASSWORD=你的密码
+EOF
+chmod 600 ~/.config/powervpn/credentials.env
+```
+
+权限不是 `0600` 时命令会直接拒绝运行。密码只从这个文件读，不会出现在命令行参数、日志或报告里。
+
+**3. 写要连的服务器**
+
+```sh
 cp docs/targets.example.json ~/.config/powervpn/targets.json
 chmod 600 ~/.config/powervpn/targets.json
 ```
 
-## 凭据
+然后按你自己的情况改：
 
---non-interactive 模式从 ~/.config/powervpn/credentials.env（0600）读：
-
-```sh
-PORTAL_USERNAME=...
-PORTAL_PASSWORD=...
+```json
+{
+  "portalOrigin": "https://<Portal 地址>:<端口>",
+  "targets": {
+    "lab-a": { "host": "<服务器 IPv4>", "user": "<SSH 用户名>", "resource": "<Portal 里的资源名>" }
+  }
+}
 ```
 
-不加 --non-interactive 时走 TTY 模式，操作者当场输入。凭据绝不进
-argv、日志或报告。
+- `lab-a` 是你给这台机器起的名字，后面所有命令都用它。
+- `portalOrigin` 就是你在浏览器里登录 VPN 门户的地址。
+- `resource` 必须和官方客户端资源列表里的名字一字不差。
+- 可以写多台；不过同一时间只能连其中一台。
 
-## Remote-SSH 配置
+**4. 配 SSH**
 
-Host 块只描述普通 SSH 目标和 ControlMaster socket。`powervpn up` 在启动 master
-时临时注入内部 ProxyCommand；后续 `ssh lab-a` 和 Remote-SSH 只复用这个 master，
-不会重复 Portal/helper startup。无需给 Host 块永久写入 PowerVPN ProxyCommand。
+在 `~/.ssh/config` 里给每个目标加一段，名字和 `targets.json` 里的一致：
 
 ```text
 Host lab-a
-  HostName <numeric-ipv4>
-  User <remote-user>
-  Port 22
+  HostName <服务器 IPv4>
+  User <SSH 用户名>
   ControlMaster auto
   ControlPath ~/.ssh/cm-%C
   ControlPersist 8h
 ```
 
-规则：
+`HostName` 和 `User` 必须和 `targets.json` 对上。不要在这里写 PowerVPN 的 `ProxyCommand`，
+需要时 `powervpn up` 会自己注入。
 
-- HostName 必须与 `targets.json` 的数字 IPv4 一致。
-- User 必须与 `targets.json` 一致。
-- `ControlMaster auto` 与绝对展开后的 `ControlPath` 是持久模式的复用边界；
-  `powervpn up` 会拒绝接管不是它创建的现有 master。
-- 临时 `powervpn ssh` 强制 `ControlMaster=no`，所以不会错误复用持久 lease。
+**5. 自检并连一次**
 
-`powervpn up lab-a` 返回 READY 后，`ssh lab-a` 就是日常用法；VS Code / Cursor
-Remote-SSH 选择同一别名。
+```sh
+powervpn doctor              # 应显示 ready；否则会指出第一个要修的问题
+powervpn ssh lab-a -- hostname
+```
 
-## 工程约束
+第二条能打印出服务器的主机名，就说明 Portal 登录、隧道和 SSH 全都通了。
 
-- 协议保真不变量：每个出站字节都必须能溯源到 vendor 证据（从冻结的官方
-  客户端逆向出的字段与序列），不发明、不猜。
-- value-free 报告：JSON 报告为 schema 15，全部 closed enum token，
-  不携带地址、用户名等值。
-- M2 是一次性交易：单调 120 秒预算、生成围栏（generation fencing）、
-  有界清理、授权材料用后擦除。
-- proxy 退出码：0 成功且清理已验证；64 用法错误；69 helper 变更前不可用；
-  70 已验证清理后的运行失败；74 清理未证明（不要重试）；77 批准被拒或
-  不可用；130 取消。
+想长时间挂着（比如给 VS Code / Cursor Remote-SSH 用）：
 
-## 已知 vendor 缺陷与客户端对策
+```sh
+powervpn up lab-a    # 建立后台会话
+ssh lab-a            # 普通 ssh 和 Remote-SSH 都复用这条会话
+powervpn down        # 用完断开，并确认路由已恢复
+```
 
-helper 是官方闭件，不可修改；以下缺陷都在客户端侧缓解：
+## 交给 Agent
 
-- 所有命令响应只经 ordinary connection channel 返回，reply callback 永远
-  不回业务 ACK。客户端把 ReplyFailed 归为 replyUnavailable（非终结），
-  继续在 ordinary channel 上等结果。
-- 异步 status 通知会读一个未 retain 的全局请求指针（use-after-free），
-  迟到的 CHILD_SA install/delete 通知可触发 helper SIGILL。客户端在 stop
-  后驻留 10 秒 drain，并在 route 前对 status 通知设 400/800ms 静默门。
-  teardown 臂无法根治（崩溃可能晚于任何有限 drain），install 臂已缓解。
-- Portal catalog 偶发服务端退化（拒绝列举）。客户端做一次 fresh-login
-  重试，再失败即如实上报失败判别 token。
+自检通过之后，Agent 只需要一条命令：
 
-## Native strongSwan 后端（实验，数据面已打通）
+```sh
+powervpn run lab-a -- 'nvidia-smi -L'
+```
 
-除了驱动厂商 helper，仓库里还有一条不依赖 helper 的路线：用补丁版 strongSwan
-6.0.7 自己的 charon（kernel-libipsec + VICI）直接连 NC 资源，原生 arm64，
-不经 Rosetta。2026-10-17 已在真实网关上验证：补上 `NEW CLIENT` Vendor ID
-（`charon.leadsec_new_client_vid = yes`）后，A/B 对照 6/6 对 0/6，随后连续 10/10，
-每次都 `ssh` 成功。
+`run` 会复用已有的会话，没有就自动建一个。遇到常见的瞬时失败，它会自己重试或恢复。
+多个 `run` 可以同时跑，共用同一条会话。
 
-- 补丁：`patches/strongswan-6.0.7/0004-*.patch`，清单 `native-series.json`，
-  需先应用 0001–0003。
-- Portal→VICI 映射与实验驱动：`NativeTrialMaterial`、`NativeTrialPortalBridge`、
-  `powervpn-native-trial`。
-- 根因、对照数据和排除过的方向：`docs/evidence/native-strongswan-backend.md`。
+把 `skills/powervpn/SKILL.md` 装进 agent 的 skill 目录（Claude Code 是 `~/.claude/skills/powervpn/`），
+它就知道该怎么用 `run`，什么时候自己恢复，什么时候该来找你。
+需要人出面的只有这几种情况：输入密码、短信验证码、Touch ID，以及 macOS 弹出的授权框。
 
-它还没有接进 `powervpn run/up/ssh`，日常使用仍走厂商 helper。
+退出码：
 
-## 构建与目录
+| 退出码 | 意思 | 怎么办 |
+|---|---|---|
+| 远端命令自己的码 | 命令已在服务器上跑完 | 按命令本身处理 |
+| 75 | 暂时不行（会话忙、启动失败、中途断开） | 等一会儿原样重跑 |
+| 77 | 卡住了 | 看 stderr 最后的 `next:` 行，照着做 |
+
+PowerVPN 自己出错时，stderr 最后两行固定是 `powervpn run: <原因>` 和 `next: <下一步>`。
+没有这两行，说明 75/77 是远端命令自己返回的。
+
+## 出问题时
+
+- 先跑 `powervpn doctor`，它会指出第一个要修的问题。
+- `next:` 提示 `powervpn recovery …`：说明上次断开时没能确认路由已恢复，会话被隔离了。
+  先跑 `powervpn recovery inspect --json`，再跑 `powervpn recovery clear --json`，
+  后者只在实测网络状态干净时才会解除隔离。
+- `next:` 提示 `powervpn repair vendor-log --json`：官方日志文件丢了，或者权限不对。
+  跑这条命令会弹一次 macOS 管理员授权，确认后修复。
+- 开发和底层调试命令都在 `powervpn debug help` 里，日常用不到。
+
+## Native strongSwan 后端（实验）
+
+另一条路线是不用官方 helper，改用打过补丁的 strongSwan 6.0.7 自己的 charon 直连，
+原生 arm64，不经过 Rosetta。2026-10-17 在真实网关上跑通：补上 `NEW CLIENT` Vendor ID 之后，
+对照实验 6/6 对 0/6，随后连续 10/10 都能 SSH 上去。
+它还没接进 `run` / `up` / `ssh`，日常仍走官方 helper。
+补丁和清单在 `patches/strongswan-6.0.7/`，过程和数据见
+`docs/evidence/native-strongswan-backend.md`。
+
+## 开发
 
 ```sh
 swift build --product powervpn --arch arm64
-scripts/hermetic_swift_test.sh
+scripts/hermetic_swift_test.sh    # swift test，但读不到本机真实的 PowerVPN 状态
 ```
-
-当前 test inventory 为 919 项，全量通过。`scripts/hermetic_swift_test.sh`
-即 `swift test` 外加 `sandbox-exec` 隔离：测试不能读写本机真实的
-PowerVPN 状态、配置与厂商目录，所以有 live session 时也能放心跑。
 
 ```text
 Sources/
-  PowerVPNCore/    vendor helper XPC 控制连接与协议模型
-  PowerVPNPortal/  Portal 登录、凭据、cookie、catalog
-  PowerVPNProduct/ M1/M2/proxy 产品编排与状态机
-  PowerVPNCLI/     argv 解析与命令入口
-  PowerVPNNativeTrial/ native strongSwan 后端实验驱动
-patches/strongswan-6.0.7/ charon 补丁序列
+  PowerVPNCore/         helper XPC 控制、VICI、路由与清理判定
+  PowerVPNPortal/       Portal 登录、凭据、cookie、资源目录
+  PowerVPNProduct/      run/up/ssh/down 的编排与状态机
+  PowerVPNCLI/          命令行入口
+  PowerVPNNativeTrial/  native strongSwan 后端的实验驱动
+patches/strongswan-6.0.7/  charon 补丁序列
+skills/powervpn/           给 agent 的 skill
+docs/                      协议取证、设计和历史记录
 ```
 
-## 历史证据
-
-Rescue R1/R2、checkpoint 序列、strongSwan 5.8.0 溯源、expandrule 线协议
-契约、R2 TLS 信任链等协议取证材料完整保留在 docs/（含 docs/evidence/、
-docs/progress/）。它们不再是产品关键路径，但仍是理解协议约束的第一手
-依据。
+`main` 是唯一的长期分支，功能分支通过 PR 合进来，发布用 tag（见 `docs/branching.md`）。
