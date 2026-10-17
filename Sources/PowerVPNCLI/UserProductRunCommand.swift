@@ -3,14 +3,26 @@ import Foundation
 /// `powervpn run <target> -- <command...>` is the one-call entrypoint for agents and scripts.
 ///
 /// It reuses the persistent session for `target`, starts one when none is active, clears a
-/// cleanup quarantine only through the existing measured `recovery clear` gate, retries one
-/// transient start failure, and then runs the command over the session's ControlMaster.
+/// cleanup quarantine only through the existing measured `recovery clear` gate, retries
+/// transient start and recovery failures within fixed bounds, and then runs the command over the
+/// session's ControlMaster.
 /// The command itself runs without the session command lock, so several `run` calls can share
 /// one session concurrently.
 ///
 /// Exit codes: the remote command's own code once it ran; 75 retryable; 77 needs a human.
 /// Every PowerVPN-side failure ends stderr with `powervpn run: <token>` and `next: <action>`,
 /// which distinguishes it from a remote command that happens to exit 75 or 77.
+///
+/// Worst-case time `run` adds by sleeping (the injected `sleepMilliseconds`; each recovery or
+/// start attempt also costs its own run time):
+/// - settle (`settleLocalState`): at most 19 s per use, one use after each `up` that leaves a
+///   quarantine (exit 74) and one before each vendor-helper preflight retry;
+/// - recovery retries: at most 3 waits (the attempt cap is 4): 10 s after `selection_rejected`,
+///   3 s after `cold_baseline_rejected`, one settle after transient vendor-helper preflight
+///   findings. 41 s at most (two settles and one cold-baseline wait), 9 s for the common
+///   cold-baseline flake;
+/// - `local_safety_check_failed` start retries: 2 retries, each a 3 s / 6 s backoff plus one
+///   settle, so 47 s at most.
 enum UserProductRunExit {
   static let retryable: Int32 = 75
   static let needsHuman: Int32 = 77
@@ -20,12 +32,17 @@ private let runStepLimit = 40
 private let runBusyWaitLimit = 30
 private let runBusyWaitMilliseconds = 2_000
 private let runStartRetryMilliseconds = 3_000
+private let runSettlePollLimit = 20
+private let runSettlePollMilliseconds = 1_000
 
-/// Start failures that a retry cannot fix: credentials/configuration or a local safety gate.
+/// Start failures that a retry cannot fix: credentials or configuration.
 private let runHumanStartFailures: Set<String> = [
-  "local_safety_check_failed",
-  "runtime_unavailable",
+  "runtime_unavailable"
 ]
+
+/// `local_safety_check_failed` also names transient states (the vendor helper still exiting, the
+/// mutation lease briefly held), so `run` retries it with these backoffs before giving up.
+private let runLocalSafetyRetryBackoffsMilliseconds = [3_000, 6_000]
 
 func runUserProductRun(
   arguments: [String],
@@ -64,6 +81,7 @@ func runUserProductRun(
   var notes: [String] = []
   var recoveryAttempts = 0
   var startFailures = 0
+  var localSafetyRetries = 0
   var busyWaits = 0
 
   func waitWhileBusy() async -> Bool {
@@ -120,19 +138,19 @@ func runUserProductRun(
           return runBusy(rerun)
         default:
           let detail = recoveryRejectionDetail(recovery.standardOutput)
-          // The Portal catalog intermittently yields no unique resource; a later measured
-          // attempt can pass, so only that class is retried. Local preflight failures are not.
-          if let failure = detail.failure, runRetryableRecoveryFailures.contains(failure),
-            recoveryAttempts < runRecoveryAttemptLimit
-          {
-            await dependencies.sleepMilliseconds(runRecoveryRetryDelayMilliseconds)
-            continue
+          // Only flaky classes are retried: the Portal catalog yielding no unique resource, two
+          // back-to-back snapshots that differ while Surge's TUN churns host routes, and a
+          // vendor helper that is still exiting. Persistent local preflight failures are not.
+          if let retry = recoveryRetry(for: detail), recoveryAttempts < retry.maxAttempts {
+            if !retry.settlesVendor {
+              await dependencies.sleepMilliseconds(retry.delayMilliseconds)
+              continue
+            }
+            if await settleLocalState(dependencies: dependencies) { continue }
           }
           return runFailure(
             "recovery_rejected",
-            detail.findings.isEmpty
-              ? "PowerVPN: the measured cold-baseline check did not pass; reconnect stays quarantined."
-              : "PowerVPN: local preflight failed (\(detail.findings.joined(separator: ", "))); reconnect stays quarantined.",
+            recoveryRejectionMessage(detail, attempts: recoveryAttempts),
             exitCode: UserProductRunExit.needsHuman,
             next: detail.nextAction ?? "powervpn recovery inspect --json"
           )
@@ -155,13 +173,33 @@ func runUserProductRun(
       if await waitWhileBusy() { continue }
       return runBusy(rerun)
     case 74:
-      continue  // The start left a quarantine; the next pass runs the measured recovery once.
+      // The start left a quarantine. The vendor helper crashes on every stop and stays visible
+      // while the crash report is captured, so let it settle before the measured recovery.
+      _ = await settleLocalState(dependencies: dependencies)
+      continue
     default:
-      if let failure = try? dependencies.stateStore.load()?.failure,
-        runHumanStartFailures.contains(failure)
-      {
+      let failure = (try? dependencies.stateStore.load())?.failure
+      if let failure, runHumanStartFailures.contains(failure) {
         return runFailure(
           failure,
+          firstLine(of: up.standardError),
+          exitCode: UserProductRunExit.needsHuman,
+          next: "powervpn doctor --json"
+        )
+      }
+      if failure == "local_safety_check_failed" {
+        // A missing or unsafe vendor log, or a vendor process that never goes away, is not
+        // transient: retry only while the log is fine and the helper settles.
+        if localSafetyRetries < runLocalSafetyRetryBackoffsMilliseconds.count,
+          dependencies.vendorLogFinding() == .bounded
+        {
+          await dependencies.sleepMilliseconds(
+            runLocalSafetyRetryBackoffsMilliseconds[localSafetyRetries])
+          localSafetyRetries += 1
+          if await settleLocalState(dependencies: dependencies) { continue }
+        }
+        return runFailure(
+          "local_safety_check_failed",
           firstLine(of: up.standardError),
           exitCode: UserProductRunExit.needsHuman,
           next: "powervpn doctor --json"
@@ -272,22 +310,103 @@ private func firstLine(of text: String) -> String {
   return line ?? "PowerVPN: the session could not start."
 }
 
+/// Waits until no vendor process is visible, the helper is launchd-inactive and the mutation
+/// lease is free, polling every second for at most `runSettlePollLimit` polls (19 s of sleeping).
+/// Returns whether the local state settled; callers go on either way, because the measured
+/// recovery names whatever is still wrong.
+private func settleLocalState(dependencies: UserProductCommandDependencies) async -> Bool {
+  for poll in 0..<runSettlePollLimit {
+    if dependencies.mutationLeaseAvailable(), await dependencies.vendorQuiescent() {
+      return true
+    }
+    if poll + 1 < runSettlePollLimit {
+      await dependencies.sleepMilliseconds(runSettlePollMilliseconds)
+    }
+  }
+  return false
+}
+
+private struct RecoveryRejectionDetail {
+  let failure: String?
+  let findings: [String]
+  /// Names of the cold-baseline assessment dimensions that failed; values are never included.
+  let failedChecks: [String]
+  let nextAction: String?
+}
+
 /// Reads the value-free fields a rejected `recovery clear` reports, so `run` can name the failed
-/// preflight condition and its specific next step instead of a generic inspect.
-private func recoveryRejectionDetail(
-  _ json: String
-) -> (failure: String?, findings: [String], nextAction: String?) {
+/// preflight condition or assessment dimension and its specific next step instead of a generic
+/// inspect.
+private func recoveryRejectionDetail(_ json: String) -> RecoveryRejectionDetail {
   guard
     let object = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
-  else { return (nil, [], nil) }
+  else {
+    return RecoveryRejectionDetail(failure: nil, findings: [], failedChecks: [], nextAction: nil)
+  }
   let measurement = object["measurement"] as? [String: Any]
-  return (
-    measurement?["failure"] as? String,
-    measurement?["preflightFindings"] as? [String] ?? [],
-    object["nextAction"] as? String
+  return RecoveryRejectionDetail(
+    failure: measurement?["failure"] as? String,
+    findings: measurement?["preflightFindings"] as? [String] ?? [],
+    failedChecks: failedAssessmentChecks(measurement?["captureAssessment"] as? [String: Any]),
+    nextAction: object["nextAction"] as? String
   )
 }
 
-private let runRecoveryAttemptLimit = 3
-private let runRecoveryRetryDelayMilliseconds = 10_000
-private let runRetryableRecoveryFailures: Set<String> = ["selection_rejected"]
+/// The `NetworkColdRecoveryAssessment` keys that report a failed dimension: Bool fields that are
+/// false, and a selected-route residue count above zero. `passed` and the constant `contains*`
+/// flags are not dimensions. Bool is told apart from the 0/1 counts through the CFBoolean type.
+private func failedAssessmentChecks(_ assessment: [String: Any]?) -> [String] {
+  (assessment ?? [:]).compactMap { key, value -> String? in
+    guard key != "passed", !key.hasPrefix("contains"), let number = value as? NSNumber
+    else { return nil }
+    if CFGetTypeID(number) == CFBooleanGetTypeID() { return number.boolValue ? nil : key }
+    return key.hasSuffix("ResidueCount") && number.intValue > 0 ? key : nil
+  }.sorted()
+}
+
+private func recoveryRejectionMessage(_ detail: RecoveryRejectionDetail, attempts: Int) -> String {
+  let attemptSuffix = attempts > 1 ? " after \(attempts) attempts" : ""
+  if !detail.findings.isEmpty {
+    return
+      "PowerVPN: local preflight failed (\(detail.findings.joined(separator: ", ")))\(attemptSuffix); reconnect stays quarantined."
+  }
+  let checks =
+    detail.failedChecks.isEmpty ? "" : " (\(detail.failedChecks.joined(separator: ", ")))"
+  return
+    "PowerVPN: the measured cold-baseline check did not pass\(checks)\(attemptSuffix); reconnect stays quarantined."
+}
+
+/// Largest `RunRecoveryRetry.maxAttempts`; the quarantine loop gives up once it is reached.
+private let runRecoveryAttemptLimit = 4
+
+private struct RunRecoveryRetry {
+  /// Total recovery attempts allowed for this class of rejection, counting the first one.
+  let maxAttempts: Int
+  let delayMilliseconds: Int
+  /// Wait for the vendor helper to settle instead of sleeping `delayMilliseconds`.
+  let settlesVendor: Bool
+}
+
+/// Transient vendor-process states: the helper crashes on every stop under macOS 27.2/Rosetta and
+/// stays visible for several seconds. Any other finding (GUI running, DNS recovery file, vendor
+/// log) needs a human or a repair, so one of those anywhere in the list rules out a retry.
+private let runTransientPreflightFindings: Set<String> = [
+  "vendor_helper_running",
+  "vendor_helper_not_inactive",
+  "vendor_auxiliary_helper_running",
+]
+
+private func recoveryRetry(for detail: RecoveryRejectionDetail) -> RunRecoveryRetry? {
+  switch detail.failure {
+  case "selection_rejected":
+    return RunRecoveryRetry(maxAttempts: 3, delayMilliseconds: 10_000, settlesVendor: false)
+  case "cold_baseline_rejected":
+    // About a third of attempts fail because two back-to-back snapshots differ.
+    return RunRecoveryRetry(maxAttempts: 4, delayMilliseconds: 3_000, settlesVendor: false)
+  case "preflight_rejected"
+  where !detail.findings.isEmpty && Set(detail.findings).isSubset(of: runTransientPreflightFindings):
+    return RunRecoveryRetry(maxAttempts: 3, delayMilliseconds: 0, settlesVendor: true)
+  default:
+    return nil
+  }
+}
