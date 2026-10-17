@@ -17,16 +17,23 @@ final class VendorCharonControlConnectionDrain: @unchecked Sendable {
     _ queue: DispatchQueue,
     _ expiration: @escaping @Sendable () -> Void
   ) -> @Sendable () -> Void {
-    let timer = DispatchSource.makeTimerSource(queue: queue)
-    timer.schedule(
+    let timer = DrainTimer(DispatchSource.makeTimerSource(queue: queue))
+    timer.source.schedule(
       deadline: .now() + .milliseconds(productionDurationMilliseconds)
     )
-    timer.setEventHandler(handler: expiration)
-    timer.resume()
+    timer.source.setEventHandler(handler: expiration)
+    timer.source.resume()
     return {
-      timer.setEventHandler {}
-      timer.cancel()
+      timer.source.setEventHandler {}
+      timer.source.cancel()
     }
+  }
+
+  /// Swift 6.0 SDKs (Xcode 16.2) do not mark DispatchSourceTimer Sendable;
+  /// the source is only touched through its own thread-safe API.
+  private final class DrainTimer: @unchecked Sendable {
+    let source: any DispatchSourceTimer
+    init(_ source: any DispatchSourceTimer) { self.source = source }
   }
 
   private let scheduler: VendorCharonConnectionDrainScheduler
