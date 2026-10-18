@@ -5,9 +5,19 @@
 # Nothing here needs root. Requires Xcode command line tools and Homebrew
 # autoconf automake libtool gettext bison gperf pkg-config openssl@3.
 #
-# usage: scripts/native/build_runtime.sh [out-dir]   (default ~/.cache/powervpn-native)
+# usage: scripts/native/build_runtime.sh [--source DIR] [out-dir]
+#   out-dir defaults to ~/.cache/powervpn-native. Without --source the pinned
+#   upstream tag is cloned with git; --source takes an unpacked, unmodified
+#   strongSwan 6.0.7 source tree instead (the Homebrew formula uses this).
 
 set -eu
+
+source_tree=
+if [ "${1:-}" = --source ]; then
+	[ $# -ge 2 ] || { echo "build_runtime: --source needs a directory" >&2; exit 1; }
+	source_tree=$2
+	shift 2
+fi
 
 repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd -P)
 patch_dir="$repo_root/patches/strongswan-6.0.7"
@@ -39,22 +49,35 @@ build="$out/build"
 stage="$out/stage"
 mkdir -p "$out"
 
-if [ ! -d "$src/.git" ]; then
-	git clone --quiet --depth 1 --branch "$UPSTREAM_TAG" "$UPSTREAM" "$src"
-fi
-[ "$(git -C "$src" rev-parse 'HEAD^{commit}' 2>/dev/null || true)" != "" ] || fail "bad checkout: $src"
+if [ -n "$source_tree" ]; then
+	grep -q '^AC_INIT(\[strongSwan\],\[6\.0\.7\])' "$source_tree/configure.ac" 2>/dev/null ||
+		fail "not a strongSwan $UPSTREAM_TAG source tree: $source_tree"
+	rm -rf "$src"
+	ditto "$source_tree" "$src"
+	for patch in "$patch_dir"/000[1-4]-*.patch; do
+		patch -d "$src" -p1 --forward --batch --quiet -i "$patch" >/dev/null ||
+			fail "patch does not apply: $(basename "$patch")"
+	done
+	! find "$src" -name '*.rej' | grep -q . || fail "patch left rejects in $src"
+	echo "build_runtime: patched source tree for $UPSTREAM_TAG"
+else
+	if [ ! -d "$src/.git" ]; then
+		git clone --quiet --depth 1 --branch "$UPSTREAM_TAG" "$UPSTREAM" "$src"
+	fi
+	[ "$(git -C "$src" rev-parse 'HEAD^{commit}' 2>/dev/null || true)" != "" ] || fail "bad checkout: $src"
 
-# Reset to the pinned upstream commit, then apply the series in order.
-base=$(git -C "$src" rev-list -n 1 "$UPSTREAM_TAG")
-[ "$base" = "$UPSTREAM_COMMIT" ] || fail "tag $UPSTREAM_TAG is $base, expected $UPSTREAM_COMMIT"
-git -C "$src" checkout --quiet --detach "$base"
-git -C "$src" reset --quiet --hard "$base"
-git -C "$src" clean -qfdx
-for patch in "$patch_dir"/000[1-4]-*.patch; do
-	git -C "$src" -c user.name=powervpn -c user.email=powervpn@localhost \
-		am --quiet --keep-cr "$patch" || fail "patch does not apply: $(basename "$patch")"
-done
-echo "build_runtime: patched $(git -C "$src" rev-parse --short HEAD) on $UPSTREAM_TAG"
+	# Reset to the pinned upstream commit, then apply the series in order.
+	base=$(git -C "$src" rev-list -n 1 "$UPSTREAM_TAG")
+	[ "$base" = "$UPSTREAM_COMMIT" ] || fail "tag $UPSTREAM_TAG is $base, expected $UPSTREAM_COMMIT"
+	git -C "$src" checkout --quiet --detach "$base"
+	git -C "$src" reset --quiet --hard "$base"
+	git -C "$src" clean -qfdx
+	for patch in "$patch_dir"/000[1-4]-*.patch; do
+		git -C "$src" -c user.name=powervpn -c user.email=powervpn@localhost \
+			am --quiet --keep-cr "$patch" || fail "patch does not apply: $(basename "$patch")"
+	done
+	echo "build_runtime: patched $(git -C "$src" rev-parse --short HEAD) on $UPSTREAM_TAG"
+fi
 
 PATH="$brew_prefix/opt/bison/bin:$brew_prefix/opt/gettext/bin:$brew_prefix/bin:$PATH"
 export PATH
@@ -101,5 +124,7 @@ for artifact in libexec/ipsec/charon lib/ipsec/libcharon.0.dylib \
 done
 
 (cd "$root" && find . -type f | sort | xargs shasum -a 256) > "$out/runtime.sha256"
-git -C "$src" log --format='%H %s' "$base..HEAD" > "$out/patches.txt"
+# The Homebrew keg ships this tar, so Homebrew never relocates the Mach-O files.
+tar -c -f "$out/runtime.tar" -C "$root" --no-acls --no-xattrs --no-mac-metadata .
+(cd "$patch_dir" && shasum -a 256 000[1-4]-*.patch) > "$out/patches.txt"
 echo "build_runtime: staged $root"

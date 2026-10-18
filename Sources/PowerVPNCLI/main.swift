@@ -95,6 +95,13 @@ struct PowerVPNCommand {
       if result.exitCode != 0 {
         Foundation.exit(result.exitCode)
       }
+    case "native":
+      writeUserProductCommandResult(runNativeCommand(arguments))
+    case "--version", "version":
+      guard arguments.count == 1 else {
+        throw CLIError.invalidArguments("usage: powervpn --version")
+      }
+      print(powervpnVersion)
     case "help", "--help", "-h":
       printCLIUsage()
     default:

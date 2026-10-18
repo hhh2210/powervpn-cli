@@ -5,6 +5,10 @@
 #   swift build -c release --product powervpn-native-helper --arch arm64
 #   sudo scripts/native/install.sh
 #
+# Homebrew installs run `sudo powervpn native install`, which calls this script
+# with POWERVPN_NATIVE_RUNTIME_ARCHIVE (a tar of the runtime tree, so Homebrew
+# never rewrites its Mach-O files) and POWERVPN_NATIVE_HELPER.
+#
 # It installs our own files only: the patched charon runtime and the helper
 # under /Library/PrivilegedHelperTools/com.hhh2210.powervpn-native, and one
 # LaunchDaemon. Nothing of the official PowerVPN client is touched.
@@ -29,11 +33,16 @@ owner_uid=${SUDO_UID:-}
 owner_home=$(dscl . -read "/Users/$(id -un "$owner_uid")" NFSHomeDirectory | sed 's/^NFSHomeDirectory: //')
 repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd -P)
 
+archive=${POWERVPN_NATIVE_RUNTIME_ARCHIVE:-}
 runtime=${POWERVPN_NATIVE_RUNTIME:-"$owner_home/.cache/powervpn-native/stage$HOME_DIR/runtime"}
 helper=${POWERVPN_NATIVE_HELPER:-"$repo_root/.build/release/powervpn-native-helper"}
-[ -x "$runtime/libexec/ipsec/charon" ] || fail "no runtime at $runtime (run scripts/native/build_runtime.sh first)"
+if [ -n "$archive" ]; then
+	[ -f "$archive" ] && [ ! -L "$archive" ] || fail "no runtime archive at $archive"
+else
+	[ -x "$runtime/libexec/ipsec/charon" ] || fail "no runtime at $runtime (run scripts/native/build_runtime.sh first)"
+	file "$runtime/libexec/ipsec/charon" | grep -q 'Mach-O 64-bit.*arm64' || fail "runtime is not arm64"
+fi
 [ -x "$helper" ] || fail "no helper at $helper (swift build -c release --product powervpn-native-helper)"
-file "$runtime/libexec/ipsec/charon" | grep -q 'Mach-O 64-bit.*arm64' || fail "runtime is not arm64"
 file "$helper" | grep -q 'Mach-O 64-bit.*arm64' || fail "helper is not arm64"
 
 # Prepare and validate a fresh tree before stopping the running backend. Never
@@ -44,7 +53,20 @@ parent=/Library/PrivilegedHelperTools
 new_home=$(mktemp -d "$parent/.powervpn-native.XXXXXXXX")
 trap 'rm -rf "$new_home"' EXIT HUP INT TERM
 chmod -N "$new_home"
-ditto --noacl --noextattr --noqtn "$runtime" "$new_home/runtime"
+if [ -n "$archive" ]; then
+	# bsdtar refuses absolute and ".." members by default; drop owners, ACLs,
+	# extended attributes and macOS metadata so only file contents and modes land.
+	mkdir "$new_home/runtime"
+	tar -x -f "$archive" -C "$new_home/runtime" --no-same-owner --no-acls --no-xattrs --no-mac-metadata ||
+		fail "could not unpack $archive"
+	[ -x "$new_home/runtime/libexec/ipsec/charon" ] || fail "archive has no libexec/ipsec/charon"
+	file "$new_home/runtime/libexec/ipsec/charon" | grep -q 'Mach-O 64-bit.*arm64' || fail "runtime is not arm64"
+else
+	ditto --noacl --noextattr --noqtn "$runtime" "$new_home/runtime"
+fi
+# Recorded from the tree actually installed; `powervpn doctor` compares it with
+# the build's manifest to tell whether a Homebrew upgrade needs a reinstall.
+(cd "$new_home/runtime" && find . -type f | sort | xargs shasum -a 256) > "$new_home/runtime.sha256"
 install -m 755 "$helper" "$new_home/powervpn-native-helper"
 printf '%s\n' "$owner_uid" > "$new_home/owner-uid"
 targets=${POWERVPN_NATIVE_TARGETS:-"$owner_home/.config/powervpn/targets.json"}
@@ -103,7 +125,7 @@ chown -R -P root:wheel "$new_home"
 chmod -R -P -N "$new_home"
 chmod -R -P go-w,u-s,g-s "$new_home"
 chmod 755 "$new_home" "$new_home/openssl-empty"
-chmod 644 "$new_home/strongswan.conf" "$new_home/owner-uid" "$new_home/allowed-hosts"
+chmod 644 "$new_home/strongswan.conf" "$new_home/owner-uid" "$new_home/allowed-hosts" "$new_home/runtime.sha256"
 "$new_home/powervpn-native-helper" verify-install "$new_home" || fail "unsafe runtime tree"
 
 if launchctl print "system/$LABEL" >/dev/null 2>&1; then
