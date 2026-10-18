@@ -1,3 +1,5 @@
+import Foundation
+import PowerVPNPortal
 import PowerVPNProduct
 
 struct ProxyCommandResult: Equatable, Sendable {
@@ -47,6 +49,7 @@ struct ProxyTunnelOpenFailure: Equatable, Sendable {
   var firstBadEvent: ProductM2BadEvent? = nil
   var selectionFailureClass: ProductM2SelectionFailureClass? = nil
   var resourceCatalogFailure: ProductResourceCatalogFailure? = nil
+  var nativeFailure: NativeTunnelFailure? = nil
   let helperMutationRequested: Bool
   let serverContactRequested: Bool
   let cleanupVerified: Bool
@@ -91,6 +94,62 @@ func openProductProxyTunnel(
       ))
   }
 }
+/// Native backend: the mutation lease is held for the whole session, exactly
+/// like the vendor runtime, so `up`/`run`/`down` see the same busy signal.
+func openNativeProxyTunnel(
+  configuration: PowerVPNTargetsConfiguration,
+  request: ProductM2ConnectRequest
+) async -> ProxyTunnelOpenResult {
+  guard let mutationLease = try? ProductMutationLease.acquireCurrentMachine() else {
+    return .failed(nativeOpenFailure(.busy))
+  }
+  switch await NativeTunnel.open(
+    configuration: configuration, targetKey: request.sshTarget.rawValue)
+  {
+  case .success(let tunnel):
+    return .opened(
+      NativeProxyTunnelLease(tunnel: tunnel, mutationLease: mutationLease),
+      helperMutationRequested: true,
+      serverContactRequested: true
+    )
+  case .failure(let failure):
+    withExtendedLifetime(mutationLease) {}
+    return .failed(nativeOpenFailure(failure))
+  }
+}
+
+private func nativeOpenFailure(_ failure: NativeTunnelFailure) -> ProxyTunnelOpenFailure {
+  // NativeTunnel.open removes whatever it created before it reports a failure.
+  ProxyTunnelOpenFailure(
+    failure: failure == .cancelled ? .cancelled : nil,
+    nativeFailure: failure,
+    helperMutationRequested: false,
+    serverContactRequested: failure != .helperUnavailable && failure != .charonUnavailable,
+    cleanupVerified: true
+  )
+}
+
+private final class NativeProxyTunnelLease: ProxyTunnelLeasing, @unchecked Sendable {
+  let tunnel: NativeTunnel
+  private var mutationLease: ProductMutationLease?
+  private let lock = NSLock()
+
+  init(tunnel: NativeTunnel, mutationLease: ProductMutationLease) {
+    self.tunnel = tunnel
+    self.mutationLease = mutationLease
+  }
+
+  func permitsIPv4(_ address: UInt32) async -> Bool {
+    address == tunnel.targetIPv4
+  }
+
+  func shutdown(budget _: ProductM2CleanupBudget) async -> ProxyTunnelShutdown {
+    let verified = await tunnel.shutdown()
+    lock.withLock { mutationLease = nil }
+    return ProxyTunnelShutdown(cleanupVerified: verified)
+  }
+}
+
 private struct ProductProxyTunnelLease: ProxyTunnelLeasing {
   let lease: ProductPersistentTunnelLease
 

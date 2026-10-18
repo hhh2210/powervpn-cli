@@ -28,6 +28,24 @@ import Testing
     }
   }
 
+  @Test func backendDefaultsToVendorAndAcceptsOnlyKnownValues() throws {
+    #expect(try PowerVPNTargetsConfiguration.decode(syntheticTargetsJSON()).backend == .vendor)
+    #expect(
+      try PowerVPNTargetsConfiguration.decode(
+        syntheticTargetsJSON(topLevelSuffix: ",\"backend\":\"native\"")
+      ).backend == .native)
+    #expect(
+      try PowerVPNTargetsConfiguration.decode(
+        syntheticTargetsJSON(topLevelSuffix: ",\"backend\":\"vendor\"")
+      ).backend == .vendor)
+    for value in ["\"Native\"", "\"\"", "1", "null"] {
+      #expect(throws: PowerVPNTargetsConfigurationError.invalid) {
+        _ = try PowerVPNTargetsConfiguration.decode(
+          syntheticTargetsJSON(topLevelSuffix: ",\"backend\":\(value)"))
+      }
+    }
+  }
+
   @Test func malformedExtraAndCredentialShapedFieldsFailClosed() {
     for data in [
       syntheticTargetsJSON(

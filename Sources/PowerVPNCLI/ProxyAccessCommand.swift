@@ -32,16 +32,25 @@ func runCurrentMachineProxyCommand(
   let resolveTarget: @Sendable (String) throws -> ProductM2SSHTarget = { key in
     try ProductM2SSHTarget(key: key, configuration: configuration)
   }
-  let runtime = ProductPersistentTunnelRuntime(configuration: configuration)
-  let open: ProxyTunnelOpenOperation = { request, budget in
-    await openProductProxyTunnel(
-      runtime: runtime,
-      request: request,
-      budget: budget
-    )
-  }
-  let availability: @Sendable () -> ProductM2AuthorizationFailure? = {
-    runtime.authorizationAvailabilityFailure
+  let open: ProxyTunnelOpenOperation
+  let availability: @Sendable () -> ProductM2AuthorizationFailure?
+  switch configuration.backend {
+  case .native:
+    open = { request, _ in
+      await openNativeProxyTunnel(configuration: configuration, request: request)
+    }
+    // Credentials are read by the Portal login inside the native open.
+    availability = { nil }
+  case .vendor:
+    let runtime = ProductPersistentTunnelRuntime(configuration: configuration)
+    open = { request, budget in
+      await openProductProxyTunnel(
+        runtime: runtime,
+        request: request,
+        budget: budget
+      )
+    }
+    availability = { runtime.authorizationAvailabilityFailure }
   }
   if subcommand == "ssh" {
     return try await runProxySSHCommand(

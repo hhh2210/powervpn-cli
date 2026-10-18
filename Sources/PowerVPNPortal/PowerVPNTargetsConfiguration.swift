@@ -34,10 +34,20 @@ public struct PowerVPNTargetConfiguration: Equatable, Sendable {
   }
 }
 
+/// Which tunnel implementation `run`/`up`/`ssh` use. Absent means vendor, so
+/// existing configurations keep their behavior until they opt in.
+public enum PowerVPNBackend: String, Equatable, Sendable {
+  /// Patched strongSwan charon run by our own root helper.
+  case native
+  /// The official PowerVPN privileged helper.
+  case vendor
+}
+
 public struct PowerVPNTargetsConfiguration: Equatable, Sendable {
   public static let path = "~/.config/powervpn/targets.json"
 
   public let portalOrigin: URL
+  public let backend: PowerVPNBackend
   private let targets: [String: PowerVPNTargetConfiguration]
 
   public static func currentMachine() throws -> Self {
@@ -78,7 +88,7 @@ public struct PowerVPNTargetsConfiguration: Equatable, Sendable {
         resourceDisplayName: target.resourceDisplayName
       )
     }
-    return Self(portalOrigin: origin, targets: validated)
+    return Self(portalOrigin: origin, backend: decoded.backend, targets: validated)
   }
 
   public func target(named key: String) throws -> PowerVPNTargetConfiguration {
@@ -106,12 +116,24 @@ public struct PowerVPNTargetsConfiguration: Equatable, Sendable {
 
   private struct FileSchema: Decodable {
     let portalOrigin: String
+    let backend: PowerVPNBackend
     let targets: [String: TargetSchema]
 
     init(from decoder: any Decoder) throws {
       let container = try decoder.container(keyedBy: ConfigurationCodingKey.self)
-      guard Set(container.allKeys.map(\.stringValue)) == ["portalOrigin", "targets"] else {
+      let keys = Set(container.allKeys.map(\.stringValue))
+      guard keys == ["portalOrigin", "targets"] || keys == ["portalOrigin", "targets", "backend"]
+      else {
         throw PowerVPNTargetsConfigurationError.invalid
+      }
+      if keys.contains("backend") {
+        let raw = try container.decode(String.self, forKey: ConfigurationCodingKey("backend"))
+        guard let value = PowerVPNBackend(rawValue: raw) else {
+          throw PowerVPNTargetsConfigurationError.invalid
+        }
+        backend = value
+      } else {
+        backend = .vendor
       }
       portalOrigin = try container.decode(
         String.self,

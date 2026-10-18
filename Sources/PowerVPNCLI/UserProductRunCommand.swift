@@ -1,4 +1,5 @@
 import Foundation
+import PowerVPNProduct
 
 /// `powervpn run <target> -- <command...>` is the one-call entrypoint for agents and scripts.
 ///
@@ -37,7 +38,12 @@ private let runSettlePollMilliseconds = 1_000
 
 /// Start failures that a retry cannot fix: credentials or configuration.
 private let runHumanStartFailures: Set<String> = [
-  "runtime_unavailable"
+  "runtime_unavailable",
+  NativeTunnelFailure.helperUnavailable.rawValue,
+  NativeTunnelFailure.charonUnavailable.rawValue,
+  NativeTunnelFailure.targetInvalid.rawValue,
+  NativeTunnelFailure.portalRejected.rawValue,
+  NativeTunnelFailure.resourceUnavailable.rawValue,
 ]
 
 /// `local_safety_check_failed` also names transient states (the vendor helper still exiting, the
@@ -112,7 +118,8 @@ func runUserProductRun(
         if await waitWhileBusy() { continue }
         return runBusy(rerun)
       }
-      if state.terminal, !state.reconnectPermitted {
+      // Native leftovers are cleared by `up` itself; only the vendor needs recovery.
+      if state.terminal, !state.reconnectPermitted, !usesNativeBackend(dependencies) {
         guard recoveryAttempts < runRecoveryAttemptLimit else {
           return runFailure(
             "quarantine_persists",
@@ -184,7 +191,7 @@ func runUserProductRun(
           failure,
           firstLine(of: up.standardError),
           exitCode: UserProductRunExit.needsHuman,
-          next: "powervpn doctor --json"
+          next: NativeTunnelFailure(rawValue: failure)?.next ?? "powervpn doctor --json"
         )
       }
       if failure == "local_safety_check_failed" {
