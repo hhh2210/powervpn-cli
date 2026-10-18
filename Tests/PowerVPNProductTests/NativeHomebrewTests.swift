@@ -7,7 +7,7 @@ import Testing
 
 @Suite struct NativeHomebrewTests {
   private static let payloadFiles = [
-    "install.sh", "uninstall.sh", "powervpn-native-helper", "runtime.tar", "runtime.sha256",
+    "install.sh", "uninstall.sh", "powervpn-native-helper", "runtime.tar",
   ]
 
   private func temporaryDirectory() throws -> URL {
@@ -39,18 +39,38 @@ import Testing
     return (link, payload.path)
   }
 
-  @Test func locatesTheKegPayloadThroughTheBrewSymlinkOnlyWhenComplete() throws {
+  /// A root install made from `payload`, as install.sh lays it out.
+  private func install(_ payload: NativeBundledPayload, into home: String) throws {
+    for directory in ["runtime/libexec/ipsec"] {
+      try FileManager.default.createDirectory(
+        atPath: home + "/" + directory, withIntermediateDirectories: true)
+    }
+    for file in ["runtime/libexec/ipsec/charon", "strongswan.conf", "allowed-hosts", "owner-uid"] {
+      try Data("installed".utf8).write(to: URL(fileURLWithPath: home + "/" + file))
+    }
+    try FileManager.default.copyItem(
+      atPath: payload.helper, toPath: home + "/powervpn-native-helper")
+    try #require(payload.expectedInstalledFrom())
+      .write(toFile: home + "/installed-from", atomically: true, encoding: .utf8)
+  }
+
+  @Test func locatesTheKegThroughTheBrewSymlinkEvenWhenInstallFilesAreMissing() throws {
     let root = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
     let keg = try makeKeg(in: root)
-    #expect(NativeBundledPayload.locate(executablePath: keg.link)?.directory == keg.payload)
+    let found = try #require(NativeBundledPayload.locate(executablePath: keg.link))
+    #expect(found.directory == keg.payload)
+    #expect(found.installFilesPresent)
 
-    try FileManager.default.removeItem(atPath: keg.payload + "/runtime.sha256")
+    try FileManager.default.removeItem(atPath: keg.payload + "/runtime.tar")
+    let partial = try #require(NativeBundledPayload.locate(executablePath: keg.link))
+    #expect(!partial.installFilesPresent)
+    try FileManager.default.removeItem(atPath: keg.payload + "/uninstall.sh")
     #expect(NativeBundledPayload.locate(executablePath: keg.link) == nil)
     #expect(NativeBundledPayload.locate(executablePath: nil) == nil)
   }
 
-  @Test func comparesTheInstalledHelperAndRuntimeManifestWithTheKeg() throws {
+  @Test func detectsAnyKegChangeAndAnIncompleteRootInstall() throws {
     let root = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
     let payload = NativeBundledPayload(directory: try makeKeg(in: root).payload)
@@ -58,47 +78,55 @@ import Testing
     try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
     #expect(payload.matchesInstalled(home: home) == nil)
 
-    try FileManager.default.copyItem(
-      atPath: payload.helper, toPath: home + "/powervpn-native-helper")
-    // An install from before the manifest existed must count as outdated.
-    #expect(payload.matchesInstalled(home: home) == false)
-    try FileManager.default.copyItem(
-      atPath: payload.runtimeManifest, toPath: home + "/runtime.sha256")
+    try install(payload, into: home)
     #expect(payload.matchesInstalled(home: home) == true)
 
-    try Data("other runtime".utf8).write(to: URL(fileURLWithPath: home + "/runtime.sha256"))
+    // An installer-only change (e.g. a new strongswan.conf) must count too.
+    for file in ["install.sh", "powervpn-native-helper", "runtime.tar"] {
+      let path = payload.directory + "/" + file
+      let original = try Data(contentsOf: URL(fileURLWithPath: path))
+      try Data("changed".utf8).write(to: URL(fileURLWithPath: path))
+      #expect(payload.matchesInstalled(home: home) == false)
+      try original.write(to: URL(fileURLWithPath: path))
+    }
+    #expect(payload.matchesInstalled(home: home) == true)
+
+    try FileManager.default.removeItem(atPath: home + "/runtime/libexec/ipsec/charon")
     #expect(payload.matchesInstalled(home: home) == false)
   }
 
   @Test func installRequiresSudoAndPassesOnlyThePayloadAndOwner() throws {
-    let payload = NativeBundledPayload(directory: "/keg/libexec/powervpn-native")
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let payload = NativeBundledPayload(directory: try makeKeg(in: root).payload)
+    let home = root.appendingPathComponent("home").path
     var calls: [(String, [String: String])] = []
+    var notices: [String] = []
     let record: (String, [String: String]) -> Int32 = { script, environment in
       calls.append((script, environment))
       return 0
     }
     let notRoot = runNativeCommand(
-      ["native", "install"], payload: payload, invokedPath: "/opt/homebrew/bin/powervpn",
-      effectiveUserID: 501, environment: ["SUDO_UID": "501"], runScript: record)
+      ["native", "install"], payload: payload, installedHome: home,
+      invokedPath: "/opt/homebrew/bin/powervpn", effectiveUserID: 501,
+      environment: ["SUDO_UID": "501"], runScript: record)
     #expect(notRoot.exitCode == 77)
     #expect(notRoot.standardError.contains("next: sudo /opt/homebrew/bin/powervpn native install"))
-    #expect(
-      NativeBundledPayload.sudoCommand("install", invokedAs: "powervpn")
-        == "sudo powervpn native install")
     let rootWithoutOwner = runNativeCommand(
-      ["native", "install"], payload: payload, effectiveUserID: 0, environment: [:],
-      runScript: record)
+      ["native", "install"], payload: payload, installedHome: home, effectiveUserID: 0,
+      environment: [:], runScript: record)
     #expect(rootWithoutOwner.exitCode == 77)
     #expect(calls.isEmpty)
 
     let installed = runNativeCommand(
-      ["native", "install"], payload: payload, effectiveUserID: 0,
+      ["native", "install"], payload: payload, installedHome: home, effectiveUserID: 0,
       environment: [
         "SUDO_UID": "501", "POWERVPN_NATIVE_RUNTIME": "/tmp/elsewhere",
         "DYLD_INSERT_LIBRARIES": "/tmp/x.dylib",
       ],
-      runScript: record)
+      notice: { notices.append($0) }, runScript: record)
     #expect(installed.exitCode == 0)
+    #expect(notices.isEmpty)
     #expect(calls.count == 1)
     #expect(calls.first?.0 == payload.installScript)
     #expect(
@@ -108,11 +136,35 @@ import Testing
         "POWERVPN_NATIVE_HELPER": payload.helper,
       ])
 
+    // Reinstalling over a running backend warns that the session drops.
+    try install(payload, into: home)
     _ = runNativeCommand(
-      ["native", "uninstall"], payload: payload, effectiveUserID: 0,
+      ["native", "install"], payload: payload, installedHome: home, effectiveUserID: 0,
+      environment: ["SUDO_UID": "501"], notice: { notices.append($0) }, runScript: record)
+    #expect(notices.count == 1)
+    #expect(notices.first?.contains("session drops") == true)
+  }
+
+  @Test func uninstallWorksFromAnIncompleteKegButInstallDoesNot() throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let payload = NativeBundledPayload(
+      directory: try makeKeg(in: root, files: ["uninstall.sh"]).payload)
+    var scripts: [String] = []
+    let record: (String, [String: String]) -> Int32 = { script, _ in
+      scripts.append(script)
+      return 0
+    }
+    let install = runNativeCommand(
+      ["native", "install"], payload: payload, effectiveUserID: 0,
       environment: ["SUDO_UID": "501"], runScript: record)
-    #expect(calls.last?.0 == payload.uninstallScript)
-    #expect(calls.last?.1 == ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "SUDO_UID": "501"])
+    #expect(install.exitCode == 77)
+    #expect(install.standardError.contains("brew reinstall"))
+    let uninstall = runNativeCommand(
+      ["native", "uninstall"], payload: payload, effectiveUserID: 0,
+      environment: ["SUDO_UID": "501"], notice: { _ in }, runScript: record)
+    #expect(uninstall.exitCode == 0)
+    #expect(scripts == [payload.uninstallScript])
   }
 
   @Test func statusAndSourceCheckoutsNameTheRightNextStep() throws {
@@ -122,16 +174,11 @@ import Testing
     let home = root.appendingPathComponent("home").path
     try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
 
-    let missing = runNativeCommand(
-      ["native", "status"], payload: payload, installedHome: home)
+    let missing = runNativeCommand(["native", "status"], payload: payload, installedHome: home)
     #expect(missing.exitCode == 1)
     #expect(missing.standardError.contains("not installed"))
-    for file in ["powervpn-native-helper", "runtime.sha256"] {
-      try FileManager.default.copyItem(
-        atPath: payload.directory + "/" + file, toPath: home + "/" + file)
-    }
-    let current = runNativeCommand(
-      ["native", "status"], payload: payload, installedHome: home)
+    try install(payload, into: home)
+    let current = runNativeCommand(["native", "status"], payload: payload, installedHome: home)
     #expect(current.exitCode == 0)
     #expect(current.standardOutput.contains("up to date"))
 
@@ -139,5 +186,22 @@ import Testing
     #expect(source.exitCode == 77)
     #expect(source.standardError.contains("scripts/native/install.sh"))
     #expect(runNativeCommand(["native", "frobnicate"], payload: payload).exitCode == 64)
+  }
+
+  @Test func nextLinesQuoteTheCLIPathForTheShell() {
+    let command = NativeBundledPayload.sudoCommand
+    #expect(
+      command("install", "/opt/homebrew/bin/powervpn")
+        == "sudo /opt/homebrew/bin/powervpn native install")
+    #expect(
+      command("install", "/Users/a b/bin/powervpn")
+        == "sudo '/Users/a b/bin/powervpn' native install")
+    #expect(command("install", "/tmp/x;id/powervpn") == "sudo '/tmp/x;id/powervpn' native install")
+    #expect(
+      command("install", "/tmp/it's/powervpn")
+        == "sudo '/tmp/it'\\''s/powervpn' native install")
+    #expect(command("uninstall", nil) == "sudo powervpn native uninstall")
+    // A relative invocation is resolved to an absolute path, never left relative.
+    #expect(command("install", "bin/powervpn").hasPrefix("sudo /"))
   }
 }

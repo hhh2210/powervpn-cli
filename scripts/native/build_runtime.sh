@@ -123,6 +123,23 @@ for artifact in libexec/ipsec/charon lib/ipsec/libcharon.0.dylib \
 	file "$root/$artifact" | grep -q 'Mach-O 64-bit.*arm64' || fail "not arm64: $artifact"
 done
 
+# The runtime is redistributed: ship the strongSwan (GPL-2.0-or-later) and
+# OpenSSL (Apache-2.0) license texts and where the corresponding source lives.
+licenses="$root/share/licenses"
+mkdir -p "$licenses/strongswan" "$licenses/openssl"
+cp "$src/COPYING" "$src/LICENSE" "$licenses/strongswan/"
+cp "$openssl_prefix/LICENSE.txt" "$licenses/openssl/"
+openssl_version=$(sed -n 's/^Version: //p' "$openssl_prefix/lib/pkgconfig/libcrypto.pc")
+cat > "$licenses/SOURCE" <<EOF
+charon and its libraries: strongSwan $UPSTREAM_TAG
+  https://github.com/strongswan/strongswan/tree/$UPSTREAM_TAG
+with the patch series in
+  https://github.com/hhh2210/powervpn-cli/tree/main/patches/strongswan-$UPSTREAM_TAG
+lib/ipsec/libcrypto.3.dylib: OpenSSL $openssl_version
+  https://github.com/openssl/openssl
+EOF
+find "$licenses" -type f -exec chmod 644 {} +
+
 (cd "$root" && find . -type f | sort | xargs shasum -a 256) > "$out/runtime.sha256"
 # The Homebrew keg ships this tar, so Homebrew never relocates the Mach-O files.
 tar -c -f "$out/runtime.tar" -C "$root" --no-acls --no-xattrs --no-mac-metadata .

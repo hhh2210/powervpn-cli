@@ -28,7 +28,7 @@ powervpn-native-helper                          root LaunchDaemon，安装一次
 ## 需要什么
 
 - arm64 Mac，macOS 14 或更新。
-- 完整的 Xcode（只装 Command Line Tools 不够）和 Homebrew。
+- Homebrew。它会顺带装好 Xcode Command Line Tools，编译只需要这个，不需要完整的 Xcode。
 
 - 你自己的 Portal 账号，以及要连的服务器 IP、SSH 用户名，和它在 Portal 里对应的资源名。
 
@@ -58,14 +58,10 @@ chmod 600 ~/.config/powervpn/credentials.env
 
 **3. 写要连的服务器**
 
+把尖括号里的内容换成你自己的，再执行：
+
 ```sh
-cp docs/targets.example.json ~/.config/powervpn/targets.json
-chmod 600 ~/.config/powervpn/targets.json
-```
-
-然后按你自己的情况改：
-
-```json
+cat > ~/.config/powervpn/targets.json <<'EOF'
 {
   "portalOrigin": "https://<Portal 地址>:<端口>",
   "backend": "native",
@@ -73,6 +69,8 @@ chmod 600 ~/.config/powervpn/targets.json
     "lab-a": { "host": "<服务器 IPv4>", "user": "<SSH 用户名>", "resource": "<Portal 里的资源名>" }
   }
 }
+EOF
+chmod 600 ~/.config/powervpn/targets.json
 ```
 
 - `lab-a` 是你给这台机器起的名字，后面所有命令都用它。
@@ -91,7 +89,8 @@ sudo "$(brew --prefix)/bin/powervpn" native install
 看到 `install: native backend running` 就好了。
 
 安装时会把 `targets.json` 的目标 IP 固定到 root 拥有的路由白名单。以后新增或修改目标 IP，需重新执行安装命令。
-root 进程运行的是复制进系统目录、校验过的副本，从不直接执行 Homebrew 目录（当前用户可写）里的文件。
+装好之后，常驻的 root 进程只运行复制进系统目录、校验过的副本，从不执行 Homebrew 目录（当前用户可写）里的文件。
+安装这一步本身和任何 `sudo` 命令一样，信任你自己账户下的文件。
 
 **5. 配 SSH**
 
@@ -190,6 +189,12 @@ sudo scripts/native/install.sh             # 代替 powervpn native install；�
 ```
 
 卸载用 `sudo scripts/native/uninstall.sh`。
+
+## 许可
+
+powervpn-cli 是 MIT。native 后端运行的是 strongSwan 6.0.7（GPL-2.0-or-later）加 `patches/strongswan-6.0.7/` 的补丁，
+带一份 OpenSSL libcrypto（Apache-2.0）。两者的许可证和源码出处随运行时安装在
+`/Library/PrivilegedHelperTools/com.hhh2210.powervpn-native/runtime/share/licenses/`。
 
 ## 开发
 

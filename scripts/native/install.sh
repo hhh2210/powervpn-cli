@@ -53,21 +53,31 @@ parent=/Library/PrivilegedHelperTools
 new_home=$(mktemp -d "$parent/.powervpn-native.XXXXXXXX")
 trap 'rm -rf "$new_home"' EXIT HUP INT TERM
 chmod -N "$new_home"
+sha256() { shasum -a 256 "$1" | awk '{print $1}'; }
+# Copy the helper (and the archive) into the root-owned tree first and use only
+# those copies, so the files hashed, run and installed are the same bytes.
+install -m 755 "$helper" "$new_home/powervpn-native-helper"
 if [ -n "$archive" ]; then
-	# bsdtar refuses absolute and ".." members by default; drop owners, ACLs,
-	# extended attributes and macOS metadata so only file contents and modes land.
+	install -m 600 "$archive" "$new_home/runtime.tar"
+	# bsdtar strips a leading "/" and refuses ".." members by default; drop
+	# owners, ACLs, extended attributes and macOS metadata so only file
+	# contents, modes and symlinks land. verify-install then rejects hard links
+	# and symlinks that leave the tree.
 	mkdir "$new_home/runtime"
-	tar -x -f "$archive" -C "$new_home/runtime" --no-same-owner --no-acls --no-xattrs --no-mac-metadata ||
+	tar -x -f "$new_home/runtime.tar" -C "$new_home/runtime" --no-same-owner --no-acls --no-xattrs --no-mac-metadata ||
 		fail "could not unpack $archive"
 	[ -x "$new_home/runtime/libexec/ipsec/charon" ] || fail "archive has no libexec/ipsec/charon"
 	file "$new_home/runtime/libexec/ipsec/charon" | grep -q 'Mach-O 64-bit.*arm64' || fail "runtime is not arm64"
+	runtime_source="runtime-archive $(sha256 "$new_home/runtime.tar")"
+	rm -f "$new_home/runtime.tar"
 else
 	ditto --noacl --noextattr --noqtn "$runtime" "$new_home/runtime"
+	runtime_source="runtime-directory $runtime"
 fi
-# Recorded from the tree actually installed; `powervpn doctor` compares it with
-# the build's manifest to tell whether a Homebrew upgrade needs a reinstall.
-(cd "$new_home/runtime" && find . -type f | sort | xargs shasum -a 256) > "$new_home/runtime.sha256"
-install -m 755 "$helper" "$new_home/powervpn-native-helper"
+# What this install was made from; `powervpn native status` and doctor compare
+# it with the Homebrew keg to tell whether an upgrade needs a reinstall.
+printf 'installer %s\nhelper %s\n%s\n' "$(sha256 "$0")" \
+	"$(sha256 "$new_home/powervpn-native-helper")" "$runtime_source" > "$new_home/installed-from"
 printf '%s\n' "$owner_uid" > "$new_home/owner-uid"
 targets=${POWERVPN_NATIVE_TARGETS:-"$owner_home/.config/powervpn/targets.json"}
 "$new_home/powervpn-native-helper" host-policy < "$targets" > "$new_home/allowed-hosts"
@@ -125,7 +135,7 @@ chown -R -P root:wheel "$new_home"
 chmod -R -P -N "$new_home"
 chmod -R -P go-w,u-s,g-s "$new_home"
 chmod 755 "$new_home" "$new_home/openssl-empty"
-chmod 644 "$new_home/strongswan.conf" "$new_home/owner-uid" "$new_home/allowed-hosts" "$new_home/runtime.sha256"
+chmod 644 "$new_home/strongswan.conf" "$new_home/owner-uid" "$new_home/allowed-hosts" "$new_home/installed-from"
 "$new_home/powervpn-native-helper" verify-install "$new_home" || fail "unsafe runtime tree"
 
 if launchctl print "system/$LABEL" >/dev/null 2>&1; then
