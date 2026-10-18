@@ -78,6 +78,27 @@ fi
 # it with the Homebrew keg to tell whether an upgrade needs a reinstall.
 printf 'installer %s\nhelper %s\n%s\n' "$(sha256 "$0")" \
 	"$(sha256 "$new_home/powervpn-native-helper")" "$runtime_source" > "$new_home/installed-from"
+# Enhanced Security for the two root executables (see docs/security-settings.md),
+# signed ad hoc on the root-owned copies only after installed-from has recorded
+# the bytes that were copied. Nothing rewrites these files afterwards.
+cat > "$new_home/hardened.entitlements" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.hardened-process</key><true/>
+  <key>com.apple.security.hardened-process.enhanced-security-version-string</key><string>2</string>
+  <key>com.apple.security.hardened-process.hardened-heap</key><true/>
+  <key>com.apple.security.hardened-process.dyld-ro</key><true/>
+  <key>com.apple.security.hardened-process.platform-restrictions-string</key><string>2</string>
+</dict>
+</plist>
+EOF
+for binary in "$new_home/powervpn-native-helper" "$new_home/runtime/libexec/ipsec/charon"; do
+	codesign --force --sign - --entitlements "$new_home/hardened.entitlements" "$binary" 2>/dev/null ||
+		fail "could not sign $binary"
+done
+rm -f "$new_home/hardened.entitlements"
 printf '%s\n' "$owner_uid" > "$new_home/owner-uid"
 targets=${POWERVPN_NATIVE_TARGETS:-"$owner_home/.config/powervpn/targets.json"}
 "$new_home/powervpn-native-helper" host-policy < "$targets" > "$new_home/allowed-hosts"
