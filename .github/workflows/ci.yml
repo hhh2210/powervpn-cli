@@ -101,7 +101,10 @@ jobs:
           helper="$(swift build -c debug --show-bin-path)/powervpn-native-helper"
           symbols="$(nm -um "$helper")"
           if grep -E '_swift_task_(isCurrentExecutor|reportUnexpectedExecutor)' <<<"$symbols"; then
-            echo "powervpn-native-helper contains runtime actor-isolation checks" >&2
+            echo "powervpn-native-helper contains runtime actor-isolation checks in:" >&2
+            otool -tV "$helper" \
+              | awk '/^[^ \t].*:$/ { fn = $0 } /_swift_task_isCurrentExecutor/ { print fn }' \
+              | sort -u | sed 's/:$//' | xcrun swift-demangle >&2
             exit 1
           fi
 
