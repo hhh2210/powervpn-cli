@@ -8,6 +8,7 @@ let package = Package(
   products: [
     .executable(name: "powervpn-native-trial", targets: ["PowerVPNNativeTrial"]),
     .executable(name: "powervpn", targets: ["PowerVPNCLI"]),
+    .executable(name: "powervpn-native-helper", targets: ["PowerVPNNativeHelper"]),
     .executable(
       name: "powervpn-tls-evidence",
       targets: ["PowerVPNTLSEvidenceCLI"]
@@ -17,6 +18,7 @@ let package = Package(
     .executableTarget(
       name: "PowerVPNNativeTrial",
       dependencies: ["PowerVPNCore", "PowerVPNPortal", "PowerVPNProduct"]),
+    .executableTarget(name: "PowerVPNNativeHelper", dependencies: ["PowerVPNCore"]),
     .target(
       name: "CPortalCurl",
       linkerSettings: [.linkedLibrary("curl")]
