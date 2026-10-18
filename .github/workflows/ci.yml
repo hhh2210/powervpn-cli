@@ -108,6 +108,22 @@ jobs:
             exit 1
           fi
 
+      - name: Static analyzer security checks (own C code)
+        run: |
+          set -euo pipefail
+          status=0
+          for source in Sources/CPortalCurl/*.c Sources/CPowerVPNXPCSession/*.c; do
+            target="$(basename "$(dirname "$source")")"
+            report="$(xcrun clang --analyze -arch arm64 -mmacosx-version-min=14 -I"Sources/$target/include" \
+              -Xanalyzer -analyzer-checker=security.FloatLoopCounter,security.insecureAPI.rand,security.insecureAPI.strcpy \
+              -Xanalyzer -analyzer-output=text -o /dev/null "$source" 2>&1)"
+            if grep -q 'warning:' <<<"$report"; then
+              echo "$report"
+              status=1
+            fi
+          done
+          exit "$status"
+
       - name: Test (deterministic suites, offline, real PowerVPN state denied)
         # Serial on purpose: the curl and PTY drivers block a cooperative
         # thread by design, and parallel suites starved the small hosted

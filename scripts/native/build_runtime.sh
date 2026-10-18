@@ -83,12 +83,20 @@ PATH="$brew_prefix/opt/bison/bin:$brew_prefix/opt/gettext/bin:$brew_prefix/bin:$
 export PATH
 (cd "$src" && ./autogen.sh >/dev/null)
 
+# The compiler side of Enhanced Security for charon, which parses IKE from the
+# network as root (see docs/security-settings.md): zero-initialized stack
+# variables and, when this clang has it, type-aware allocation.
+hardening='-ftrivial-auto-var-init=zero'
+if printf 'int main(void){return 0;}' | cc -x c -ftyped-memory-operations -o /dev/null - 2>/dev/null; then
+	hardening="$hardening -ftyped-memory-operations"
+fi
+
 rm -rf "$build" "$stage"
 mkdir -p "$build"
 cd "$build"
 PKG_CONFIG_PATH="$openssl_prefix/lib/pkgconfig" \
 	PYTHON=/usr/bin/python3 \
-	CFLAGS='-arch arm64 -O2 -Wno-address-of-packed-member' \
+	CFLAGS="-arch arm64 -O2 -Wno-address-of-packed-member $hardening" \
 	LDFLAGS="-L$openssl_prefix/lib -Wl,-headerpad_max_install_names" \
 	CPPFLAGS="-I$openssl_prefix/include" \
 	"$src/configure" --quiet --prefix="$PREFIX" --with-piddir="$PIDDIR" \
