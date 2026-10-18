@@ -233,10 +233,7 @@ import Testing
         peerGenerationValidator: { _ in true }
       )
     }
-    for _ in 0..<100 where driver.startCount == 0 {
-      await Task.yield()
-    }
-    #expect(driver.startCount == 1)
+    #expect(await waitForControl { driver.startCount == 1 })
 
     task.cancel()
     let evidence = await task.value
