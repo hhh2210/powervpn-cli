@@ -375,7 +375,14 @@ func serveControl(_ helper: Helper, owner: uid_t) {
 /// stopped. If it does not exit, or the pid cannot be inspected, this fails
 /// and keeps the pidfile rather than let a second charon start.
 func stopStrayCharon() {
-  guard let text = try? String(contentsOfFile: paths.charonPID, encoding: .utf8) else { return }
+  let text: String
+  do {
+    text = try String(contentsOfFile: paths.charonPID, encoding: .utf8)
+  } catch CocoaError.fileReadNoSuchFile {
+    return
+  } catch {
+    fail("cannot read the charon pidfile")
+  }
   if let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)), pid > 1 {
     switch ProcessIdentity.lookup(pid) {
     case .running(let stray) where stray.uid == 0 && stray.executedPath == paths.charon:
