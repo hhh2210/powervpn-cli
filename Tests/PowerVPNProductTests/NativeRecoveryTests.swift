@@ -8,6 +8,168 @@ import Testing
 @testable import PowerVPNProduct
 
 @Suite struct NativeRecoveryTests {
+  @Test func nativeStatusAndDoctorIgnoreVendorHistoryWithoutReadingVendorState() async throws {
+    let store = try makeStore()
+    defer { try? FileManager.default.removeItem(at: store.directory) }
+    let archive = store.directory.appendingPathComponent("recovery-legacy.json")
+    let original = Data("historical vendor receipt".utf8)
+    try original.write(to: archive)
+    let dependencies = UserProductCommandDependencies(
+      loadConfiguration: { try config(.native) },
+      processRunner: NativeStoppedMaster(), stateStore: store, mutationLeaseAvailable: { true },
+      systemStatus: {
+        Issue.record("native commands must not inspect vendor state or logs")
+        return crashedVendor()
+      },
+      credentialFileSafe: { true },
+      helperArtifactSafe: {
+        Issue.record("vendor helper inspected")
+        return true
+      },
+      vendorLogFinding: {
+        Issue.record("vendor log inspected")
+        return .bounded
+      }, nativeBackendFailure: { nil })
+    for command in [["status"], ["status", "--json"], ["doctor", "--json"]] {
+      let result = try await runCurrentMachineUserProductCommand(
+        command, dependencies: dependencies)
+      #expect(result.exitCode == 0)
+      #expect(!result.standardOutput.contains("crashed"))
+      if command.first == "doctor" { #expect(!result.standardOutput.contains("vendorLogSafe")) }
+    }
+    #expect(try Data(contentsOf: archive) == original)
+  }
+
+  @Test func nativeConfigurationStillNamesAnUnresolvedVendorSession() async throws {
+    let store = try makeStore()
+    defer { try? FileManager.default.removeItem(at: store.directory) }
+    let state = staleState(backend: .vendor)
+    try store.save(state)
+    let dependencies = UserProductCommandDependencies(
+      loadConfiguration: { try config(.native) },
+      processRunner: NativeStoppedMaster(), stateStore: store, mutationLeaseAvailable: { true },
+      systemStatus: crashedVendor)
+    let result = try await runCurrentMachineUserProductCommand(
+      ["status"], dependencies: dependencies)
+    #expect(result.standardOutput.contains("vendor session cleanup is not verified"))
+    #expect(result.standardOutput.contains("measured vendor recovery"))
+    #expect(try store.load() == state)
+  }
+
+  @Test func completedVendorSessionDoesNotTriggerOneLastVendorWarningInNativeMode() async throws {
+    let store = try makeStore()
+    defer { try? FileManager.default.removeItem(at: store.directory) }
+    var state = staleState(backend: .vendor)
+    state.cleanupVerified = true
+    try store.save(state)
+    let dependencies = UserProductCommandDependencies(
+      loadConfiguration: { try config(.native) },
+      processRunner: NativeStoppedMaster(), stateStore: store, mutationLeaseAvailable: { true },
+      systemStatus: {
+        Issue.record("completed vendor session is history, not the active backend")
+        return crashedVendor()
+      })
+    let result = try await runCurrentMachineUserProductCommand(
+      ["status"], dependencies: dependencies)
+    #expect(!result.standardOutput.contains("Warning:"))
+    #expect(try store.load() == nil)
+  }
+
+  private func crashedVendor() -> PowerVPNStatus {
+    .init(
+      appVersion: "synthetic", appBuild: "1", appArchitectures: [], appRunning: false,
+      helper: .init(
+        state: "not running", pid: nil, runs: 15, successiveCrashes: 14,
+        lastTerminatingSignal: "Illegal instruction: 4"),
+      tunnel: .init(health: .stopped, latestEvent: "historical", historicalHint: true))
+  }
+
+  @Test func localFailureDoesNotEraseConfirmedPortalEvidence() async throws {
+    let store = try makeStore()
+    defer { try? FileManager.default.removeItem(at: store.directory) }
+    var state = staleState(backend: .native)
+    state.nativeCleanup = .init(
+      routeRemoved: false, sessionRemoved: true,
+      portalStatus: "accepted", portalFailureClass: "completed_remote_exchange")
+    try store.save(state)
+    let dependencies = deps(store: store)
+    let inspect = try await runCurrentMachineUserProductCommand(
+      ["recovery", "inspect", "--json"], dependencies: dependencies)
+    #expect(inspect.standardOutput.contains("\"nativePortalCleanupVerified\" : true"))
+    #expect(inspect.standardOutput.contains("\"nativeLocalCleanupVerified\" : false"))
+    let down = try await runCurrentMachineUserProductCommand(["down"], dependencies: dependencies)
+    #expect(down.exitCode == 0)
+    #expect(down.standardOutput.contains("Original Portal cleanup: verified"))
+    #expect(try store.load()?.cleanupVerified == false)
+  }
+
+  @Test func knownValidPortalSessionBlocksReconnectEvenAfterLocalRecovery() async throws {
+    let store = try makeStore()
+    defer { try? FileManager.default.removeItem(at: store.directory) }
+    let valid = PortalLogoutSessionObservation(
+      state: .valid, transport: .init(httpStatus: 200), responseCode: 0)
+    var state = staleState(backend: .native)
+    state.nativeCleanup = .init(
+      routeRemoved: true, sessionRemoved: true,
+      portalStatus: "rejected", portalFailureClass: "completed_remote_exchange",
+      portalVerification: .init(before: valid, logout: .init(httpStatus: 200), after: valid))
+    try store.save(state)
+    let down = try await runCurrentMachineUserProductCommand(
+      ["down"], dependencies: deps(store: store))
+    #expect(down.exitCode == 74)
+    #expect(down.standardError.contains("Portal session is still valid"))
+    let saved = try store.load()
+    #expect(saved?.nativeLocalRecoveryVerified == true)
+    #expect(saved?.reconnectPermitted == false)
+    let acknowledged = try await runCurrentMachineUserProductCommand(
+      ["recovery", "clear", "--json", "--acknowledge-portal-logout"],
+      dependencies: deps(store: store))
+    #expect(acknowledged.exitCode == 0)
+    let released = try store.load()
+    #expect(released?.reconnectPermitted == true)
+    #expect(released?.nativePortalLogoutAcknowledged == true)
+    #expect(released?.cleanupVerified == false)
+    #expect(released?.nativeCleanup?.portalSessionStillValid == true)
+    #expect(acknowledged.standardOutput.contains("\"nativePortalCleanupVerified\" : false"))
+  }
+
+  @Test func nativeShutdownRetainsSeparateLocalAndPortalEvidence() async throws {
+    let store = try makeStore()
+    defer { try? FileManager.default.removeItem(at: store.directory) }
+    var state = staleState(backend: .native)
+    state.phase = .disconnecting
+    state.cleanupVerified = nil
+    try store.save(state)
+    let report = NativeTunnelCleanupReport(
+      routeRemoved: true, sessionRemoved: true,
+      portalStatus: "accepted", portalFailureClass: "transport_failed")
+    let dependencies = UserProductCommandDependencies(
+      loadConfiguration: { try config(.native) },
+      processRunner: NativeStoppedMaster(), stateStore: store,
+      proxyRunner: { _ in
+        .init(
+          standardOutput: "", standardError: "cleanup_unproven\n", exitCode: 74,
+          nativeCleanup: report)
+      },
+      nativeRecoverStale: { _ in
+        Issue.record("shutdown receipt already proves local cleanup")
+        return false
+      })
+    _ = try await runCurrentMachineUserProductCommand(
+      ["internal-session-proxy", state.sessionID, "thu21", "192.0.2.21", "22"],
+      dependencies: dependencies)
+    let saved = try store.load()
+    #expect(saved?.nativeCleanup == report)
+    #expect(saved?.cleanupVerified == false)
+    #expect(saved?.nativeLocalRecoveryVerified == true)
+    let down = try await runCurrentMachineUserProductCommand(["down"], dependencies: dependencies)
+    #expect(down.exitCode == 0)
+    #expect(down.standardOutput.contains("Local cleanup: verified"))
+    #expect(down.standardOutput.contains("Portal cleanup: unverified"))
+    #expect(down.standardOutput.contains("transport_failed"))
+    #expect(try store.load()?.cleanupVerified == false)
+  }
+
   @Test(arguments: [
     (NativeTunnelFailure.portalUnavailable, Int32(75), 2),
     (.resourceUnavailable, Int32(75), 2), (.portalRejected, Int32(77), 1),
@@ -143,7 +305,8 @@ import Testing
         Issue.record("failed open must never start SSH")
         return .cancelled
       })
-    guard case .failure(_, let code, _, let mutated, let contacted, let cleaned, _) = result else {
+    guard case .failure(_, let code, _, let mutated, let contacted, let cleaned, _, _) = result
+    else {
       Issue.record("expected failed execution")
       return
     }

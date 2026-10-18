@@ -7,35 +7,42 @@ struct ProxyCommandResult: Equatable, Sendable {
   let standardError: String
   let exitCode: Int32
   let cleanupReceipt: ProductPersistentTunnelShutdownReport?
+  let nativeCleanup: NativeTunnelCleanupReport?
 
   init(
     standardOutput: String,
     standardError: String,
     exitCode: Int32,
-    cleanupReceipt: ProductPersistentTunnelShutdownReport? = nil
+    cleanupReceipt: ProductPersistentTunnelShutdownReport? = nil,
+    nativeCleanup: NativeTunnelCleanupReport? = nil
   ) {
     self.standardOutput = standardOutput
     self.standardError = standardError
     self.exitCode = exitCode
     self.cleanupReceipt = cleanupReceipt
+    self.nativeCleanup = nativeCleanup
   }
 }
 
 struct ProxyTunnelShutdown: Equatable, Sendable {
   let cleanupVerified: Bool
   let cleanupReceipt: ProductPersistentTunnelShutdownReport?
+  let nativeCleanup: NativeTunnelCleanupReport?
 
   init(
     cleanupVerified: Bool,
-    cleanupReceipt: ProductPersistentTunnelShutdownReport? = nil
+    cleanupReceipt: ProductPersistentTunnelShutdownReport? = nil,
+    nativeCleanup: NativeTunnelCleanupReport? = nil
   ) {
     self.cleanupVerified = cleanupVerified
     self.cleanupReceipt = cleanupReceipt
+    self.nativeCleanup = nativeCleanup
   }
 
   init(receipt: ProductPersistentTunnelShutdownReport) {
     cleanupVerified = receipt.cleanupVerified
     cleanupReceipt = receipt
+    nativeCleanup = nil
   }
 }
 
@@ -54,6 +61,7 @@ struct ProxyTunnelOpenFailure: Equatable, Sendable {
   let serverContactRequested: Bool
   let cleanupVerified: Bool
   var cleanupReceipt: ProductPersistentTunnelShutdownReport? = nil
+  var nativeCleanup: NativeTunnelCleanupReport? = nil
 }
 
 enum ProxyTunnelOpenResult: Sendable {
@@ -133,7 +141,8 @@ func nativeOpenFailure(_ report: NativeTunnelOpenFailure) -> ProxyTunnelOpenFail
     nativeFailure: report.failure,
     helperMutationRequested: report.helperMutationRequested,
     serverContactRequested: report.serverContactRequested,
-    cleanupVerified: report.cleanupVerified
+    cleanupVerified: report.cleanupVerified,
+    nativeCleanup: report.cleanupReport
   )
 }
 
@@ -152,9 +161,9 @@ private final class NativeProxyTunnelLease: ProxyTunnelLeasing, @unchecked Senda
   }
 
   func shutdown(budget _: ProductM2CleanupBudget) async -> ProxyTunnelShutdown {
-    let verified = await tunnel.shutdown()
+    let report = await tunnel.shutdownReport()
     lock.withLock { mutationLease = nil }
-    return ProxyTunnelShutdown(cleanupVerified: verified)
+    return ProxyTunnelShutdown(cleanupVerified: report.cleanupVerified, nativeCleanup: report)
   }
 }
 

@@ -52,7 +52,11 @@ import Testing
     }
     #expect(results == [false, false, false, false])
     #expect(await tunnel.shutdown() == false)
-    #expect(transport.calls == 1)
+    #expect(transport.calls == 3)
+    let receipt = await tunnel.shutdownReport()
+    #expect(receipt.localCleanupVerified)
+    #expect(!receipt.portalCleanupVerified)
+    #expect(receipt.portalStatus == "rejected")
   }
 
   @Test func authoritativeInventoryIncludesOrphanCredentialsAndRejectsUnavailableQuery() throws {

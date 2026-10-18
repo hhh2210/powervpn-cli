@@ -122,6 +122,9 @@ import Testing
     authenticationDiagnostics.set_cookie_selection =
       PVCURL_SET_COOKIE_SELECTION_LAST_FIELD_WINS
     authenticationDiagnostics.response_headers_observed = true
+    authenticationDiagnostics.transfer_attempted = true
+    authenticationDiagnostics.curl_code = 0
+    authenticationDiagnostics.http_status = 401
     let authentication = try #require(
       CPortalCurlDriver.normalizedFailure(
         PVCURL_STATUS_AUTHENTICATION_REJECTED,
@@ -131,6 +134,9 @@ import Testing
     #expect(authentication.evidence.setCookieFieldCount == 0)
     #expect(authentication.evidence.setCookieWireSelection == .lastFieldWins)
     #expect(authentication.evidence.duplicateSetCookieRejected == false)
+    #expect(authentication.evidence.curlCode == 0)
+    #expect(authentication.evidence.httpStatus == 401)
+    #expect(authentication.evidence.operatingSystemError == 0)
 
     let oversized = try #require(
       CPortalCurlDriver.normalizedFailure(

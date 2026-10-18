@@ -157,6 +157,7 @@ PowerVPN 自己出错时，stderr 最后两行固定是 `powervpn run: <原因>`
 ## 出问题时
 
 - 先跑 `powervpn doctor`，它会指出第一个要修的问题和下一步。
+- native 登出会用同一会话做前后只读探测：只有确认已失效才报告完整清理。网关的 logout HTTP 302 不会被跟随，也不直接视为成功。若探测明确仍有效，自动重连被阻止；只有本人在 Portal 结束该会话后，才使用 `powervpn recovery clear --json --acknowledge-portal-logout`。这个显式确认保留原始未验证回执，不用于自动重试。
 - `native_portal_unavailable` / `native_resource_unavailable`：Portal 传输或目录暂不可用，`run` 有限重试后返回 75，不误报密码错误。
 - `native_helper_unavailable` / `native_charon_unavailable`：helper 没装或没在跑，重新执行 `sudo scripts/native/install.sh`。
 - 日志（需要 sudo 读）：`/var/log/powervpn-native-helper.log`、`/var/log/powervpn-native-charon.log`。

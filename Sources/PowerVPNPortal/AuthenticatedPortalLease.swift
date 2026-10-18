@@ -32,6 +32,7 @@ package enum PortalLeaseLogoutFailureClass: String, Equatable, Sendable {
   case requestConstructionFailed = "request_construction_failed"
   case transportFailed = "transport_failed"
   case completedRemoteExchange = "completed_remote_exchange"
+  case postLogoutSessionRejected = "post_logout_session_rejected"
 }
 
 package struct PortalLeaseLogoutResult: Equatable, Sendable {
@@ -40,13 +41,16 @@ package struct PortalLeaseLogoutResult: Equatable, Sendable {
   /// transport failures, plus every completed HTTP exchange (accepted or
   /// rejected).
   package let failureClass: PortalLeaseLogoutFailureClass?
+  package let verification: PortalLogoutVerificationEvidence?
 
   package init(
     status: PortalLeaseLogoutStatus,
-    failureClass: PortalLeaseLogoutFailureClass? = nil
+    failureClass: PortalLeaseLogoutFailureClass? = nil,
+    verification: PortalLogoutVerificationEvidence? = nil
   ) {
     self.status = status
     self.failureClass = failureClass
+    self.verification = verification
   }
 }
 
@@ -87,13 +91,17 @@ package actor AuthenticatedPortalLease {
     self.logoutBounder = logoutBounder
   }
 
-  package func logoutAndErase() async -> PortalLeaseLogoutResult {
+  package func logoutAndErase(verifyInvalidation: Bool = false) async -> PortalLeaseLogoutResult {
     guard !closed else { return PortalLeaseLogoutResult(status: .alreadyClosed) }
     closed = true
     snapshot.erase()
     defer {
       factory.eraseSession()
       transport.cancel()
+    }
+    if verifyInvalidation {
+      return await PortalLogoutVerification.run(
+        factory: factory, transport: transport, bounder: logoutBounder)
     }
 
     let request: PortalHTTPRequest

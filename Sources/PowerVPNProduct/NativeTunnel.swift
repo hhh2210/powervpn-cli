@@ -53,20 +53,44 @@ package enum NativeTunnelFailure: String, Error, Equatable, Sendable {
   }
 }
 
+package struct NativeTunnelCleanupReport: Codable, Equatable, Sendable {
+  package let routeRemoved: Bool
+  package let sessionRemoved: Bool
+  package let portalStatus: String
+  package let portalFailureClass: String?
+  package var portalVerification: PortalLogoutVerificationEvidence? = nil
+  package var localCleanupVerified: Bool { routeRemoved && sessionRemoved }
+  package var portalCleanupVerified: Bool {
+    guard portalStatus == "accepted" else { return false }
+    if let portalVerification { return portalVerification.after.confirmsInvalidation }
+    return portalFailureClass == "completed_remote_exchange"
+  }
+  package var cleanupVerified: Bool { localCleanupVerified && portalCleanupVerified }
+  package var portalSessionStillValid: Bool { portalVerification?.after.state == .valid }
+  package var valid: Bool {
+    PortalLeaseLogoutStatus(rawValue: portalStatus) != nil
+      && (portalFailureClass == nil
+        || portalFailureClass.flatMap(PortalLeaseLogoutFailureClass.init(rawValue:)) != nil)
+  }
+}
+
 package struct NativeTunnelOpenFailure: Error, Equatable, Sendable {
   package let failure: NativeTunnelFailure
   package var helperMutationRequested = false
   package var serverContactRequested = false
   package var cleanupVerified = true
+  package var cleanupReport: NativeTunnelCleanupReport? = nil
 
   package init(
     failure: NativeTunnelFailure, helperMutationRequested: Bool = false,
-    serverContactRequested: Bool = false, cleanupVerified: Bool = true
+    serverContactRequested: Bool = false, cleanupVerified: Bool = true,
+    cleanupReport: NativeTunnelCleanupReport? = nil
   ) {
     self.failure = failure
     self.helperMutationRequested = helperMutationRequested
     self.serverContactRequested = serverContactRequested
     self.cleanupVerified = cleanupVerified
+    self.cleanupReport = cleanupReport
   }
 
   package init(portal report: PortalLoginReport) {
@@ -99,7 +123,7 @@ package final class NativeTunnel: @unchecked Sendable {
   private let vici: String
   private let helper: String
   private let lock = NSLock()
-  private var shutdownTask: Task<Bool, Never>?
+  private var shutdownTask: Task<NativeTunnelCleanupReport, Never>?
   private var mutationRequested = false
 
   init(
@@ -158,13 +182,13 @@ package final class NativeTunnel: @unchecked Sendable {
         vici: vici, helper: helper)
       let established = await onBlockingThread { tunnel.establish(target: target) }
       if established == nil, !Task.isCancelled { return .success(tunnel) }
-      let cleaned = await tunnel.shutdown()
+      let cleanup = await tunnel.shutdownReport()
       let failure: NativeTunnelFailure = Task.isCancelled ? .cancelled : (established ?? .cancelled)
-      guard cleaned else {
+      guard cleanup.cleanupVerified else {
         return .failure(
           .init(
             failure: failure, helperMutationRequested: tunnel.mutationRequested,
-            serverContactRequested: true, cleanupVerified: false))
+            serverContactRequested: true, cleanupVerified: false, cleanupReport: cleanup))
       }
       if failure != .resourceUnavailable || attempt == portalAttempts {
         return .failure(
@@ -250,7 +274,11 @@ package final class NativeTunnel: @unchecked Sendable {
   /// Removes the route, the SA, the loaded connection and the Portal session.
   /// Returns true only when each of them is verified gone.
   package func shutdown() async -> Bool {
-    let task = lock.withLock { () -> Task<Bool, Never> in
+    await shutdownReport().cleanupVerified
+  }
+
+  package func shutdownReport() async -> NativeTunnelCleanupReport {
+    let task = lock.withLock { () -> Task<NativeTunnelCleanupReport, Never> in
       if let shutdownTask { return shutdownTask }
       let task = Task.detached { await self.performShutdown() }
       shutdownTask = task
@@ -259,18 +287,20 @@ package final class NativeTunnel: @unchecked Sendable {
     return await task.value
   }
 
-  private func performShutdown() async -> Bool {
-    let local = await onBlockingThread { () -> Bool in
-      if !self.mutationRequested { return true }
+  private func performShutdown() async -> NativeTunnelCleanupReport {
+    let local = await onBlockingThread { () -> (Bool, Bool) in
+      if !self.mutationRequested { return (true, true) }
       let routeGone =
         (try? NativeHelperClient.send(
           .init(op: .routeDelete, host: self.targetHost), socketPath: self.helper))?.ok == true
       let saGone = removeSession(name: self.name, vici: self.vici)
-      return routeGone && saGone
+      return (routeGone, saGone)
     }
-    let logout = await lease.logoutAndErase()
-    let portalClosed = logout.status == .accepted && logout.failureClass == .completedRemoteExchange
-    return local && portalClosed
+    let logout = await lease.logoutAndErase(verifyInvalidation: true)
+    return NativeTunnelCleanupReport(
+      routeRemoved: local.0, sessionRemoved: local.1,
+      portalStatus: logout.status.rawValue, portalFailureClass: logout.failureClass?.rawValue,
+      portalVerification: logout.verification)
   }
 }
 

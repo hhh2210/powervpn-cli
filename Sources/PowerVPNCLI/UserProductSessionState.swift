@@ -29,6 +29,8 @@ struct UserProductSessionState: Codable, Equatable, Sendable {
   /// infer cleanup ownership from a configuration the user may have changed.
   var backend: PowerVPNBackend?
   var nativeLocalRecoveryVerified: Bool?
+  var nativeCleanup: NativeTunnelCleanupReport?
+  var nativePortalLogoutAcknowledged: Bool?
 
   init(
     sessionID: String,
@@ -41,7 +43,9 @@ struct UserProductSessionState: Codable, Equatable, Sendable {
     originalCleanupReceipt: UserProductOriginalCleanupReceipt? = nil,
     recoveryReceipt: UserProductRecoveryReceipt? = nil,
     backend: PowerVPNBackend = .vendor,
-    nativeLocalRecoveryVerified: Bool? = nil
+    nativeLocalRecoveryVerified: Bool? = nil,
+    nativeCleanup: NativeTunnelCleanupReport? = nil,
+    nativePortalLogoutAcknowledged: Bool? = nil
   ) {
     schemaVersion = 2
     self.sessionID = sessionID
@@ -55,6 +59,8 @@ struct UserProductSessionState: Codable, Equatable, Sendable {
     self.recoveryReceipt = recoveryReceipt
     self.backend = backend
     self.nativeLocalRecoveryVerified = nativeLocalRecoveryVerified
+    self.nativeCleanup = nativeCleanup
+    self.nativePortalLogoutAcknowledged = nativePortalLogoutAcknowledged
   }
 
   var terminal: Bool { phase == .disconnected || phase == .failed }
@@ -80,13 +86,19 @@ struct UserProductSessionState: Codable, Equatable, Sendable {
         || (originalCleanupReceipt == nil && recoveryReceipt == nil))
       && (nativeLocalRecoveryVerified != true
         || (originatingBackend == .native && terminal && cleanupVerified == false))
+      && (nativeCleanup == nil
+        || (originatingBackend == .native && nativeCleanup?.valid == true
+          && nativeCleanup?.cleanupVerified == cleanupVerified))
+      && (nativePortalLogoutAcknowledged != true
+        || (originatingBackend == .native && terminal && nativeLocalRecoveryVerified == true))
   }
 
   var originatingBackend: PowerVPNBackend { backend ?? .vendor }
 
   var reconnectPermitted: Bool {
-    cleanupVerified == true || recoveryReceipt?.permitsReconnect == true
-      || nativeLocalRecoveryVerified == true
+    (cleanupVerified == true || recoveryReceipt?.permitsReconnect == true
+      || nativeLocalRecoveryVerified == true)
+      && (nativeCleanup?.portalSessionStillValid != true || nativePortalLogoutAcknowledged == true)
   }
 }
 
@@ -198,7 +210,8 @@ struct UserProductSessionStateStore: Sendable {
   func archiveNativeRecoveryAndRemove(expected: UserProductSessionState) throws -> Bool {
     try withStateLock {
       guard expected.valid, expected.originatingBackend == .native,
-        expected.nativeLocalRecoveryVerified == true, try loadUnlocked() == expected
+        expected.nativeLocalRecoveryVerified == true, expected.reconnectPermitted,
+        try loadUnlocked() == expected
       else { return false }
       let archive = directory.appendingPathComponent("native-recovery-\(expected.sessionID).json")
         .path

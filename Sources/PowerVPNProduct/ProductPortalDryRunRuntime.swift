@@ -189,6 +189,7 @@ extension ProductPortalLogoutFailureClass {
     case .requestConstructionFailed: self = .requestConstructionFailed
     case .transportFailed: self = .transportFailed
     case .completedRemoteExchange: self = .completedRemoteExchange
+    case .postLogoutSessionRejected: self = .postLogoutSessionRejected
     }
   }
 }

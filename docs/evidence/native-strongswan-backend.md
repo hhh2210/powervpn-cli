@@ -82,7 +82,7 @@ QM1–QM3 明文在 VIP 字段归一化后，与 vendor 逐字节一致，所以
 
 证据边界：一次旧版 child rekey 与续传成功。新版仍需重测；sleep/wake、网络切换和 8 小时 IKE rekey 未覆盖。
 
-## 2026-10-18：PR #3 review 修复（待安装验证）
+## 2026-10-18：PR #3 review 修复
 
 上节 live 数字来自 `c26d94d` 及其前置构建，不是本节新版 helper 的验证结果。
 
@@ -96,5 +96,39 @@ QM1–QM3 明文在 VIP 字段归一化后，与 vendor 逐字节一致，所以
   VIP 调试输出改为 trial 显式 sink，产品不读取调试环境变量。
 - 本机隔离全量测试 991 个通过；复审追加修复后针对 Native / Proxy / UserProduct / ProductPersistent 的
   134 个测试通过。独立 Codex 静态复审的两个追加 finding 已关闭，无剩余已证实 finding。
-- 尚未验证：新版特权 helper 安装/升级时序、新版连接/断开 E2E、sleep/wake、网络切换、8 小时 IKE rekey。
-  本轮没有替换已安装 helper 或 CLI，没有改 Surge 配置，也没有读取厂商敏感日志。
+- 后续安装与短程 E2E 记录见下节；未覆盖 sleep/wake、网络切换、新版长周期 child rekey 和 8 小时 IKE rekey。
+  全程未改 Surge 配置，未读取厂商敏感日志。
+
+## 2026-10-18：新版安装与 Portal 登出证据
+
+安装后的 raw VICI 位于 root-only 目录，普通用户连接返回 EACCES；用户代理的 version/list-sas 请求可用，禁止的命令被关闭连接。
+新版 thu21 连接和同会话复用成功，复用约 0.12 秒；thu52 新连接约 1.58 秒。目标流量走 native utun，默认路由与 DNS 未变。
+
+首次 `down` 暴露了原有 Portal 证据缺口：本地 route/SA/connection/shared key 都已删除，但 logout 被记为 transport_failed。
+通过在进程内提前构造同一 cookie generation 的三份 sealed request（只读 session check / logout / 只读 session check），
+在 thu21 与 thu52 两个新会话上观察到相同结果：
+
+| 阶段 | HTTP / transport | Portal 结果 |
+|---|---|---|
+| 登出前，只读探测 | HTTP 200 | `RESULT/@code=0`，会话有效 |
+| 登出 POST | HTTP 302，curl code 0，OS errno 0 | 客户端禁止重定向，归类为 redirect_rejected |
+| 同一 cookie 登出后，只读探测 | HTTP 200 | `RESULT/@code=0x80000014`，会话已失效 |
+
+因此本次并非连接超时、TLS 失败或会话泄漏：网关完成登出后返回重定向，旧逻辑将其笼统归为传输失败。
+`c26d94d` 的 NativeTunnel 只检查 logout status accepted，而 AuthenticatedPortalLease 会把非取消的传输错误转换为 accepted；
+该代码遇到这类 302 会误称已验证。旧版 15:00 前后的具体登出没有保存传输分类，不能追溯断言每一次旧报告都是 302。
+
+修复保留“不跟随重定向”，以原 cookie 的后置失效证据确认 Portal 清理。HTTP 302 本身、请求已发出、网络/解析错误都不能算确认。
+探测严格识别 RESULT/@code（兼容历史测试的 RESULT/code 文本），未知 code/歧义字段 fail closed；超时保留已完成的 post 证据。
+只记录数值/枚举，不记录 cookie、凭据、请求/响应正文；所有 sealed request 在结束时擦除。
+
+新版 `down` 已返回 exit 0、`Cleanup: verified`。独立检查 helper 名下路由为空，目标路由恢复，默认路由与 DNS 和基线相同。
+如果以后 post 明确仍有效，自动重连保持隔离；操作人确实在 Portal 结束会话后，可用显式 acknowledgement 配合本地实测解除重连限制，
+原始回执和 cleanupVerified=false 仍保留，不冒充服务端失效证明。
+
+### native status 的 vendor 历史误报
+
+错误 warning 来自 `SystemInspector` 读取的 vendor LaunchDaemon 历史计数（14 次 crash、last signal），不是 recovery archive。
+status 原来无条件运行该 inspector；现在只对活动/未解除隔离会话的 backend 做对应诊断，已完成的记录按当前配置选择诊断来源。
+native status/doctor 不再读取 vendor 日志或展示 vendor 历史 crash。真实未清理的 vendor session 仍明确命名 vendor 并要求实测恢复。
+21 份旧 recovery archive 保留，不将历史归档等同于当前故障。

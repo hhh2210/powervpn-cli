@@ -221,6 +221,12 @@ pvcurl_status_t pvcurl_request_perform(pvcurl_request_t *request,
   }
   if (result == PVCURL_STATUS_OK) {
     CURLcode code = curl_easy_perform(curl);
+    request->diagnostics.transfer_attempted = true;
+    request->diagnostics.curl_code = (int32_t)code;
+    long os_errno = 0L;
+    if (curl_easy_getinfo(curl, CURLINFO_OS_ERRNO, &os_errno) == CURLE_OK) {
+      request->diagnostics.os_errno = (int32_t)os_errno;
+    }
     char *effective_url = NULL;
     long curl_status = 0L;
     long http_version = 0L;
@@ -235,6 +241,9 @@ pvcurl_status_t pvcurl_request_perform(pvcurl_request_t *request,
         curl_easy_getinfo(curl, CURLINFO_REDIRECT_COUNT, &redirect_count) ==
             CURLE_OK &&
         curl_status >= 0L && curl_status <= 65535L;
+    if (info_valid) {
+      request->diagnostics.http_status = (uint16_t)curl_status;
+    }
     bool wire_metadata_exact =
         http_version == CURL_HTTP_VERSION_1_1 && redirect_count == 0L;
     bool exact =

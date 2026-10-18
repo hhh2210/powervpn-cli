@@ -79,7 +79,10 @@ struct CPortalCurlDriver: CurlPortalDriving {
         setCookieWireSelection: headersObserved
           ? wireSelection(diagnostics?.set_cookie_selection) : nil,
         duplicateSetCookieRejected: headersObserved
-          ? diagnostics?.duplicate_set_cookie_rejected : nil
+          ? diagnostics?.duplicate_set_cookie_rejected : nil,
+        curlCode: diagnostics?.transfer_attempted == true ? diagnostics?.curl_code : nil,
+        operatingSystemError: diagnostics?.transfer_attempted == true ? diagnostics?.os_errno : nil,
+        httpStatus: diagnostics.flatMap { $0.http_status > 0 ? Int($0.http_status) : nil }
       )
     )
   }

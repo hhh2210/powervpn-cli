@@ -25,18 +25,22 @@ private struct UserProductRecoveryCommandReport: Encodable {
   let snapshotSerialized = false
   var nativeLocalCleanupVerified: Bool? = nil
   var nativePortalCleanupVerified: Bool? = nil
+  var nativeCleanupReport: NativeTunnelCleanupReport? = nil
+  var nativePortalLogoutAcknowledged: Bool? = nil
 }
 
 func runUserProductRecovery(
   arguments: [String],
   dependencies: UserProductCommandDependencies
 ) async throws -> UserProductCommandResult {
-  guard arguments.count == 3, arguments[0] == "recovery",
+  let acknowledgePortalLogout =
+    arguments == ["recovery", "clear", "--json", "--acknowledge-portal-logout"]
+  guard arguments.count == 3 || acknowledgePortalLogout, arguments[0] == "recovery",
     let operation = UserProductRecoveryOperation(rawValue: arguments[1]),
     arguments[2] == "--json"
   else {
     throw UserProductCommandError.invalidArguments(
-      "usage: powervpn recovery <inspect|clear> --json"
+      "usage: powervpn recovery <inspect|clear> --json [--acknowledge-portal-logout]"
     )
   }
 
@@ -62,6 +66,10 @@ func runUserProductRecovery(
       exitCode: 0
     )
   }
+  if acknowledgePortalLogout, state.originatingBackend != .native {
+    throw UserProductCommandError.invalidArguments(
+      "Portal logout acknowledgement applies only to a native session")
+  }
   guard state.terminal, state.cleanupVerified != true else {
     return try recoveryResult(
       operation: operation,
@@ -76,10 +84,12 @@ func runUserProductRecovery(
     if operation == .inspect {
       return try recoveryResult(
         operation: operation, outcome: "native_local_recovery",
-        state: state, quarantineCleared: state.nativeLocalRecoveryVerified == true,
+        state: state, quarantineCleared: state.reconnectPermitted,
         requiresHumanAction: false, nextAction: "powervpn recovery clear --json", exitCode: 0)
     }
-    let failure = try await clearNativeLeftovers(state, dependencies: dependencies)
+    let failure = try await clearNativeLeftovers(
+      state,
+      acknowledgePortalLogout: acknowledgePortalLogout, dependencies: dependencies)
     return try recoveryResult(
       operation: operation,
       outcome: failure == nil
@@ -340,8 +350,14 @@ private func recoveryResult(
     nextAction: nextAction
   )
   if state?.originatingBackend == .native {
-    report.nativeLocalCleanupVerified = state?.nativeLocalRecoveryVerified == true
-    report.nativePortalCleanupVerified = state?.cleanupVerified == true
+    report.nativeLocalCleanupVerified =
+      state?.nativeLocalRecoveryVerified == true
+      || state?.nativeCleanup?.localCleanupVerified == true
+    report.nativePortalCleanupVerified =
+      state?.nativeCleanup?.portalCleanupVerified
+      ?? (state?.cleanupVerified == true)
+    report.nativeCleanupReport = state?.nativeCleanup
+    report.nativePortalLogoutAcknowledged = state?.nativePortalLogoutAcknowledged
   }
   let encoder = JSONEncoder()
   encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

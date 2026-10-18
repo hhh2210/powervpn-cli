@@ -110,6 +110,9 @@ public struct PortalTransportFailureEvidence: Encodable, Equatable, Sendable {
   public let setCookieFieldCount: UInt32?
   public let setCookieWireSelection: PortalSetCookieWireSelection?
   public let duplicateSetCookieRejected: Bool?
+  public var curlCode: Int32? = nil
+  public var operatingSystemError: Int32? = nil
+  public var httpStatus: Int? = nil
 
 }
 
