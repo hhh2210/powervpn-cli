@@ -54,3 +54,16 @@ QM1–QM3 明文在 VIP 字段归一化后，与 vendor 逐字节一致，所以
 - 已知缺口：A/B 和复验都用单端口客户端；补 VID 之后“端口浮动”这一格没有单独复测。
 - 未解释：早期少数不补 VID 也成功的样本，可能是网关上同一 VIP 的残留绑定，没有验证。
 - 不在仓库里：原始抓包、Portal 返回内容和测试用的特权 runner。
+
+## 2026-10-18：接进 run / up / ssh
+
+- 运行时由 `scripts/native/build_runtime.sh` 从官方 strongSwan 6.0.7 加 `0001`–`0004` 补丁重新构建，
+  安装到 `/Library/PrivilegedHelperTools/com.hhh2210.powervpn-native/`，由 root helper（LaunchDaemon）常驻运行。
+- helper 只接受 `status`、`route-add`、`route-delete` 三种请求。`route-add` 只有在指定的 IKE SA 已经
+  ESTABLISHED 且有 INSTALLED 的 child 时才加路由，接口取自该 SA 的虚拟 IP 所在的 utun。每 5 秒核对一次，SA 没了就删路由。
+- 实测（thu52、thu21，Surge Enhanced Mode 开着）：
+  - 冷启动 `powervpn run thu52 -- hostname` 用时 1.5 s，复用会话 0.11 s；
+  - 目标 `/32` 走 native 的 utun，默认路由仍是 Surge 的 utun；
+  - `powervpn down` 用时 0.6 s，核对通过：路由删除、SA 清空、helper 名下无路由；
+  - thu21 第一次连接遇到 Portal 资源目录不完整（已知的间歇问题），现在 open 内会重新登录重试，最多 3 次。
+- child SA 的生存期是 1 小时。现在在到期前 5 分钟 rekey；rekey 是否被网关接受，见下面的长连接记录。

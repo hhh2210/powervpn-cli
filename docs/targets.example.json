@@ -1,5 +1,6 @@
 {
   "portalOrigin": "https://192.0.2.1:4443",
+  "backend": "native",
   "targets": {
     "lab-a": {
       "host": "192.0.2.21",

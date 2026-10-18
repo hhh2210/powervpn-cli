@@ -24,7 +24,7 @@
   "boundary": {
     "serverTested": true,
     "privilegedBackendTested": true,
-    "productCLIWired": false,
+    "productCLIWired": true,
     "evidence": "docs/evidence/native-strongswan-backend.md"
   },
   "excluded": {

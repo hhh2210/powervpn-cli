@@ -1,36 +1,61 @@
 # powervpn
 
-在 Apple Silicon Mac 上用命令行连清华 LeadSec PowerVPN 后面的服务器，代替已经停更的官方 GUI。
-第一次由你本人在终端里配置、登录、确认能 SSH 上去；之后的日常命令可以全部交给 coding agent 跑。
+在 Apple Silicon Mac 上用命令行连清华 LeadSec PowerVPN 后面的服务器。
+隧道由我们自己打过补丁的 strongSwan 建立，原生 arm64，**不需要安装官方 PowerVPN 客户端**。
+第一次由你本人在终端里构建、安装、写配置，确认能 SSH 上去；之后的日常命令可以全部交给 coding agent。
 
 <img width="700" height="112" alt="image" src="https://github.com/user-attachments/assets/2baf3ae8-d342-44de-a3ea-0c0da8c93265" />
 
-它不自带加密隧道：默认驱动官方 PowerVPN 装好的特权 helper
-（`/Library/PrivilegedHelperTools/com.leadsec.charon-xpc`）按原协议建隧道，
-补上了官方客户端在长连接稳定性、和 Surge 这类代理共存方面的问题。
-认证照常走学校 Portal，不绕过任何登录。
+## 它是怎么工作的
+
+```text
+powervpn run thu21 -- cmd                       你的用户身份
+  ├─ Portal 登录、选资源（和官方客户端走同一套认证，不绕过登录）
+  ├─ 通过 VICI 让 charon 建 IKEv1 和隧道
+  └─ 作为 ssh 的 ProxyCommand 转发 ──► 只有目标 IP 走隧道
+
+powervpn-native-helper                          root LaunchDaemon，安装一次
+  ├─ 常驻运行打过补丁的 charon（strongSwan 6.0.7）
+  └─ 只接受三种请求：查状态、给目标 IP 加一条走隧道的 /32 路由、删掉它
+```
+
+- 默认路由、DNS 和 Surge 都不动，只有你配置的目标 IP 走隧道。
+- helper 不执行任何调用方给的命令或路径，控制 socket 只对安装它的用户开放。
+- 每次断开都会逐项核对：路由删了、SA 没了、Portal 登出了。上次没收干净的，下次连接前会自动清掉。
 
 ## 需要什么
 
-- arm64 Mac，macOS 14.4 或更新。
-- 已安装官方 PowerVPN，并且用它成功连过一次（这样特权 helper 才会装好）。
+- arm64 Mac，macOS 14 或更新。
+- 完整的 Xcode（只装 Command Line Tools 不够），以及 Homebrew：
+
+  ```sh
+  brew install autoconf automake libtool gettext bison gperf pkgconf openssl@3
+  ```
+
 - 你自己的 Portal 账号，以及要连的服务器 IP、SSH 用户名，和它在 Portal 里对应的资源名。
-- 从源码构建需要完整的 Xcode（只装 Command Line Tools 不够）。
 
 ## 第一次使用（你本人在终端里做）
 
-**1. 安装**
+**1. 构建**
 
 ```sh
 git clone https://github.com/hhh2210/powervpn-cli.git
 cd powervpn-cli
-swift build -c release --product powervpn --arch arm64
+scripts/native/build_runtime.sh            # 拉 strongSwan 6.0.7，打补丁，编译，约 1–2 分钟
+swift build -c release --arch arm64
 mkdir -p ~/.local/bin && cp .build/release/powervpn ~/.local/bin/   # 或任何在 PATH 里的目录
 ```
 
-`brew install hhh2210/powervpn/powervpn` 也能装，但它装的是最近一个 release tag，可能比源码旧。
+**2. 安装 native 后端（只需要一次 sudo）**
 
-**2. 写账号密码**
+```sh
+sudo scripts/native/install.sh
+```
+
+它只装我们自己的东西：`/Library/PrivilegedHelperTools/com.hhh2210.powervpn-native/` 和一个 LaunchDaemon。
+看到 `install: native backend running` 就好了。
+
+**3. 写账号密码**
 
 ```sh
 mkdir -p ~/.config/powervpn
@@ -43,7 +68,7 @@ chmod 600 ~/.config/powervpn/credentials.env
 
 权限不是 `0600` 时命令会直接拒绝运行。密码只从这个文件读，不会出现在命令行参数、日志或报告里。
 
-**3. 写要连的服务器**
+**4. 写要连的服务器**
 
 ```sh
 cp docs/targets.example.json ~/.config/powervpn/targets.json
@@ -55,6 +80,7 @@ chmod 600 ~/.config/powervpn/targets.json
 ```json
 {
   "portalOrigin": "https://<Portal 地址>:<端口>",
+  "backend": "native",
   "targets": {
     "lab-a": { "host": "<服务器 IPv4>", "user": "<SSH 用户名>", "resource": "<Portal 里的资源名>" }
   }
@@ -63,10 +89,11 @@ chmod 600 ~/.config/powervpn/targets.json
 
 - `lab-a` 是你给这台机器起的名字，后面所有命令都用它。
 - `portalOrigin` 就是你在浏览器里登录 VPN 门户的地址。
-- `resource` 必须和官方客户端资源列表里的名字一字不差。
-- 可以写多台；不过同一时间只能连其中一台。
+- `resource` 必须和 Portal 资源列表里的名字一字不差。
+- `backend` 不写时默认是旧的官方 helper 方案，所以这里要写 `"native"`。
+- 可以写多台；同一时间只连其中一台。
 
-**4. 配 SSH**
+**5. 配 SSH**
 
 在 `~/.ssh/config` 里给每个目标加一段，名字和 `targets.json` 里的一致：
 
@@ -79,10 +106,9 @@ Host lab-a
   ControlPersist 8h
 ```
 
-`HostName` 和 `User` 必须和 `targets.json` 对上。不要在这里写 PowerVPN 的 `ProxyCommand`，
-需要时 `powervpn up` 会自己注入。
+`HostName` 和 `User` 必须和 `targets.json` 对上。不要在这里写 `ProxyCommand`，`powervpn` 会自己注入。
 
-**5. 自检并连一次**
+**6. 自检并连一次**
 
 ```sh
 powervpn doctor              # 应显示 ready；否则会指出第一个要修的问题
@@ -96,7 +122,7 @@ powervpn ssh lab-a -- hostname
 ```sh
 powervpn up lab-a    # 建立后台会话
 ssh lab-a            # 普通 ssh 和 Remote-SSH 都复用这条会话
-powervpn down        # 用完断开，并确认路由已恢复
+powervpn down        # 用完断开，并核对路由、SA 都已清理
 ```
 
 ## 交给 Agent
@@ -107,12 +133,11 @@ powervpn down        # 用完断开，并确认路由已恢复
 powervpn run lab-a -- 'nvidia-smi -L'
 ```
 
-`run` 会复用已有的会话，没有就自动建一个。遇到常见的瞬时失败，它会自己重试或恢复。
-多个 `run` 可以同时跑，共用同一条会话。
+`run` 会复用已有的会话（一条命令约 0.1 秒），没有就自动建一个（约 1.5 秒）。
+遇到 Portal 资源列表偶发不完整这类瞬时失败，它会自己重试。多个 `run` 可以同时跑，共用同一条会话。
 
 把 `skills/powervpn/SKILL.md` 装进 agent 的 skill 目录（Claude Code 是 `~/.claude/skills/powervpn/`），
 它就知道该怎么用 `run`，什么时候自己恢复，什么时候该来找你。
-需要人出面的只有这几种情况：输入密码、短信验证码、Touch ID，以及 macOS 弹出的授权框。
 
 退出码：
 
@@ -120,45 +145,50 @@ powervpn run lab-a -- 'nvidia-smi -L'
 |---|---|---|
 | 远端命令自己的码 | 命令已在服务器上跑完 | 按命令本身处理 |
 | 75 | 暂时不行（会话忙、启动失败、中途断开） | 等一会儿原样重跑 |
-| 77 | 卡住了 | 看 stderr 最后的 `next:` 行，照着做 |
+| 77 | 需要人（helper 没装、账号被拒、资源名不对） | 看 stderr 最后的 `next:` 行，照着做 |
 
 PowerVPN 自己出错时，stderr 最后两行固定是 `powervpn run: <原因>` 和 `next: <下一步>`。
 没有这两行，说明 75/77 是远端命令自己返回的。
 
 ## 出问题时
 
-- 先跑 `powervpn doctor`，它会指出第一个要修的问题。
-- `next:` 提示 `powervpn recovery …`：说明上次断开时没能确认路由已恢复，会话被隔离了。
-  先跑 `powervpn recovery inspect --json`，再跑 `powervpn recovery clear --json`，
-  后者只在实测网络状态干净时才会解除隔离。
-- `next:` 提示 `powervpn repair vendor-log --json`：官方日志文件丢了，或者权限不对。
-  跑这条命令会弹一次 macOS 管理员授权，确认后修复。
-- 开发和底层调试命令都在 `powervpn debug help` 里，日常用不到。
+- 先跑 `powervpn doctor`，它会指出第一个要修的问题和下一步。
+- `native_helper_unavailable` / `native_charon_unavailable`：helper 没装或没在跑，重新执行 `sudo scripts/native/install.sh`。
+- 日志（需要 sudo 读）：`/var/log/powervpn-native-helper.log`、`/var/log/powervpn-native-charon.log`。
+- 升级：重新跑 `scripts/native/build_runtime.sh`、`swift build -c release --arch arm64`，再 `sudo scripts/native/install.sh`。
+- 卸载：`sudo scripts/native/uninstall.sh`。
 
-## Native strongSwan 后端（实验）
+## 为什么需要打补丁
 
-另一条路线是不用官方 helper，改用打过补丁的 strongSwan 6.0.7 自己的 charon 直连，
-原生 arm64，不经过 Rosetta。2026-10-17 在真实网关上跑通：补上 `NEW CLIENT` Vendor ID 之后，
-对照实验 6/6 对 0/6，随后连续 10/10 都能 SSH 上去。
-它还没接进 `run` / `up` / `ssh`，日常仍走官方 helper。
-补丁和清单在 `patches/strongswan-6.0.7/`，过程和数据见
-`docs/evidence/native-strongswan-backend.md`。
+LeadSec 网关说的是带私有扩展的 IKEv1：Quick Mode 里要带一段 `ADDRULE` 载荷描述资源，
+Main Mode 第一个包还要带 `NEW CLIENT` 这个 Vendor ID。缺了后者，网关照样完成 IKE、建隧道、
+转发入向流量，就是不给虚拟 IP 回 ESP，表现为能连上却收不到任何回包。
+补上之后对照实验 6/6 对 0/6，随后连续 10/10 都能 SSH 上去。
+补丁和清单在 `patches/strongswan-6.0.7/`，过程和数据见 `docs/evidence/native-strongswan-backend.md`。
+
+## 旧方案：驱动官方 helper
+
+不写 `backend` 或写 `"backend": "vendor"` 时，powervpn 改为驱动官方 PowerVPN 装的 x86 特权 helper。
+它需要先装官方客户端，断开时证明不了清理干净，会进入隔离和 recovery 流程。
+只作为回退保留，见 [docs/vendor-backend.md](docs/vendor-backend.md)。
 
 ## 开发
 
 ```sh
-swift build --product powervpn --arch arm64
-scripts/hermetic_swift_test.sh    # swift test，但读不到本机真实的 PowerVPN 状态
+swift build --arch arm64
+scripts/hermetic_swift_test.sh --no-parallel   # swift test，但读不到本机真实的 PowerVPN 状态
 ```
 
 ```text
 Sources/
-  PowerVPNCore/         helper XPC 控制、VICI、路由与清理判定
-  PowerVPNPortal/       Portal 登录、凭据、cookie、资源目录
-  PowerVPNProduct/      run/up/ssh/down 的编排与状态机
-  PowerVPNCLI/          命令行入口
-  PowerVPNNativeTrial/  native strongSwan 后端的实验驱动
+  PowerVPNCore/          VICI、helper 协议、路由与清理判定
+  PowerVPNPortal/        Portal 登录、凭据、cookie、资源目录
+  PowerVPNProduct/       run/up/ssh/down 的编排；NativeTunnel 是 native 后端
+  PowerVPNCLI/           命令行入口
+  PowerVPNNativeHelper/  root helper（charon 守护、/32 路由）
+  PowerVPNNativeTrial/   native 后端的实验驱动
 patches/strongswan-6.0.7/  charon 补丁序列
+scripts/native/            runtime 构建、安装、卸载
 skills/powervpn/           给 agent 的 skill
 docs/                      协议取证、设计和历史记录
 ```

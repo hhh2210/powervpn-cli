@@ -7,7 +7,7 @@ description: Run commands on Larry's THU servers (thu21 login node, thu52) that 
 
 ## What it does
 
-- Reuses the live thu21 session, or starts one and keeps it for later calls (first call ~5 s, later ~0.2 s).
+- Reuses the live thu21 session, or starts one and keeps it for later calls (first call ~2 s on the native backend, ~5 s on the vendor one; later ~0.1 s).
 - Clears a leftover cleanup quarantine itself, through the same measured safety gate a human would use.
 - Retries one transient start failure.
 - Passes stdin, stdout, stderr, and the remote exit code straight through; parallel calls are fine.
@@ -25,7 +25,11 @@ The same works for `thu52` (only one target can be connected at a time).
 
 A PowerVPN-side failure always ends stderr with `powervpn run: <token>` then `next: <action>`. If those lines are absent, a 75 or 77 came from the remote command itself.
 
-## Recovery (no human approval needed)
+## Native backend
+
+With `"backend": "native"` in targets.json there is no quarantine: a session that ended uncleanly is cleaned up by the next `run` itself. The only native tokens that need Larry are `native_helper_unavailable` and `native_charon_unavailable` (the root helper must be reinstalled with `sudo scripts/native/install.sh`) and `native_portal_rejected` (credentials). The rest are retryable.
+
+## Recovery (vendor backend; no human approval needed)
 
 Larry authorized agents to clear PowerVPN quarantines on their own: this is an intranet VPN to his own servers, and `clear` only succeeds after its own measured network-baseline gate passes, so it cannot leave the Mac in a worse state.
 
