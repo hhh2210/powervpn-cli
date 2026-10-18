@@ -2,7 +2,7 @@ import CryptoKit
 import Darwin
 import Foundation
 
-package let powervpnVersion = "0.2.0"
+package let powervpnVersion = "0.2.1"
 
 /// What a Homebrew keg ships beside the CLI, in `<prefix>/libexec/powervpn-native`.
 ///

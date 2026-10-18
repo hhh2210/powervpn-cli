@@ -18,6 +18,8 @@ public enum NativeHelperPaths {
   /// charon's own VICI socket; root only.
   public static let privateRunDirectory = runDirectory + "/private"
   public static let charonVICI = privateRunDirectory + "/charon.vici"
+  /// charon's pidfile, root-only; build_runtime.sh passes this directory as --with-piddir.
+  public static let charonPID = runDirectory + "/charon.pid"
   /// The user's VICI endpoint: the helper forwards only allowlisted commands.
   public static let vici = runDirectory + "/vici.sock"
   public static let control = runDirectory + "/control.sock"

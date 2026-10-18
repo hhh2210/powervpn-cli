@@ -366,12 +366,77 @@ func serveControl(_ helper: Helper, owner: uid_t) {
   }
 }
 
-// MARK: entry
+// MARK: serving
 
-if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "verify-install" {
-  exit(NativeInstallValidation.validateTree(CommandLine.arguments[2]) ? 0 : 1)
+/// A charon outlives a helper that died without stopping it (a crash, SIGKILL):
+/// it runs in its own process group, so launchd does not take it down with the
+/// helper, and every later charon finds its pid alive in the pidfile and exits
+/// with status 66. Only a root process executed as this runtime's charon is
+/// stopped. If it does not exit, or the pid cannot be inspected, this fails
+/// and keeps the pidfile rather than let a second charon start.
+func stopStrayCharon() {
+  let text: String
+  do {
+    text = try String(contentsOfFile: paths.charonPID, encoding: .utf8)
+  } catch CocoaError.fileReadNoSuchFile {
+    return
+  } catch {
+    fail("cannot read the charon pidfile")
+  }
+  if let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)), pid > 1 {
+    switch ProcessIdentity.lookup(pid) {
+    case .running(let stray) where stray.uid == 0 && stray.executedPath == paths.charon:
+      log("stopping stray charon pid=\(pid)")
+      guard stray.stop() else { fail("stray charon pid=\(pid) did not exit") }
+    case .running, .gone:
+      break
+    case .unknown:
+      fail("cannot inspect pid \(pid) from the charon pidfile")
+    }
+  }
+  // charon itself discards a pidfile whose pid is gone, but not one whose pid
+  // another process has reused since.
+  unlink(paths.charonPID)
 }
-if CommandLine.arguments.dropFirst() == ["host-policy"] {
+
+/// Top-level code is main-actor isolated, and so is any non-Sendable closure
+/// written in it, such as a dispatch source handler. Run on a global queue,
+/// that closure fails Swift 6's runtime isolation check and traps the daemon,
+/// leaving charon behind. Everything handed to other queues is therefore set
+/// up in this nonisolated function. The caller keeps the returned sources:
+/// a released source stops firing.
+func startBackgroundWork(_ helper: Helper, owner: uid_t) -> [any DispatchSourceProtocol] {
+  var sources: [any DispatchSourceProtocol] = []
+  for number in [SIGTERM, SIGINT, SIGHUP] {
+    signal(number, SIG_IGN)
+    let source = DispatchSource.makeSignalSource(signal: number, queue: .global())
+    source.setEventHandler {
+      log("signal \(number); stopping")
+      helper.stop()
+      unlink(paths.control)
+      unlink(paths.vici)
+      exit(0)
+    }
+    source.resume()
+    sources.append(source)
+  }
+
+  stopStrayCharon()
+  helper.startCharon()
+  let reconcileTimer = DispatchSource.makeTimerSource(queue: .global())
+  reconcileTimer.schedule(deadline: .now() + 5, repeating: 5)
+  reconcileTimer.setEventHandler { helper.reconcile() }
+  reconcileTimer.resume()
+  sources.append(reconcileTimer)
+
+  DispatchQueue.global().async { serveVICI(owner: owner) }
+  return sources
+}
+
+/// install.sh: the allowed-hosts list for a targets.json on stdin. Kept out of
+/// top-level code, whose closures (even `map(\.host)`) are main-actor isolated
+/// and carry runtime isolation checks on older compilers.
+func printHostPolicy() -> Never {
   struct Target: Decodable { let host: String }
   struct Configuration: Decodable { let targets: [String: Target] }
   guard let data = try? FileHandle.standardInput.read(upToCount: 1_048_577),
@@ -381,6 +446,19 @@ if CommandLine.arguments.dropFirst() == ["host-policy"] {
       configuration.targets.values.map(\.host).joined(separator: "\n"))
   else { fail("invalid target host policy") }
   print(hosts.sorted().joined(separator: "\n"))
+  exit(0)
+}
+
+// MARK: entry
+
+if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "verify-install" {
+  exit(NativeInstallValidation.validateTree(CommandLine.arguments[2]) ? 0 : 1)
+}
+if CommandLine.arguments.dropFirst() == ["host-policy"] { printHostPolicy() }
+// uninstall.sh, after bootout: the same stray-charon rule as at startup.
+if CommandLine.arguments.dropFirst() == ["stop-stray-charon"] {
+  guard geteuid() == 0 else { fail("must run as root") }
+  stopStrayCharon()
   exit(0)
 }
 guard CommandLine.arguments.dropFirst() == ["serve"] else {
@@ -419,26 +497,6 @@ else { fail("allowed-hosts missing or invalid; reinstall") }
 
 signal(SIGPIPE, SIG_IGN)
 let helper = Helper(allowedHosts: allowedHosts)
-var signalSources: [DispatchSourceSignal] = []
-for number in [SIGTERM, SIGINT, SIGHUP] {
-  signal(number, SIG_IGN)
-  let source = DispatchSource.makeSignalSource(signal: number, queue: .global())
-  source.setEventHandler {
-    log("signal \(number); stopping")
-    helper.stop()
-    unlink(paths.control)
-    unlink(paths.vici)
-    exit(0)
-  }
-  source.resume()
-  signalSources.append(source)
-}
-
-helper.startCharon()
-let reconcileTimer = DispatchSource.makeTimerSource(queue: .global())
-reconcileTimer.schedule(deadline: .now() + 5, repeating: 5)
-reconcileTimer.setEventHandler { helper.reconcile() }
-reconcileTimer.resume()
-
-DispatchQueue.global().async { serveVICI(owner: owner) }
+// A global lives as long as the process, and so do the sources it holds.
+let backgroundSources = startBackgroundWork(helper, owner: owner)
 serveControl(helper, owner: owner)
