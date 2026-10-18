@@ -371,33 +371,19 @@ func serveControl(_ helper: Helper, owner: uid_t) {
 /// A charon outlives a helper that died without stopping it (a crash, SIGKILL):
 /// it runs in its own process group, so launchd does not take it down with the
 /// helper, and every later charon finds its pid alive in the pidfile and exits
-/// with status 66. The pidfile is root-only in a root-owned directory, and the
-/// pid must still be a live root process named charon before it is signalled.
+/// with status 66. Only a root process executed as this runtime's charon is
+/// stopped; if it does not exit, the helper fails rather than start a second.
 func stopStrayCharon() {
-  guard let text = try? String(contentsOfFile: paths.charonPID, encoding: .utf8),
-    let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)), pid > 1
-  else { return }
-  if isRootCharon(pid) {
+  if let text = try? String(contentsOfFile: paths.charonPID, encoding: .utf8),
+    let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)),
+    let stray = ProcessIdentity.current(pid), stray.uid == 0, stray.executedPath == paths.charon
+  {
     log("stopping stray charon pid=\(pid)")
-    kill(pid, SIGTERM)
-    for _ in 0..<50 where isRootCharon(pid) { usleep(100_000) }
-    if isRootCharon(pid) { kill(pid, SIGKILL) }
+    guard stray.stop() else { fail("stray charon pid=\(pid) did not exit") }
   }
   // charon itself discards a pidfile whose pid is gone, but not one whose pid
   // another process has reused since.
   unlink(paths.charonPID)
-}
-
-func isRootCharon(_ pid: pid_t) -> Bool {
-  var info = proc_bsdinfo()
-  let size = Int32(MemoryLayout<proc_bsdinfo>.size)
-  guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size,
-    info.pbi_uid == 0, info.pbi_status != UInt32(SZOMB)
-  else { return false }
-  let name = withUnsafeBytes(of: info.pbi_comm) {
-    String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self)
-  }
-  return name == "charon"
 }
 
 /// Top-level code is main-actor isolated, and so is any non-Sendable closure

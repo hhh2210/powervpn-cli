@@ -7,18 +7,27 @@ LABEL=com.hhh2210.powervpn-native
 # Stopping the helper deletes the host routes it owns and stops charon.
 launchctl bootout "system/$LABEL" 2>/dev/null || true
 # A charon left behind by a helper that crashed is not stopped by bootout.
+# It is pinned by uid, start time and the path it was executed as, and each
+# signal goes out only while the pid still names that process.
+charon_identity() { ps -o uid=,lstart=,comm= -p "$1" 2>/dev/null | sed 's/^ *//'; }
 pid=$(cat /var/run/powervpn-native/charon.pid 2>/dev/null || true)
 case $pid in
 '' | *[!0-9]*) ;;
 *)
-	if [ "$(ps -o uid= -p "$pid" | tr -d ' ')" = 0 ] && ps -o comm= -p "$pid" | grep -q '/charon$'; then
-		kill "$pid" 2>/dev/null || true
-		for _ in $(seq 1 50); do
-			kill -0 "$pid" 2>/dev/null || break
-			sleep 0.1
+	identity=$(charon_identity "$pid")
+	case $identity in
+	"0 "*" /Library/PrivilegedHelperTools/$LABEL/runtime/libexec/ipsec/charon")
+		for signal in TERM KILL; do
+			[ "$(charon_identity "$pid")" = "$identity" ] || break
+			kill -s "$signal" "$pid" 2>/dev/null || true
+			for _ in $(seq 1 50); do
+				[ "$(charon_identity "$pid")" = "$identity" ] || break
+				sleep 0.1
+			done
 		done
-		kill -9 "$pid" 2>/dev/null || true
-	fi
+		[ "$(charon_identity "$pid")" != "$identity" ] || echo "uninstall: charon pid $pid did not exit" >&2
+		;;
+	esac
 	;;
 esac
 rm -f "/Library/LaunchDaemons/$LABEL.plist"
