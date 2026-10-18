@@ -22,7 +22,7 @@ package enum NativeTunnelFailure: String, Error, Equatable, Sendable {
   package var next: String {
     switch self {
     case .helperUnavailable, .charonUnavailable:
-      "install or restart the native backend: sudo scripts/native/install.sh"
+      "install or restart the native backend: \(NativeBundledPayload.installCommand)"
     case .targetInvalid: "fix the target in ~/.config/powervpn/targets.json"
     case .portalRejected: "check ~/.config/powervpn/credentials.env and the Portal account"
     case .portalConfigurationRejected: "check the Portal origin and TLS trust in targets.json"

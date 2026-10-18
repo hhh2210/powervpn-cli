@@ -40,6 +40,27 @@ import Testing
     #expect(try Data(contentsOf: archive) == original)
   }
 
+  @Test func doctorWarnsWhenABrewUpgradeLeftTheRootInstallBehind() async throws {
+    let store = try makeStore()
+    defer { try? FileManager.default.removeItem(at: store.directory) }
+    for (current, warns) in [(false, true), (true, false), (nil, false)] as [(Bool?, Bool)] {
+      let dependencies = UserProductCommandDependencies(
+        loadConfiguration: { try config(.native) },
+        processRunner: NativeStoppedMaster(), stateStore: store, mutationLeaseAvailable: { true },
+        credentialFileSafe: { true }, nativeBackendFailure: { nil },
+        nativeInstallCurrent: { current })
+      let result = try await runCurrentMachineUserProductCommand(
+        ["doctor"], dependencies: dependencies)
+      // An outdated helper still works; doctor says so without blocking.
+      #expect(result.exitCode == 0)
+      #expect(result.standardOutput.contains("differs from this powervpn") == warns)
+      #expect(
+        result.standardOutput.contains(
+          "Next: \(NativeBundledPayload.sudoCommand("install", invokedAs: dependencies.executablePath))"
+        ) == warns)
+    }
+  }
+
   @Test func nativeConfigurationStillNamesAnUnresolvedVendorSession() async throws {
     let store = try makeStore()
     defer { try? FileManager.default.removeItem(at: store.directory) }

@@ -20,6 +20,10 @@ func printCLIUsage() {
       recovery clear --json  Clear quarantine only after a measured cold baseline
       repair vendor-log --json
                              Restore the root-only vendor log (one macOS admin approval)
+      native status          Check the installed native backend against this powervpn
+      sudo powervpn native install | uninstall
+                             Install or remove the native backend (Homebrew installs)
+      --version              Print the powervpn version
       debug help             Show development and compatibility commands
 
     Options:

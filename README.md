@@ -28,25 +28,20 @@ powervpn-native-helper                          root LaunchDaemon，安装一次
 ## 需要什么
 
 - arm64 Mac，macOS 14 或更新。
-- 完整的 Xcode（只装 Command Line Tools 不够），以及 Homebrew：
-
-  ```sh
-  brew install autoconf automake libtool gettext bison gperf pkgconf openssl@3
-  ```
+- Homebrew。它会顺带装好 Xcode Command Line Tools，编译只需要这个，不需要完整的 Xcode。
 
 - 你自己的 Portal 账号，以及要连的服务器 IP、SSH 用户名，和它在 Portal 里对应的资源名。
 
 ## 第一次使用（你本人在终端里做）
 
-**1. 构建**
+**1. 安装**
 
 ```sh
-git clone https://github.com/hhh2210/powervpn-cli.git
-cd powervpn-cli
-scripts/native/build_runtime.sh            # 拉 strongSwan 6.0.7，打补丁，编译，约 1–2 分钟
-swift build -c release --arch arm64
-mkdir -p ~/.local/bin && cp .build/release/powervpn ~/.local/bin/   # 或任何在 PATH 里的目录
+brew install hhh2210/powervpn/powervpn
 ```
+
+Homebrew 在本机从源码编译 CLI、root helper 和打过补丁的 strongSwan 6.0.7，约几分钟。
+想直接从源码构建，见文末「从源码构建」。
 
 **2. 写账号密码**
 
@@ -63,14 +58,10 @@ chmod 600 ~/.config/powervpn/credentials.env
 
 **3. 写要连的服务器**
 
+把尖括号里的内容换成你自己的，再执行：
+
 ```sh
-cp docs/targets.example.json ~/.config/powervpn/targets.json
-chmod 600 ~/.config/powervpn/targets.json
-```
-
-然后按你自己的情况改：
-
-```json
+cat > ~/.config/powervpn/targets.json <<'EOF'
 {
   "portalOrigin": "https://<Portal 地址>:<端口>",
   "backend": "native",
@@ -78,6 +69,8 @@ chmod 600 ~/.config/powervpn/targets.json
     "lab-a": { "host": "<服务器 IPv4>", "user": "<SSH 用户名>", "resource": "<Portal 里的资源名>" }
   }
 }
+EOF
+chmod 600 ~/.config/powervpn/targets.json
 ```
 
 - `lab-a` 是你给这台机器起的名字，后面所有命令都用它。
@@ -89,13 +82,15 @@ chmod 600 ~/.config/powervpn/targets.json
 **4. 安装 native 后端（只需要一次 sudo）**
 
 ```sh
-sudo scripts/native/install.sh
+sudo "$(brew --prefix)/bin/powervpn" native install
 ```
 
 它只装我们自己的东西：`/Library/PrivilegedHelperTools/com.hhh2210.powervpn-native/` 和一个 LaunchDaemon。
 看到 `install: native backend running` 就好了。
 
 安装时会把 `targets.json` 的目标 IP 固定到 root 拥有的路由白名单。以后新增或修改目标 IP，需重新执行安装命令。
+装好之后，常驻的 root 进程只运行复制进系统目录、校验过的副本，从不执行 Homebrew 目录（当前用户可写）里的文件。
+安装这一步本身和任何 `sudo` 命令一样，信任你自己账户下的文件。
 
 **5. 配 SSH**
 
@@ -159,10 +154,11 @@ PowerVPN 自己出错时，stderr 最后两行固定是 `powervpn run: <原因>`
 - 先跑 `powervpn doctor`，它会指出第一个要修的问题和下一步。
 - native 登出会用同一会话做前后只读探测：只有确认已失效才报告完整清理。网关的 logout HTTP 302 不会被跟随，也不直接视为成功。若探测明确仍有效，自动重连被阻止；只有本人在 Portal 结束该会话后，才使用 `powervpn recovery clear --json --acknowledge-portal-logout`。这个显式确认保留原始未验证回执，不用于自动重试。
 - `native_portal_unavailable` / `native_resource_unavailable`：Portal 传输或目录暂不可用，`run` 有限重试后返回 75，不误报密码错误。
-- `native_helper_unavailable` / `native_charon_unavailable`：helper 没装或没在跑，重新执行 `sudo scripts/native/install.sh`。
+- `native_helper_unavailable` / `native_charon_unavailable`：helper 没装或没在跑，按 `next:` 行重新安装 native 后端。
 - 日志（需要 sudo 读）：`/var/log/powervpn-native-helper.log`、`/var/log/powervpn-native-charon.log`。
-- 升级：重新跑 `scripts/native/build_runtime.sh`、`swift build -c release --arch arm64`，再 `sudo scripts/native/install.sh`。
-- 卸载：`sudo scripts/native/uninstall.sh`。
+- 升级：`brew upgrade powervpn`。只有 helper 或 strongSwan 运行时变了才需要再 sudo 一次；
+  `powervpn native status` 或 `powervpn doctor` 会告诉你，并给出要执行的命令。
+- 卸载：`sudo "$(brew --prefix)/bin/powervpn" native uninstall`，再 `brew uninstall powervpn`。
 
 ## 为什么需要打补丁
 
@@ -177,6 +173,28 @@ Main Mode 第一个包还要带 `NEW CLIENT` 这个 Vendor ID。缺了后者，�
 不写 `backend` 或写 `"backend": "vendor"` 时，powervpn 改为驱动官方 PowerVPN 装的 x86 特权 helper。
 它需要先装官方客户端，断开时证明不了清理干净，会进入隔离和 recovery 流程。
 只作为回退保留，见 [docs/vendor-backend.md](docs/vendor-backend.md)。
+
+## 从源码构建
+
+不用 Homebrew 时，先装构建依赖，再用仓库里的脚本：
+
+```sh
+brew install autoconf automake libtool gettext bison gperf pkgconf openssl@3
+git clone https://github.com/hhh2210/powervpn-cli.git
+cd powervpn-cli
+scripts/native/build_runtime.sh            # 拉 strongSwan 6.0.7，打补丁，编译，约 1–2 分钟
+swift build -c release --arch arm64
+mkdir -p ~/.local/bin && cp .build/release/powervpn ~/.local/bin/   # 或任何在 PATH 里的目录
+sudo scripts/native/install.sh             # 代替 powervpn native install；升级后同样重跑
+```
+
+卸载用 `sudo scripts/native/uninstall.sh`。
+
+## 许可
+
+powervpn-cli 是 MIT。native 后端运行的是 strongSwan 6.0.7（GPL-2.0-or-later）加 `patches/strongswan-6.0.7/` 的补丁，
+带一份 OpenSSL libcrypto（Apache-2.0）。两者的许可证和源码出处随运行时安装在
+`/Library/PrivilegedHelperTools/com.hhh2210.powervpn-native/runtime/share/licenses/`。
 
 ## 开发
 

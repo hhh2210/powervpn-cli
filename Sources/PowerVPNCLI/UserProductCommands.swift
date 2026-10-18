@@ -63,6 +63,9 @@ struct UserProductCommandDependencies: Sendable {
   let cleanupPollLimit: Int
   let nativeBackendFailure: @Sendable () -> NativeTunnelFailure?
   let nativeRecoverStale: @Sendable (PowerVPNTargetsConfiguration) async -> Bool
+  /// nil unless a Homebrew keg ships the native payload; false when the root
+  /// install no longer matches it (a `brew upgrade` changed the helper/runtime).
+  let nativeInstallCurrent: @Sendable () -> Bool?
 
   init(
     loadConfiguration: @escaping @Sendable () throws -> PowerVPNTargetsConfiguration = {
@@ -133,6 +136,9 @@ struct UserProductCommandDependencies: Sendable {
     },
     nativeRecoverStale: @escaping @Sendable (PowerVPNTargetsConfiguration) async -> Bool = {
       await NativeTunnel.recoverStale(configuration: $0)
+    },
+    nativeInstallCurrent: @escaping @Sendable () -> Bool? = {
+      NativeBundledPayload.current?.matchesInstalled()
     }
   ) {
     self.loadConfiguration = loadConfiguration
@@ -163,6 +169,7 @@ struct UserProductCommandDependencies: Sendable {
     self.cleanupPollLimit = cleanupPollLimit
     self.nativeBackendFailure = nativeBackendFailure
     self.nativeRecoverStale = nativeRecoverStale
+    self.nativeInstallCurrent = nativeInstallCurrent
   }
 
   private static var currentExecutablePath: String {
@@ -873,7 +880,11 @@ private func runUserProductDoctor(
   } else {
     blocker = nil
   }
-  let warning = system.flatMap(historicalHelperWarning)
+  let nativeInstallStale = native && dependencies.nativeInstallCurrent() == false
+  let warning =
+    nativeInstallStale
+    ? "the installed native backend differs from this powervpn \(powervpnVersion)"
+    : system.flatMap(historicalHelperWarning)
   let report = UserProductDoctorReport(
     ready: blocker == nil,
     targetConfigurationSafe: configurationSafe,
@@ -890,7 +901,11 @@ private func runUserProductDoctor(
     nextAction: nativeFailure.map(\.next)
       ?? (blocker == "previous_cleanup_unverified"
         ? "powervpn recovery inspect --json"
-        : (!logSafe && logFinding.repairable ? vendorLogRepairCommand : nil)),
+        : (!logSafe && logFinding.repairable
+          ? vendorLogRepairCommand
+          : (nativeInstallStale
+            ? NativeBundledPayload.sudoCommand("install", invokedAs: dependencies.executablePath)
+            : nil))),
     warning: warning
   )
   if arguments.last == "--json" {
