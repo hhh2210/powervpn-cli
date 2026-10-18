@@ -335,7 +335,12 @@ struct NativeTrial {
           snapshot: lease.snapshot, target: target, name: name,
           includePrivateRule: args[0] == "--live-private-child" || coexistMode || exclusiveMode,
           proposalNumber: proposalNumber,
-          observeGateway: observeGateway
+          observeGateway: observeGateway,
+          diagnosticSink: ProcessInfo.processInfo.environment["POWERVPN_CAPTURE_VIP_FIELDS"] == "1"
+            ? { data in
+              FileHandle.standardOutput.write(data)
+              FileHandle.standardOutput.write(Data([10]))
+            } : nil
         ) { shared, connection in
           try Task.checkCancellation()
           phase = "load_shared"

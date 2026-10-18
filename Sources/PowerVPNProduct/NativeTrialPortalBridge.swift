@@ -35,6 +35,7 @@ package enum NativeTrialPortalBridge {
     includePrivateRule: Bool = false,
     proposalNumber: UInt8 = 0,
     observeGateway: ((String) throws -> Void)? = nil,
+    diagnosticSink: ((Data) -> Void)? = nil,
     _ body: (VICIMessage, VICIMessage) throws -> Void
   ) throws {
     let mapped = AuthenticatedPortalSnapshotMapper.mapClassified(snapshot)
@@ -49,7 +50,7 @@ package enum NativeTrialPortalBridge {
         try NativeTrialMaterial.withRequests(
           snapshot: start, target: target.host, connectionName: name,
           includePrivateRule: includePrivateRule, proposalNumber: proposalNumber,
-          observeGateway: observeGateway, body)
+          observeGateway: observeGateway, diagnosticSink: diagnosticSink, body)
       }
     } catch let error as AuthenticatedPortalValidatedSnapshotError {
       if case .incompleteSnapshot(let field) = error { throw Failure.snapshotIncomplete(field) }

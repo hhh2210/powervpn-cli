@@ -118,6 +118,7 @@ public enum ProductPortalLogoutFailureClass: String, Encodable, Equatable, Senda
   case requestConstructionFailed = "request_construction_failed"
   case transportFailed = "transport_failed"
   case completedRemoteExchange = "completed_remote_exchange"
+  case postLogoutSessionRejected = "post_logout_session_rejected"
 }
 
 public struct ProductPortalDryRunOperations: Encodable, Equatable, Sendable {

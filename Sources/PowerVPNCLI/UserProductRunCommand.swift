@@ -1,4 +1,5 @@
 import Foundation
+import PowerVPNProduct
 
 /// `powervpn run <target> -- <command...>` is the one-call entrypoint for agents and scripts.
 ///
@@ -37,7 +38,12 @@ private let runSettlePollMilliseconds = 1_000
 
 /// Start failures that a retry cannot fix: credentials or configuration.
 private let runHumanStartFailures: Set<String> = [
-  "runtime_unavailable"
+  "runtime_unavailable",
+  NativeTunnelFailure.helperUnavailable.rawValue,
+  NativeTunnelFailure.charonUnavailable.rawValue,
+  NativeTunnelFailure.targetInvalid.rawValue,
+  NativeTunnelFailure.portalRejected.rawValue,
+  NativeTunnelFailure.portalConfigurationRejected.rawValue,
 ]
 
 /// `local_safety_check_failed` also names transient states (the vendor helper still exiting, the
@@ -112,7 +118,8 @@ func runUserProductRun(
         if await waitWhileBusy() { continue }
         return runBusy(rerun)
       }
-      if state.terminal, !state.reconnectPermitted {
+      // Native leftovers are cleared by `up` itself; only the vendor needs recovery.
+      if state.terminal, !state.reconnectPermitted, state.originatingBackend == .vendor {
         guard recoveryAttempts < runRecoveryAttemptLimit else {
           return runFailure(
             "quarantine_persists",
@@ -175,8 +182,23 @@ func runUserProductRun(
     case 74:
       // The start left a quarantine. The vendor helper crashes on every stop and stays visible
       // while the crash report is captured, so let it settle before the measured recovery.
-      _ = await settleLocalState(dependencies: dependencies)
+      if (try? dependencies.stateStore.load())?.originatingBackend == .vendor {
+        _ = await settleLocalState(dependencies: dependencies)
+      } else {
+        // A native attempt with uncertain logout still counts as a failed
+        // start. Local recovery must not reset the retry budget indefinitely.
+        startFailures += 1
+        if startFailures >= 2 {
+          return runFailure(
+            "native_cleanup_unproven", firstLine(of: up.standardError),
+            exitCode: UserProductRunExit.retryable,
+            next: "powervpn down (recover local objects; Portal logout may remain unverified)")
+        }
+      }
       continue
+    case 130:
+      return runFailure(
+        "native_cancelled", firstLine(of: up.standardError), exitCode: 130, next: rerun)
     default:
       let failure = (try? dependencies.stateStore.load())?.failure
       if let failure, runHumanStartFailures.contains(failure) {
@@ -184,7 +206,7 @@ func runUserProductRun(
           failure,
           firstLine(of: up.standardError),
           exitCode: UserProductRunExit.needsHuman,
-          next: "powervpn doctor --json"
+          next: NativeTunnelFailure(rawValue: failure)?.next ?? "powervpn doctor --json"
         )
       }
       if failure == "local_safety_check_failed" {

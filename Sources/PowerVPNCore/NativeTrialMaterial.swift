@@ -5,6 +5,8 @@ import Foundation
 /// Temporary, scoped bridge for the native-daemon interoperability experiment.
 /// Payloads never leave this process except over the selected Unix socket.
 package enum NativeTrialMaterial {
+  /// Name of the single child the generated connection carries.
+  package static let childName = "selected-resource"
   package enum Failure: Error {
     case incomplete, unsupported, targetOutsideResource, gatewayMatchesTarget
   }
@@ -53,6 +55,7 @@ package enum NativeTrialMaterial {
     includePrivateRule: Bool = false,
     proposalNumber: UInt8 = 0,
     observeGateway: ((String) throws -> Void)? = nil,
+    diagnosticSink: ((Data) -> Void)? = nil,
     _ body: (VICIMessage, VICIMessage) throws -> Void
   ) throws {
     guard proposalNumber <= 1 else { throw Failure.unsupported }
@@ -120,26 +123,29 @@ package enum NativeTrialMaterial {
     } else {
       localTS = "dynamic"
     }
-    if let vip = common.vip, ipv4(try text(vip)) != nil {
+    // Trial-only diagnostics. In the product this runs inside an SSH
+    // ProxyCommand, where stdout is the SSH stream and stderr is the terminal.
+    if let diagnosticSink, let vip = common.vip, ipv4(try text(vip)) != nil {
       let metadata: [String: Any] = [
         "stage": "portal_vip", "vip": try text(vip),
         "proposalNumber": proposalNumber, "epoch": Date().timeIntervalSince1970,
       ]
-      FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: metadata))
-      FileHandle.standardOutput.write(Data([10]))
+      diagnosticSink(try JSONSerialization.data(withJSONObject: metadata))
     }
     // NC connection type 2 is finalized by vendor _set_adapter_name
     // (0x100122d69..0x100122d7b) with remote TS 0.0.0.0/0. The resource
     // CIDR remains in ADDRULE. Run only with native automatic routes disabled;
     // the existing runner installs the selected target /32 explicitly.
     let remoteTS = "0.0.0.0/0"
-    FileHandle.standardError.write(
-      Data("native NC remote_ts=\(remoteTS) addrule_scope=selected-resource\n".utf8))
     var childElements: [VICIElement] = [
       .list("local_ts", [localTS]), .list("remote_ts", [remoteTS]),
       .list("esp_proposals", try text(esp).split(separator: ",").map(String.init)),
       .keyValue("start_action", "none"), .keyValue("close_action", "none"),
-      .keyValue("dpd_action", "none"), .keyValue("rekey_time", "0"),
+      .keyValue("dpd_action", "none"),
+      // Rekey five minutes before the gateway's hard lifetime (one hour on
+      // THU) so long sessions survive; a rejected rekey just expires as before.
+      .keyValue("rekey_time", String(childLifetime.value > 600 ? childLifetime.value - 300 : 0)),
+      .keyValue("rand_time", "0"),
       .keyValue("life_time", String(childLifetime.value)),
     ]
     if includePrivateRule {

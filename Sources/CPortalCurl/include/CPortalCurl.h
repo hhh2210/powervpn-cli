@@ -38,6 +38,11 @@ typedef struct {
   pvcurl_set_cookie_selection_t set_cookie_selection;
   bool duplicate_set_cookie_rejected;
   bool response_headers_observed;
+  /* Numeric diagnostics only; never URLs, headers, cookies or error buffers. */
+  bool transfer_attempted;
+  int32_t curl_code;
+  int32_t os_errno;
+  uint16_t http_status;
 } pvcurl_transfer_diagnostics_t;
 
 
