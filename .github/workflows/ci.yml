@@ -92,6 +92,19 @@ jobs:
           swift build --product powervpn -c debug
           swift build --product powervpn-native-helper -c debug
 
+      - name: Helper has no runtime actor-isolation checks
+        # The helper is dispatch-based. A runtime isolation check means a
+        # main-actor closure runs on a global queue: depending on the SDK it
+        # only warns or traps the root daemon (and charon outlives it).
+        run: |
+          set -euo pipefail
+          helper="$(swift build -c debug --show-bin-path)/powervpn-native-helper"
+          symbols="$(nm -um "$helper")"
+          if grep -E '_swift_task_(isCurrentExecutor|reportUnexpectedExecutor)' <<<"$symbols"; then
+            echo "powervpn-native-helper contains runtime actor-isolation checks" >&2
+            exit 1
+          fi
+
       - name: Test (deterministic suites, offline, real PowerVPN state denied)
         # Serial on purpose: the curl and PTY drivers block a cooperative
         # thread by design, and parallel suites starved the small hosted

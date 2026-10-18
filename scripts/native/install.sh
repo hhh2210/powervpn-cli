@@ -186,4 +186,10 @@ done
 [ -S "$RUN_DIR/private/charon.vici" ] || fail "charon did not start; see /var/log/powervpn-native-helper.log"
 [ -S "$RUN_DIR/vici.sock" ] || fail "VICI broker did not start"
 [ "$(stat -f '%u:%Lp' "$RUN_DIR/private/charon.vici")" = '0:600' ] || fail "unsafe charon socket"
+# The sockets are up within a second, but a helper that dies later (its first
+# reconcile runs after 5 s) would otherwise be reported as running.
+helper_pid() { launchctl print "system/$LABEL" 2>/dev/null | awk '$1 == "pid" { print $3; exit }'; }
+started=$(helper_pid)
+sleep 6
+[ -n "$started" ] && [ "$(helper_pid)" = "$started" ] || fail "helper exited after start; see /var/log/powervpn-native-helper.log"
 echo "install: native backend running ($LABEL)"

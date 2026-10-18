@@ -366,6 +366,74 @@ func serveControl(_ helper: Helper, owner: uid_t) {
   }
 }
 
+// MARK: serving
+
+/// A charon outlives a helper that died without stopping it (a crash, SIGKILL):
+/// it runs in its own process group, so launchd does not take it down with the
+/// helper, and every later charon finds its pid alive in the pidfile and exits
+/// with status 66. The pidfile is root-only in a root-owned directory, and the
+/// pid must still be a live root process named charon before it is signalled.
+func stopStrayCharon() {
+  guard let text = try? String(contentsOfFile: paths.charonPID, encoding: .utf8),
+    let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)), pid > 1
+  else { return }
+  if isRootCharon(pid) {
+    log("stopping stray charon pid=\(pid)")
+    kill(pid, SIGTERM)
+    for _ in 0..<50 where isRootCharon(pid) { usleep(100_000) }
+    if isRootCharon(pid) { kill(pid, SIGKILL) }
+  }
+  // charon itself discards a pidfile whose pid is gone, but not one whose pid
+  // another process has reused since.
+  unlink(paths.charonPID)
+}
+
+func isRootCharon(_ pid: pid_t) -> Bool {
+  var info = proc_bsdinfo()
+  let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+  guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size,
+    info.pbi_uid == 0, info.pbi_status != UInt32(SZOMB)
+  else { return false }
+  let name = withUnsafeBytes(of: info.pbi_comm) {
+    String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self)
+  }
+  return name == "charon"
+}
+
+/// Top-level code is main-actor isolated, and so is any non-Sendable closure
+/// written in it, such as a dispatch source handler. Run on a global queue,
+/// that closure fails Swift 6's runtime isolation check and traps the daemon,
+/// leaving charon behind. Everything handed to other queues is therefore set
+/// up in this nonisolated function. The caller keeps the returned sources:
+/// a released source stops firing.
+func startBackgroundWork(_ helper: Helper, owner: uid_t) -> [any DispatchSourceProtocol] {
+  var sources: [any DispatchSourceProtocol] = []
+  for number in [SIGTERM, SIGINT, SIGHUP] {
+    signal(number, SIG_IGN)
+    let source = DispatchSource.makeSignalSource(signal: number, queue: .global())
+    source.setEventHandler {
+      log("signal \(number); stopping")
+      helper.stop()
+      unlink(paths.control)
+      unlink(paths.vici)
+      exit(0)
+    }
+    source.resume()
+    sources.append(source)
+  }
+
+  stopStrayCharon()
+  helper.startCharon()
+  let reconcileTimer = DispatchSource.makeTimerSource(queue: .global())
+  reconcileTimer.schedule(deadline: .now() + 5, repeating: 5)
+  reconcileTimer.setEventHandler { helper.reconcile() }
+  reconcileTimer.resume()
+  sources.append(reconcileTimer)
+
+  DispatchQueue.global().async { serveVICI(owner: owner) }
+  return sources
+}
+
 // MARK: entry
 
 if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "verify-install" {
@@ -419,26 +487,6 @@ else { fail("allowed-hosts missing or invalid; reinstall") }
 
 signal(SIGPIPE, SIG_IGN)
 let helper = Helper(allowedHosts: allowedHosts)
-var signalSources: [DispatchSourceSignal] = []
-for number in [SIGTERM, SIGINT, SIGHUP] {
-  signal(number, SIG_IGN)
-  let source = DispatchSource.makeSignalSource(signal: number, queue: .global())
-  source.setEventHandler {
-    log("signal \(number); stopping")
-    helper.stop()
-    unlink(paths.control)
-    unlink(paths.vici)
-    exit(0)
-  }
-  source.resume()
-  signalSources.append(source)
-}
-
-helper.startCharon()
-let reconcileTimer = DispatchSource.makeTimerSource(queue: .global())
-reconcileTimer.schedule(deadline: .now() + 5, repeating: 5)
-reconcileTimer.setEventHandler { helper.reconcile() }
-reconcileTimer.resume()
-
-DispatchQueue.global().async { serveVICI(owner: owner) }
+// A global lives as long as the process, and so do the sources it holds.
+let backgroundSources = startBackgroundWork(helper, owner: owner)
 serveControl(helper, owner: owner)
