@@ -117,8 +117,8 @@ PowerVPNXPCSessionRef power_vpn_xpc_session_create(
     }
     session_release(wrapper);
   });
-  xpc_session_set_cancel_handler(xpc_session, ^(xpc_rich_error_t error) {
-    (void)error;
+  xpc_session_set_cancel_handler(xpc_session, ^(xpc_rich_error_t cancel_error) {
+    (void)cancel_error;
     atomic_store_explicit(&wrapper->closed, true, memory_order_release);
     if (!atomic_exchange_explicit(&wrapper->cancellation_delivered, true,
                                   memory_order_acq_rel)) {

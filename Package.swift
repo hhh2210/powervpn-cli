@@ -2,6 +2,29 @@
 
 import PackageDescription
 
+// -ftyped-memory-operations arrived with the Enhanced Security toolchains
+// (Swift 6.2); the clang of older ones rejects it.
+#if compiler(>=6.2)
+  let typedAllocation = ["-ftyped-memory-operations"]
+#else
+  let typedAllocation: [String] = []
+#endif
+
+/// The compiler side of Xcode's Enhanced Security for our own C code (see
+/// docs/security-settings.md): security warnings, stack zero-initialization
+/// and, where the toolchain has it, type-aware allocation.
+let hardenedC: [CSetting] = [
+  .unsafeFlags(
+    [
+      "-Werror=return-type", "-Wuninitialized", "-Wconditional-uninitialized",
+      "-Wimplicit-fallthrough", "-Wshorten-64-to-32", "-Werror=implicit-function-declaration",
+      "-Wshadow", "-Wempty-body", "-Wformat-nonliteral", "-Warray-bounds",
+      "-Warray-bounds-pointer-arithmetic", "-Wsuspicious-memaccess", "-Wsizeof-array-div",
+      "-Wsizeof-pointer-div", "-Wreturn-stack-address", "-Wbuiltin-memcpy-chk-size",
+      "-ftrivial-auto-var-init=zero",
+    ] + typedAllocation)
+]
+
 let package = Package(
   name: "powervpn-cli",
   platforms: [.macOS(.v14)],
@@ -21,10 +44,12 @@ let package = Package(
     .executableTarget(name: "PowerVPNNativeHelper", dependencies: ["PowerVPNCore"]),
     .target(
       name: "CPortalCurl",
+      cSettings: hardenedC,
       linkerSettings: [.linkedLibrary("curl")]
     ),
     .target(
       name: "CPowerVPNXPCSession",
+      cSettings: hardenedC,
       linkerSettings: [.linkedFramework("Security")]
     ),
     .target(name: "PowerVPNCore", dependencies: ["CPowerVPNXPCSession"]),
