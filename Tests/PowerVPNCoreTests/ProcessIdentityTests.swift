@@ -17,14 +17,18 @@ import Testing
   /// running when `run` returns).
   private func identity(of process: Process, executed path: String) throws -> ProcessIdentity {
     for _ in 0..<50 {
-      if let identity = ProcessIdentity.current(process.processIdentifier),
+      if case .running(let identity) = ProcessIdentity.lookup(process.processIdentifier),
         identity.executedPath == path
       {
         return identity
       }
       usleep(20_000)
     }
-    return try #require(ProcessIdentity.current(process.processIdentifier))
+    guard case .running(let identity) = ProcessIdentity.lookup(process.processIdentifier) else {
+      Issue.record("pid \(process.processIdentifier) is not running")
+      throw CancellationError()
+    }
+    return identity
   }
 
   @Test func identifiesAChildAndStopsItWithSIGTERM() throws {
@@ -33,13 +37,13 @@ import Testing
     let identity = try identity(of: child, executed: "/bin/sleep")
     #expect(identity.executedPath == "/bin/sleep")
     #expect(identity.uid == getuid())
-    #expect(identity.isRunning)
+    #expect(identity.isRunning == true)
 
     #expect(identity.stop(grace: 2))
     child.waitUntilExit()
     #expect(child.terminationReason == .uncaughtSignal)
     #expect(child.terminationStatus == SIGTERM)
-    #expect(!identity.isRunning)
+    #expect(identity.isRunning == false)
   }
 
   @Test func escalatesToSIGKILLWhenSIGTERMIsIgnored() throws {
@@ -70,15 +74,28 @@ import Testing
         startMicroseconds: real.startMicroseconds),
     ]
     for impostor in impostors {
-      #expect(!impostor.isRunning)
+      #expect(impostor.isRunning == false)
       #expect(impostor.stop(grace: 0.1))
     }
     #expect(child.isRunning)
-    #expect(real.isRunning)
+    #expect(real.isRunning == true)
   }
 
-  @Test func rejectsPidsThatNameNoProcess() {
-    #expect(ProcessIdentity.current(0) == nil)
-    #expect(ProcessIdentity.current(-1) == nil)
+  @Test func reportsAnExitedPidAsGone() throws {
+    let child = try run("/usr/bin/true", [])
+    child.waitUntilExit()
+    #expect(ProcessIdentity.lookup(child.processIdentifier) == .gone)
+    #expect(ProcessIdentity.lookup(0) == .gone)
+    #expect(ProcessIdentity.lookup(-1) == .gone)
+  }
+
+  /// A process this caller may not inspect is unknown, never gone, so stop()
+  /// does not report success for it.
+  @Test(.enabled(if: geteuid() != 0)) func cannotInspectAnotherUsersProcess() throws {
+    #expect(ProcessIdentity.lookup(1) == .unknown)
+    let launchd = ProcessIdentity(
+      pid: 1, uid: 0, executedPath: "/sbin/launchd", startMicroseconds: 0)
+    #expect(launchd.isRunning == nil)
+    #expect(!launchd.stop(grace: 0.1))
   }
 }

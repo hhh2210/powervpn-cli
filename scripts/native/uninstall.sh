@@ -7,29 +7,17 @@ LABEL=com.hhh2210.powervpn-native
 # Stopping the helper deletes the host routes it owns and stops charon.
 launchctl bootout "system/$LABEL" 2>/dev/null || true
 # A charon left behind by a helper that crashed is not stopped by bootout.
-# It is pinned by uid, start time and the path it was executed as, and each
-# signal goes out only while the pid still names that process.
-charon_identity() { ps -o uid=,lstart=,comm= -p "$1" 2>/dev/null | sed 's/^ *//'; }
-pid=$(cat /var/run/powervpn-native/charon.pid 2>/dev/null || true)
-case $pid in
-'' | *[!0-9]*) ;;
-*)
-	identity=$(charon_identity "$pid")
-	case $identity in
-	"0 "*" /Library/PrivilegedHelperTools/$LABEL/runtime/libexec/ipsec/charon")
-		for signal in TERM KILL; do
-			[ "$(charon_identity "$pid")" = "$identity" ] || break
-			kill -s "$signal" "$pid" 2>/dev/null || true
-			for _ in $(seq 1 50); do
-				[ "$(charon_identity "$pid")" = "$identity" ] || break
-				sleep 0.1
-			done
-		done
-		[ "$(charon_identity "$pid")" != "$identity" ] || echo "uninstall: charon pid $pid did not exit" >&2
-		;;
-	esac
-	;;
-esac
+# The helper identifies it by the path it was executed as (not argv[0]); if it
+# cannot be stopped, nothing is removed, so a later run can retry.
+helper="/Library/PrivilegedHelperTools/$LABEL/powervpn-native-helper"
+if [ -x "$helper" ]; then
+	"$helper" stop-stray-charon || {
+		echo "uninstall: a charon is still running; nothing removed" >&2
+		exit 1
+	}
+elif [ -e /var/run/powervpn-native/charon.pid ]; then
+	echo "uninstall: helper missing; a charon named in /var/run/powervpn-native/charon.pid may still run" >&2
+fi
 rm -f "/Library/LaunchDaemons/$LABEL.plist"
 rm -rf "/Library/PrivilegedHelperTools/$LABEL" /var/run/powervpn-native
 echo "uninstall: removed $LABEL"

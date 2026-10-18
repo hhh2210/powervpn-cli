@@ -372,14 +372,20 @@ func serveControl(_ helper: Helper, owner: uid_t) {
 /// it runs in its own process group, so launchd does not take it down with the
 /// helper, and every later charon finds its pid alive in the pidfile and exits
 /// with status 66. Only a root process executed as this runtime's charon is
-/// stopped; if it does not exit, the helper fails rather than start a second.
+/// stopped. If it does not exit, or the pid cannot be inspected, this fails
+/// and keeps the pidfile rather than let a second charon start.
 func stopStrayCharon() {
-  if let text = try? String(contentsOfFile: paths.charonPID, encoding: .utf8),
-    let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)),
-    let stray = ProcessIdentity.current(pid), stray.uid == 0, stray.executedPath == paths.charon
-  {
-    log("stopping stray charon pid=\(pid)")
-    guard stray.stop() else { fail("stray charon pid=\(pid) did not exit") }
+  guard let text = try? String(contentsOfFile: paths.charonPID, encoding: .utf8) else { return }
+  if let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)), pid > 1 {
+    switch ProcessIdentity.lookup(pid) {
+    case .running(let stray) where stray.uid == 0 && stray.executedPath == paths.charon:
+      log("stopping stray charon pid=\(pid)")
+      guard stray.stop() else { fail("stray charon pid=\(pid) did not exit") }
+    case .running, .gone:
+      break
+    case .unknown:
+      fail("cannot inspect pid \(pid) from the charon pidfile")
+    }
   }
   // charon itself discards a pidfile whose pid is gone, but not one whose pid
   // another process has reused since.
@@ -420,12 +426,10 @@ func startBackgroundWork(_ helper: Helper, owner: uid_t) -> [any DispatchSourceP
   return sources
 }
 
-// MARK: entry
-
-if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "verify-install" {
-  exit(NativeInstallValidation.validateTree(CommandLine.arguments[2]) ? 0 : 1)
-}
-if CommandLine.arguments.dropFirst() == ["host-policy"] {
+/// install.sh: the allowed-hosts list for a targets.json on stdin. Kept out of
+/// top-level code, whose closures (even `map(\.host)`) are main-actor isolated
+/// and carry runtime isolation checks on older compilers.
+func printHostPolicy() -> Never {
   struct Target: Decodable { let host: String }
   struct Configuration: Decodable { let targets: [String: Target] }
   guard let data = try? FileHandle.standardInput.read(upToCount: 1_048_577),
@@ -435,6 +439,19 @@ if CommandLine.arguments.dropFirst() == ["host-policy"] {
       configuration.targets.values.map(\.host).joined(separator: "\n"))
   else { fail("invalid target host policy") }
   print(hosts.sorted().joined(separator: "\n"))
+  exit(0)
+}
+
+// MARK: entry
+
+if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "verify-install" {
+  exit(NativeInstallValidation.validateTree(CommandLine.arguments[2]) ? 0 : 1)
+}
+if CommandLine.arguments.dropFirst() == ["host-policy"] { printHostPolicy() }
+// uninstall.sh, after bootout: the same stray-charon rule as at startup.
+if CommandLine.arguments.dropFirst() == ["stop-stray-charon"] {
+  guard geteuid() == 0 else { fail("must run as root") }
+  stopStrayCharon()
   exit(0)
 }
 guard CommandLine.arguments.dropFirst() == ["serve"] else {
