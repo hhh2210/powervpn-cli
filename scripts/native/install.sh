@@ -11,6 +11,7 @@
 
 set -eu
 export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+umask 077
 
 LABEL=com.hhh2210.powervpn-native
 HOME_DIR=/Library/PrivilegedHelperTools/$LABEL
@@ -25,7 +26,7 @@ fail() {
 [ "$(id -u)" = 0 ] || fail "run with sudo"
 owner_uid=${SUDO_UID:-}
 [ -n "$owner_uid" ] && [ "$owner_uid" != 0 ] || fail "run with sudo from your own account"
-owner_home=$(dscl . -read "/Users/$(id -un "$owner_uid")" NFSHomeDirectory | awk '{print $2}')
+owner_home=$(dscl . -read "/Users/$(id -un "$owner_uid")" NFSHomeDirectory | sed 's/^NFSHomeDirectory: //')
 repo_root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd -P)
 
 runtime=${POWERVPN_NATIVE_RUNTIME:-"$owner_home/.cache/powervpn-native/stage$HOME_DIR/runtime"}
@@ -35,20 +36,22 @@ helper=${POWERVPN_NATIVE_HELPER:-"$repo_root/.build/release/powervpn-native-help
 file "$runtime/libexec/ipsec/charon" | grep -q 'Mach-O 64-bit.*arm64' || fail "runtime is not arm64"
 file "$helper" | grep -q 'Mach-O 64-bit.*arm64' || fail "helper is not arm64"
 
-if launchctl print "system/$LABEL" >/dev/null 2>&1; then
-	launchctl bootout "system/$LABEL" 2>/dev/null || true
-	sleep 1
-fi
+# Prepare and validate a fresh tree before stopping the running backend. Never
+# reuse an existing destination ACL, hard link, or symlink as a write target.
+parent=/Library/PrivilegedHelperTools
+[ -d "$parent" ] && [ ! -L "$parent" ] || fail "unsafe helper parent"
+[ ! -L "$HOME_DIR" ] || fail "install destination is a symlink"
+new_home=$(mktemp -d "$parent/.powervpn-native.XXXXXXXX")
+trap 'rm -rf "$new_home"' EXIT HUP INT TERM
+chmod -N "$new_home"
+ditto --noacl --noextattr --noqtn "$runtime" "$new_home/runtime"
+install -m 755 "$helper" "$new_home/powervpn-native-helper"
+printf '%s\n' "$owner_uid" > "$new_home/owner-uid"
+targets=${POWERVPN_NATIVE_TARGETS:-"$owner_home/.config/powervpn/targets.json"}
+"$new_home/powervpn-native-helper" host-policy < "$targets" > "$new_home/allowed-hosts"
+mkdir "$new_home/openssl-empty"
 
-mkdir -p "$HOME_DIR"
-rm -rf "$HOME_DIR/runtime.new"
-ditto "$runtime" "$HOME_DIR/runtime.new"
-rm -rf "$HOME_DIR/runtime"
-mv "$HOME_DIR/runtime.new" "$HOME_DIR/runtime"
-install -m 755 "$helper" "$HOME_DIR/powervpn-native-helper"
-printf '%s\n' "$owner_uid" > "$HOME_DIR/owner-uid"
-
-cat > "$HOME_DIR/strongswan.conf" <<EOF
+cat > "$new_home/strongswan.conf" <<EOF
 # Written by powervpn-cli scripts/native/install.sh. No endpoint or secret here:
 # connections and keys are loaded over VICI per session and unloaded after.
 charon {
@@ -90,18 +93,38 @@ charon {
             allow_peer_ts = no
         }
         vici {
-            socket = unix://$RUN_DIR/charon.vici
+            socket = unix://$RUN_DIR/private/charon.vici
         }
     }
 }
 EOF
 
-chown -R root:wheel "$HOME_DIR"
-chmod -R go-w "$HOME_DIR"
-chmod 755 "$HOME_DIR"
-chmod 644 "$HOME_DIR/strongswan.conf" "$HOME_DIR/owner-uid"
+chown -R -P root:wheel "$new_home"
+chmod -R -P -N "$new_home"
+chmod -R -P go-w,u-s,g-s "$new_home"
+chmod 755 "$new_home" "$new_home/openssl-empty"
+chmod 644 "$new_home/strongswan.conf" "$new_home/owner-uid" "$new_home/allowed-hosts"
+"$new_home/powervpn-native-helper" verify-install "$new_home" || fail "unsafe runtime tree"
 
-cat > "$PLIST" <<EOF
+if launchctl print "system/$LABEL" >/dev/null 2>&1; then
+	launchctl bootout "system/$LABEL" || fail "could not stop existing helper"
+	sleep 1
+fi
+rm -rf "$HOME_DIR"
+mv "$new_home" "$HOME_DIR"
+
+# A previous installation may have handed this socket to the user. The new
+# daemon creates it root-only; do not leave an old endpoint at activation.
+if [ -e "$RUN_DIR" ]; then
+	[ -d "$RUN_DIR" ] && [ ! -L "$RUN_DIR" ] || fail "unsafe runtime directory"
+	[ "$(stat -f %u "$RUN_DIR")" = 0 ] || fail "runtime directory not root-owned"
+	chmod -N "$RUN_DIR"
+	chmod 755 "$RUN_DIR"
+	rm -f "$RUN_DIR/charon.vici" "$RUN_DIR/vici.sock" "$RUN_DIR/control.sock"
+fi
+
+plist_stage=$(mktemp /Library/LaunchDaemons/.powervpn-native.XXXXXXXX)
+cat > "$plist_stage" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -111,18 +134,24 @@ cat > "$PLIST" <<EOF
   <array><string>$HOME_DIR/powervpn-native-helper</string><string>serve</string></array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
+  <key>Umask</key><integer>63</integer>
   <key>StandardErrorPath</key><string>/var/log/powervpn-native-helper.log</string>
 </dict>
 </plist>
 EOF
-chown root:wheel "$PLIST"
-chmod 644 "$PLIST"
+chown root:wheel "$plist_stage"
+chmod -N "$plist_stage"
+chmod 644 "$plist_stage"
+mv -f "$plist_stage" "$PLIST"
 launchctl bootstrap system "$PLIST"
 
 for _ in $(seq 1 50); do
-	[ -S "$RUN_DIR/control.sock" ] && [ -S "$RUN_DIR/charon.vici" ] && break
+	[ -S "$RUN_DIR/control.sock" ] && [ -S "$RUN_DIR/vici.sock" ] && \
+		[ "$(stat -f '%u:%Lp' "$RUN_DIR/private/charon.vici" 2>/dev/null || true)" = '0:600' ] && break
 	sleep 0.2
 done
 [ -S "$RUN_DIR/control.sock" ] || fail "helper did not start; see /var/log/powervpn-native-helper.log"
-[ -S "$RUN_DIR/charon.vici" ] || fail "charon did not start; see /var/log/powervpn-native-helper.log"
+[ -S "$RUN_DIR/private/charon.vici" ] || fail "charon did not start; see /var/log/powervpn-native-helper.log"
+[ -S "$RUN_DIR/vici.sock" ] || fail "VICI broker did not start"
+[ "$(stat -f '%u:%Lp' "$RUN_DIR/private/charon.vici")" = '0:600' ] || fail "unsafe charon socket"
 echo "install: native backend running ($LABEL)"

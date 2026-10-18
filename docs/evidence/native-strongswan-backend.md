@@ -4,8 +4,8 @@
 替代厂商 x86_64 helper 连接 NC 资源，在打开 `charon.leadsec_new_client_vid`
 后稳定可用：A/B 对照补 VID 6/6、不补 0/6，随后连续 10/10，每次都 `ssh` 成功并收到回程 ESP。
 
-正式 `powervpn` CLI 仍走厂商 helper。本记录只证明 native 数据面可行；
-接进产品命令（`backend = native`）是下一步。
+下面先记录 2026-10-17 的隔离实验；当时正式 CLI 仍走厂商 helper。
+2026-10-18 的产品接入与后续 review 验证单独记录，不能把旧实验当成新版 helper 的 E2E。
 
 ## 组成
 
@@ -67,3 +67,20 @@ QM1–QM3 明文在 VIP 字段归一化后，与 vendor 逐字节一致，所以
   - `powervpn down` 用时 0.6 s，核对通过：路由删除、SA 清空、helper 名下无路由；
   - thu21 第一次连接遇到 Portal 资源目录不完整（已知的间歇问题），现在 open 内会重新登录重试，最多 3 次。
 - child SA 的生存期是 1 小时。现在在到期前 5 分钟 rekey；rekey 是否被网关接受，见下面的长连接记录。
+
+## 2026-10-18：PR #3 review 修复（待安装验证）
+
+上节 live 数字来自 `c26d94d` 及其前置构建，不是本节新版 helper 的验证结果。
+
+- charon VICI 移到 root-only 目录；用户通过 peer UID 检查的代理，逐帧校验命令、事件和连接字段。
+  安装时移除 ACL，校验运行时树、链接和权限；OpenSSL engine/provider 搜索路径固定到 root 空目录。
+  路由只允许安装时从 targets.json 固定下来的 host。
+- SA 查询不再使用 `noblock`；超时/未知不作为删除证据。shutdown 核实 SA、连接和共享密钥，保留失败结果。
+  Portal 超时或旧 owner 退出后，只能报告本地恢复；未确认的 Portal 登出记录保留/归档。
+- 会话持久化 backend；恢复持有 mutation lease 到状态提交，迟到 proxy 在取得 lease 后再次检查 owner。
+  Portal 传输/目录失败与认证拒绝分开，native 清理不确定的启动也受两次重试上限约束。
+  VIP 调试输出改为 trial 显式 sink，产品不读取调试环境变量。
+- 本机隔离全量测试 991 个通过；复审追加修复后针对 Native / Proxy / UserProduct / ProductPersistent 的
+  134 个测试通过。独立 Codex 静态复审的两个追加 finding 已关闭，无剩余已证实 finding。
+- 尚未验证：新版特权 helper 安装/升级时序、新版连接/断开 E2E、sleep/wake、网络切换、8 小时 IKE rekey。
+  本轮没有替换已安装 helper 或 CLI，没有改 Surge 配置，也没有读取厂商敏感日志。

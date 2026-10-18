@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import PowerVPNPortal
 import PowerVPNProduct
 
 @_silgen_name("flock")
@@ -24,6 +25,10 @@ struct UserProductSessionState: Codable, Equatable, Sendable {
   var failure: String?
   var originalCleanupReceipt: UserProductOriginalCleanupReceipt?
   var recoveryReceipt: UserProductRecoveryReceipt?
+  /// Missing in legacy records: those belong to the vendor backend. Never
+  /// infer cleanup ownership from a configuration the user may have changed.
+  var backend: PowerVPNBackend?
+  var nativeLocalRecoveryVerified: Bool?
 
   init(
     sessionID: String,
@@ -34,7 +39,9 @@ struct UserProductSessionState: Codable, Equatable, Sendable {
     cleanupVerified: Bool? = nil,
     failure: String? = nil,
     originalCleanupReceipt: UserProductOriginalCleanupReceipt? = nil,
-    recoveryReceipt: UserProductRecoveryReceipt? = nil
+    recoveryReceipt: UserProductRecoveryReceipt? = nil,
+    backend: PowerVPNBackend = .vendor,
+    nativeLocalRecoveryVerified: Bool? = nil
   ) {
     schemaVersion = 2
     self.sessionID = sessionID
@@ -46,6 +53,8 @@ struct UserProductSessionState: Codable, Equatable, Sendable {
     self.failure = failure
     self.originalCleanupReceipt = originalCleanupReceipt
     self.recoveryReceipt = recoveryReceipt
+    self.backend = backend
+    self.nativeLocalRecoveryVerified = nativeLocalRecoveryVerified
   }
 
   var terminal: Bool { phase == .disconnected || phase == .failed }
@@ -69,10 +78,15 @@ struct UserProductSessionState: Codable, Equatable, Sendable {
           && recoveryReceipt?.originalFailure == failure))
       && (schemaVersion == 2
         || (originalCleanupReceipt == nil && recoveryReceipt == nil))
+      && (nativeLocalRecoveryVerified != true
+        || (originatingBackend == .native && terminal && cleanupVerified == false))
   }
+
+  var originatingBackend: PowerVPNBackend { backend ?? .vendor }
 
   var reconnectPermitted: Bool {
     cleanupVerified == true || recoveryReceipt?.permitsReconnect == true
+      || nativeLocalRecoveryVerified == true
   }
 }
 
@@ -178,6 +192,24 @@ struct UserProductSessionStateStore: Sendable {
     }
   }
 
+  /// Retain the original unverified Portal cleanup when a verified local
+  /// recovery permits a new session. The receipt contains no session secrets.
+  @discardableResult
+  func archiveNativeRecoveryAndRemove(expected: UserProductSessionState) throws -> Bool {
+    try withStateLock {
+      guard expected.valid, expected.originatingBackend == .native,
+        expected.nativeLocalRecoveryVerified == true, try loadUnlocked() == expected
+      else { return false }
+      let archive = directory.appendingPathComponent("native-recovery-\(expected.sessionID).json")
+        .path
+      try saveUnlocked(expected, destination: archive)
+      guard Darwin.unlink(statePath) == 0, syncDirectory() else {
+        throw UserProductSessionStoreError.unsafeStateFile
+      }
+      return true
+    }
+  }
+
   private func withStateLock<T>(_ body: () throws -> T) throws -> T {
     try ensureDirectory()
     let descriptor = try openLock(named: "session-state.lock")
@@ -266,7 +298,7 @@ struct UserProductSessionStateStore: Sendable {
     return state
   }
 
-  private func saveUnlocked(_ state: UserProductSessionState) throws {
+  private func saveUnlocked(_ state: UserProductSessionState, destination: String? = nil) throws {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
     let data = try encoder.encode(state)
@@ -296,7 +328,7 @@ struct UserProductSessionStateStore: Sendable {
       return offset
     }
     guard written == data.count, fsync(descriptor) == 0,
-      rename(temporary, statePath) == 0, syncDirectory()
+      rename(temporary, destination ?? statePath) == 0, syncDirectory()
     else { throw UserProductSessionStoreError.unsafeStateFile }
     succeeded = true
   }

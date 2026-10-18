@@ -76,12 +76,17 @@ package struct ProductM2CurrentMachineRuntime: Sendable {
 }
 
 extension ProductPersistentTunnelRuntime {
-  package init(configuration: PowerVPNTargetsConfiguration) {
+  package init(
+    configuration: PowerVPNTargetsConfiguration,
+    acquireMutationLease: @escaping @Sendable () throws -> any ProductMutationLeaseHolding =
+      ProductMutationLease.acquireCurrentMachine
+  ) {
     let authorizationProvider = ProductM2PortalAdapter { _ in
       await PortalLoginRuntime.acquire(configuration: configuration)
     }
     self.init(
       dependencies: ProductM2CurrentMachineComposition.dependencies(
+        acquireMutationLease: acquireMutationLease,
         authorizationProvider: authorizationProvider
       )
     )

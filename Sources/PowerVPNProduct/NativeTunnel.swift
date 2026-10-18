@@ -9,6 +9,9 @@ package enum NativeTunnelFailure: String, Error, Equatable, Sendable {
   case charonUnavailable = "native_charon_unavailable"
   case targetInvalid = "native_target_invalid"
   case portalRejected = "native_portal_rejected"
+  case portalUnavailable = "native_portal_unavailable"
+  case portalConfigurationRejected = "native_portal_configuration_rejected"
+  case cleanupUnproven = "native_cleanup_unproven"
   case resourceUnavailable = "native_resource_unavailable"
   case ikeFailed = "native_ike_failed"
   case childFailed = "native_child_failed"
@@ -22,10 +25,66 @@ package enum NativeTunnelFailure: String, Error, Equatable, Sendable {
       "install or restart the native backend: sudo scripts/native/install.sh"
     case .targetInvalid: "fix the target in ~/.config/powervpn/targets.json"
     case .portalRejected: "check ~/.config/powervpn/credentials.env and the Portal account"
+    case .portalConfigurationRejected: "check the Portal origin and TLS trust in targets.json"
+    case .cleanupUnproven: "powervpn down (inspect local recovery and Portal cleanup separately)"
     case .resourceUnavailable:
       "make `resource` in targets.json match the Portal resource name exactly"
-    case .ikeFailed, .childFailed, .routeRejected, .busy, .cancelled: "retry the same command"
+    case .portalUnavailable, .ikeFailed, .childFailed, .routeRejected, .busy, .cancelled:
+      "retry the same command"
     }
+  }
+
+  package static func portalFailure(_ report: PortalLoginReport) -> Self {
+    if report.status == .cancelled || report.transportFailure?.category == .cancelled {
+      return .cancelled
+    }
+    switch report.transportFailure?.category {
+    case .httpAuthenticationRejected: return .portalRejected
+    case .trustRejected, .redirectRejected, .invalidRequest, .setupFailed:
+      return .portalConfigurationRejected
+    default: break
+    }
+    switch report.status {
+    case .credentialInputRejected, .loginRejected, .challengeRequired: return .portalRejected
+    case .configurationRejected, .tlsRejected, .redirectRejected:
+      return .portalConfigurationRejected
+    default: return .portalUnavailable
+    }
+  }
+}
+
+package struct NativeTunnelOpenFailure: Error, Equatable, Sendable {
+  package let failure: NativeTunnelFailure
+  package var helperMutationRequested = false
+  package var serverContactRequested = false
+  package var cleanupVerified = true
+
+  package init(
+    failure: NativeTunnelFailure, helperMutationRequested: Bool = false,
+    serverContactRequested: Bool = false, cleanupVerified: Bool = true
+  ) {
+    self.failure = failure
+    self.helperMutationRequested = helperMutationRequested
+    self.serverContactRequested = serverContactRequested
+    self.cleanupVerified = cleanupVerified
+  }
+
+  package init(portal report: PortalLoginReport) {
+    failure = .portalFailure(report)
+    serverContactRequested = report.operations.loginRequested
+    let explicitlyRejected =
+      !report.operations.loginAccepted
+      && (report.status == .loginRejected || report.status == .challengeRequired
+        || report.transportFailure?.category == .httpAuthenticationRejected)
+    // A request can reach the server even when its response never reaches us.
+    // `loginAccepted` is an observation, not evidence of server-side absence.
+    let portalClosed =
+      !report.operations.loginRequested || explicitlyRejected
+      || report.operations.logoutAccepted
+    let material = report.ownedMaterial
+    cleanupVerified =
+      portalClosed && material.credentialsErased && material.requestBodiesErased
+      && material.responseBodiesErased && material.sessionMaterialErased
   }
 }
 
@@ -40,9 +99,10 @@ package final class NativeTunnel: @unchecked Sendable {
   private let vici: String
   private let helper: String
   private let lock = NSLock()
-  private var closed = false
+  private var shutdownTask: Task<Bool, Never>?
+  private var mutationRequested = false
 
-  private init(
+  init(
     targetIPv4: UInt32, targetHost: String, name: String, lease: AuthenticatedPortalLease,
     vici: String, helper: String
   ) {
@@ -69,36 +129,55 @@ package final class NativeTunnel: @unchecked Sendable {
     targetKey: String,
     vici: String = NativeHelperPaths.vici,
     helper: String = NativeHelperPaths.control
-  ) async -> Result<NativeTunnel, NativeTunnelFailure> {
-    if let failure = backendAvailable(helper: helper) { return .failure(failure) }
+  ) async -> Result<NativeTunnel, NativeTunnelOpenFailure> {
+    if let failure = backendAvailable(helper: helper) { return .failure(.init(failure: failure)) }
     guard let target = try? configuration.target(named: targetKey),
       target.resourceDisplayName != nil
-    else { return .failure(.targetInvalid) }
+    else { return .failure(.init(failure: .targetInvalid)) }
     let name = namePrefix + targetKey + "-" + UUID().uuidString.prefix(8).lowercased()
 
-    // A crashed earlier session can leave its connection loaded; the product
-    // runs one session at a time, so anything with our prefix is stale.
-    await onBlockingThread { removeStaleSessions(vici: vici, helper: helper, host: target.host) }
-    if Task.isCancelled { return .failure(.cancelled) }
+    // Cleanup of an earlier owner belongs to explicit, leased recovery. A
+    // standalone proxy must not silently erase that owner's cleanup evidence.
+    let empty = await onBlockingThread { localStateIsEmpty(vici: vici, helper: helper) }
+    guard empty else {
+      return .failure(.init(failure: .cleanupUnproven, cleanupVerified: false))
+    }
+    if Task.isCancelled { return .failure(.init(failure: .cancelled)) }
 
     // The Portal resource catalog intermittently comes back without the
     // selected resource; a fresh login usually returns it.
     for attempt in 1...portalAttempts {
-      guard
-        case .acquired(let lease) = await PortalLoginRuntime.acquire(configuration: configuration)
-      else { return .failure(.portalRejected) }
+      let lease: AuthenticatedPortalLease
+      switch await PortalLoginRuntime.acquire(configuration: configuration) {
+      case .acquired(let acquired): lease = acquired
+      case .rejected(let report):
+        return .failure(.init(portal: report))
+      }
       let tunnel = NativeTunnel(
         targetIPv4: target.ipv4, targetHost: target.host, name: name, lease: lease,
         vici: vici, helper: helper)
       let established = await onBlockingThread { tunnel.establish(target: target) }
       if established == nil, !Task.isCancelled { return .success(tunnel) }
-      _ = await tunnel.shutdown()
-      if Task.isCancelled { return .failure(.cancelled) }
-      guard let failure = established else { return .failure(.cancelled) }
-      if failure != .resourceUnavailable || attempt == portalAttempts { return .failure(failure) }
+      let cleaned = await tunnel.shutdown()
+      let failure: NativeTunnelFailure = Task.isCancelled ? .cancelled : (established ?? .cancelled)
+      guard cleaned else {
+        return .failure(
+          .init(
+            failure: failure, helperMutationRequested: tunnel.mutationRequested,
+            serverContactRequested: true, cleanupVerified: false))
+      }
+      if failure != .resourceUnavailable || attempt == portalAttempts {
+        return .failure(
+          .init(
+            failure: failure, helperMutationRequested: tunnel.mutationRequested,
+            serverContactRequested: true, cleanupVerified: true))
+      }
       try? await Task.sleep(for: .seconds(2))
+      if Task.isCancelled {
+        return .failure(.init(failure: .cancelled, serverContactRequested: true))
+      }
     }
-    return .failure(.resourceUnavailable)
+    return .failure(.init(failure: .resourceUnavailable, serverContactRequested: true))
   }
 
   private static let portalAttempts = 3
@@ -112,6 +191,8 @@ package final class NativeTunnel: @unchecked Sendable {
       try NativeTrialPortalBridge.withRequests(
         snapshot: lease.snapshot, target: target, name: name, includePrivateRule: true
       ) { shared, connection in
+        // A timeout after sending a request can still have mutated charon.
+        mutationRequested = true
         _ = try session.request(command: "load-shared", message: shared)
         _ = try session.request(command: "load-conn", message: connection)
       }
@@ -151,7 +232,7 @@ package final class NativeTunnel: @unchecked Sendable {
     guard
       let result = try? session.streamedRequest(
         command: "list-sas", event: "list-sa",
-        message: VICIMessage(elements: [.keyValue("ike", name), .keyValue("noblock", "yes")]))
+        message: VICIMessage(elements: [.keyValue("ike", name)]))
     else { return nil }
     return NativeIKESummary.parse(result.events).first { $0.name == name }
   }
@@ -169,12 +250,18 @@ package final class NativeTunnel: @unchecked Sendable {
   /// Removes the route, the SA, the loaded connection and the Portal session.
   /// Returns true only when each of them is verified gone.
   package func shutdown() async -> Bool {
-    let first = lock.withLock { () -> Bool in
-      defer { closed = true }
-      return !closed
+    let task = lock.withLock { () -> Task<Bool, Never> in
+      if let shutdownTask { return shutdownTask }
+      let task = Task.detached { await self.performShutdown() }
+      shutdownTask = task
+      return task
     }
-    guard first else { return true }
+    return await task.value
+  }
+
+  private func performShutdown() async -> Bool {
     let local = await onBlockingThread { () -> Bool in
+      if !self.mutationRequested { return true }
       let routeGone =
         (try? NativeHelperClient.send(
           .init(op: .routeDelete, host: self.targetHost), socketPath: self.helper))?.ok == true
@@ -182,7 +269,7 @@ package final class NativeTunnel: @unchecked Sendable {
       return routeGone && saGone
     }
     let logout = await lease.logoutAndErase()
-    let portalClosed = logout.status == .accepted || logout.status == .alreadyClosed
+    let portalClosed = logout.status == .accepted && logout.failureClass == .completedRemoteExchange
     return local && portalClosed
   }
 }
@@ -190,27 +277,31 @@ package final class NativeTunnel: @unchecked Sendable {
 extension NativeTunnel {
   /// Removes what a crashed or unverified earlier session may have left: our
   /// host routes for the configured targets and every `powervpn-` SA and
-  /// connection. True only when the helper and charon both confirm nothing is left.
+  /// connection/credential. This proves LOCAL cleanup only: a crashed owner's
+  /// memory-only Portal lease cannot be recovered. Caller must hold the mutation
+  /// lease and retain the original Portal cleanup uncertainty in session state.
   package static func recoverStale(
-    configuration: PowerVPNTargetsConfiguration,
+    configuration _: PowerVPNTargetsConfiguration,
     vici: String = NativeHelperPaths.vici,
     helper: String = NativeHelperPaths.control
   ) async -> Bool {
-    let hosts = configuration.configuredTargetKeys.compactMap {
-      try? configuration.target(named: $0).host
-    }
     return await onBlockingThread {
-      for host in hosts { removeStaleSessions(vici: vici, helper: helper, host: host) }
-      guard
-        let status = try? NativeHelperClient.send(.init(op: .status), socketPath: helper),
-        status.ok, (status.routes ?? []).allSatisfy({ !hosts.contains($0) }),
-        let session = try? VICISession(socketPath: vici, timeoutMilliseconds: 5_000),
-        let sas = try? session.streamedRequest(
-          command: "list-sas", event: "list-sa",
-          message: VICIMessage(elements: [.keyValue("noblock", "yes")]))
+      guard let status = try? NativeHelperClient.send(.init(op: .status), socketPath: helper),
+        status.ok, let hosts = status.routes,
+        let session = try? VICISession(socketPath: vici, timeoutMilliseconds: 5_000)
       else { return false }
-      session.close()
-      return NativeIKESummary.parse(sas.events).allSatisfy { !$0.name.hasPrefix(namePrefix) }
+      defer { session.close() }
+      guard let names = try? nativeSessionNames(session) else { return false }
+      for host in hosts {
+        guard
+          (try? NativeHelperClient.send(.init(op: .routeDelete, host: host), socketPath: helper))?
+            .ok == true
+        else { return false }
+      }
+      for name in names where name.hasPrefix(namePrefix) {
+        guard removeSession(name: name, vici: vici) else { return false }
+      }
+      return localStateIsEmpty(vici: vici, helper: helper)
     }
   }
 }
@@ -232,38 +323,36 @@ private func removeSession(name: String, vici: String) -> Bool {
     command: "unload-conn", message: VICIMessage(elements: [.keyValue("name", name)]))
   _ = try? session.request(
     command: "unload-shared", message: VICIMessage(elements: [.keyValue("id", name)]))
-  guard
-    let remaining = try? session.streamedRequest(
-      command: "list-sas", event: "list-sa",
-      message: VICIMessage(elements: [.keyValue("ike", name), .keyValue("noblock", "yes")]))
-  else { return false }
-  return NativeIKESummary.parse(remaining.events).allSatisfy { $0.name != name }
+  // Check all three object types, even when an unload response was lost.
+  guard let remaining = try? nativeSessionNames(session) else { return false }
+  return !remaining.contains(name)
 }
 
-private func removeStaleSessions(vici: String, helper: String, host: String) {
-  _ = try? NativeHelperClient.send(.init(op: .routeDelete, host: host), socketPath: helper)
-  guard let session = try? VICISession(socketPath: vici, timeoutMilliseconds: 5_000) else {
-    return
-  }
+func nativeSessionNames(_ session: VICISession) throws -> Set<String> {
   var names = Set<String>()
-  if let sas = try? session.streamedRequest(
-    command: "list-sas", event: "list-sa",
-    message: VICIMessage(elements: [.keyValue("noblock", "yes")]))
-  {
-    for ike in NativeIKESummary.parse(sas.events) { names.insert(ike.name) }
-  }
-  if let conns = try? session.request(command: "get-conns"),
-    let list = conns.message.elements.first(where: {
-      if case .list("conns", _) = $0 { return true }
-      return false
-    }), case .list(_, let values) = list
-  {
+  let sas = try session.streamedRequest(command: "list-sas", event: "list-sa")
+  for ike in NativeIKESummary.parse(sas.events) { names.insert(ike.name) }
+  for (command, key) in [("get-conns", "conns"), ("get-shared", "keys")] {
+    let result = try session.request(command: command)
+    guard
+      let element = result.message.elements.first(where: {
+        if case .list(key, _) = $0 { return true }
+        return false
+      }), case .list(_, let values) = element
+    else { throw VICISessionError.commandFailed(command) }
     for value in values { names.insert(String(decoding: value, as: UTF8.self)) }
   }
-  session.close()
-  for name in names where name.hasPrefix(NativeTunnel.namePrefix) {
-    removeSession(name: name, vici: vici)
-  }
+  return names
+}
+
+private func localStateIsEmpty(vici: String, helper: String) -> Bool {
+  guard let status = try? NativeHelperClient.send(.init(op: .status), socketPath: helper),
+    status.ok, status.routes?.isEmpty == true,
+    let session = try? VICISession(socketPath: vici, timeoutMilliseconds: 5_000)
+  else { return false }
+  defer { session.close() }
+  guard let names = try? nativeSessionNames(session) else { return false }
+  return names.allSatisfy { !$0.hasPrefix(NativeTunnel.namePrefix) }
 }
 
 /// VICI and the helper socket block; keep them off the cooperative pool.

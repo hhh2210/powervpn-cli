@@ -5,8 +5,7 @@ import PowerVPNCore
 // Root LaunchDaemon for the native backend.
 //
 // It owns two things the user-level CLI cannot do itself:
-//   1. keep the patched charon running, with its VICI socket handed to the
-//      installing user;
+//   1. keep the patched charon running, with its VICI socket kept root-only;
 //   2. add one host route per tunnel into charon's virtual-IP utun, and take it
 //      away again when asked or when the IKE SA behind it is gone.
 // The control socket accepts status/route-add/route-delete only, from the
@@ -24,7 +23,7 @@ func fail(_ message: String) -> Never {
   exit(1)
 }
 
-struct OwnedRoute: Codable, Equatable {
+struct OwnedRoute: Equatable {
   let host: String
   let interface: String
   let ike: String
@@ -32,55 +31,68 @@ struct OwnedRoute: Codable, Equatable {
 
 final class Helper: @unchecked Sendable {
   private let lock = NSLock()
-  private let owner: uid_t
+  private let allowedHosts: Set<String>
+  private let routeLock = NSLock()
   private var charon: Process?
   private var routes: [String: OwnedRoute] = [:]
+  private var absenceCounts: [String: Int] = [:]
   private var restartDelay: TimeInterval = 1
   private var stopping = false
 
-  init(owner: uid_t) {
-    self.owner = owner
+  init(allowedHosts: Set<String>) {
+    self.allowedHosts = allowedHosts
   }
 
   // MARK: charon
 
   func startCharon() {
     lock.lock()
-    defer { lock.unlock() }
-    guard !stopping, charon?.isRunning != true else { return }
-    try? FileManager.default.removeItem(atPath: paths.vici)
+    guard !stopping, charon?.isRunning != true else {
+      lock.unlock()
+      return
+    }
+    try? FileManager.default.removeItem(atPath: paths.charonVICI)
     let process = Process()
     process.executableURL = URL(fileURLWithPath: paths.charon)
     process.environment = [
       "STRONGSWAN_CONF": paths.configuration,
       "OPENSSL_CONF": paths.runtime + "/etc/powervpn-openssl.cnf",
-      "OPENSSL_MODULES": paths.runtime + "/lib/ossl-modules",
+      "OPENSSL_MODULES": paths.opensslEmpty,
+      "OPENSSL_ENGINES": paths.opensslEmpty,
       "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
     ]
     process.standardInput = FileHandle.nullDevice
     process.standardOutput = FileHandle.nullDevice
     process.standardError = FileHandle.nullDevice
     process.terminationHandler = { [weak self] finished in
-      self?.charonExited(status: finished.terminationStatus)
+      self?.charonExited(finished)
     }
     do {
       try process.run()
     } catch {
+      lock.unlock()
       log("charon failed to start")
       scheduleRestart()
       return
     }
     charon = process
+    lock.unlock()
     log("charon started pid=\(process.processIdentifier)")
-    DispatchQueue.global().async { [self] in handOverVICISocket(pid: process.processIdentifier) }
+    DispatchQueue.global().async { [self] in checkVICISocket(process) }
   }
 
-  private func handOverVICISocket(pid: Int32) {
+  private func checkVICISocket(_ process: Process) {
     for _ in 0..<80 {
+      guard lock.withLock({ charon === process && process.isRunning && !stopping }) else { return }
       var info = stat()
-      if lstat(paths.vici, &info) == 0, info.st_mode & S_IFMT == S_IFSOCK {
-        chown(paths.vici, owner, 0)
-        chmod(paths.vici, 0o600)
+      if lstat(paths.charonVICI, &info) == 0, info.st_mode & S_IFMT == S_IFSOCK {
+        // strongSwan creates Unix sockets as 0660. The enclosing directory is
+        // root-only from before spawn, so tightening to 0600 has no access gap.
+        guard info.st_uid == 0, chmod(paths.charonVICI, 0o600) == 0 else {
+          log("unsafe charon socket; stopping")
+          process.terminate()
+          return
+        }
         lock.withLock { restartDelay = 1 }
         log("vici socket ready")
         return
@@ -88,11 +100,12 @@ final class Helper: @unchecked Sendable {
       usleep(100_000)
     }
     log("vici socket did not appear; restarting charon")
-    kill(pid, SIGTERM)
+    if lock.withLock({ charon === process && process.isRunning }) { process.terminate() }
   }
 
-  private func charonExited(status: Int32) {
-    log("charon exited status=\(status)")
+  private func charonExited(_ process: Process) {
+    guard lock.withLock({ charon === process }) else { return }
+    log("charon exited status=\(process.terminationStatus)")
     // Every owned route pointed into charon's utun, which is gone with it.
     deleteAllRoutes(reason: "charon_exited")
     lock.withLock { charon = nil }
@@ -126,26 +139,34 @@ final class Helper: @unchecked Sendable {
 
   // MARK: routes
 
-  private func listIKE(_ name: String) -> NativeIKESummary? {
-    guard let session = try? VICISession(socketPath: paths.vici, timeoutMilliseconds: 3_000)
-    else { return nil }
+  private func listIKE(_ name: String) -> NativeIKELookup {
+    guard let session = try? VICISession(socketPath: paths.charonVICI, timeoutMilliseconds: 3_000)
+    else { return .unknown }
     defer { session.close() }
     guard
       let result = try? session.streamedRequest(
         command: "list-sas", event: "list-sa",
-        message: VICIMessage(elements: [.keyValue("ike", name), .keyValue("noblock", "yes")]))
-    else { return nil }
-    return NativeIKESummary.parse(result.events).first { $0.name == name }
+        message: VICIMessage(elements: [.keyValue("ike", name)]))
+    else { return .unknown }
+    if let summary = NativeIKESummary.parse(result.events).first(where: { $0.name == name }) {
+      return .present(summary)
+    }
+    return .absent
   }
 
   func addRoute(ike: String, host: String) -> NativeHelperResponse {
-    guard ike.utf8.count <= 128, ike.utf8.allSatisfy({ $0 > 0x20 && $0 < 0x7F }) else {
+    routeLock.lock()
+    defer { routeLock.unlock() }
+    guard NativeVICIAllowlist.validSessionName(ike) else {
       return NativeHelperResponse(ok: false, error: "ike_name_invalid")
     }
     guard let address = parseStrictIPv4(host), nativeRoutableHost(address) else {
       return NativeHelperResponse(ok: false, error: "host_not_routable")
     }
-    guard let summary = listIKE(ike), summary.state == "ESTABLISHED",
+    guard allowedHosts.contains(host) else {
+      return NativeHelperResponse(ok: false, error: "host_not_authorized")
+    }
+    guard case .present(let summary) = listIKE(ike), summary.state == "ESTABLISHED",
       summary.hasInstalledChild
     else { return NativeHelperResponse(ok: false, error: "child_not_installed") }
     guard summary.remoteHost != host else {
@@ -172,6 +193,8 @@ final class Helper: @unchecked Sendable {
   }
 
   func deleteRoute(host: String) -> NativeHelperResponse {
+    routeLock.lock()
+    defer { routeLock.unlock() }
     guard let owned = lock.withLock({ routes[host] }) else {
       return NativeHelperResponse(ok: true)
     }
@@ -182,31 +205,38 @@ final class Helper: @unchecked Sendable {
 
   @discardableResult
   private func removeRoute(_ owned: OwnedRoute, reason: String) -> Bool {
-    // Delete only if the host route still points at our interface.
-    if hostRouteInterface(owned.host) == owned.interface {
+    // A failed route query is not proof that our route disappeared.
+    let current = hostRouteInterface(owned.host)
+    guard current != .unknown else { return false }
+    if current == .interface(owned.interface) {
       guard route(["-n", "delete", "-host", owned.host, "-interface", owned.interface]) else {
         return false
       }
     }
     lock.withLock { _ = routes.removeValue(forKey: owned.host) }
+    absenceCounts.removeValue(forKey: owned.host)
     log("route delete \(owned.host) (\(reason))")
     return true
   }
 
   private func deleteAllRoutes(reason: String) {
+    routeLock.lock()
+    defer { routeLock.unlock() }
     for owned in lock.withLock({ Array(routes.values) }) { removeRoute(owned, reason: reason) }
   }
 
-  /// Drops routes whose IKE SA or utun no longer exists.
+  /// Only authoritative absence removes a route. Busy or unreachable charon,
+  /// and a temporarily missing CHILD during rekey, leave ownership intact.
   func reconcile() {
+    routeLock.lock()
+    defer { routeLock.unlock() }
     for owned in lock.withLock({ Array(routes.values) }) {
-      let summary = listIKE(owned.ike)
-      let alive =
-        summary?.hasInstalledChild == true
-        && summary.map { s in
-          s.localVirtualIPs.contains { utunInterface(holding: $0) == owned.interface }
-        } == true
-      if !alive { removeRoute(owned, reason: "sa_gone") }
+      if listIKE(owned.ike).confirmsAbsence {
+        absenceCounts[owned.host, default: 0] += 1
+        if absenceCounts[owned.host, default: 0] >= 2 { removeRoute(owned, reason: "sa_gone") }
+      } else {
+        absenceCounts.removeValue(forKey: owned.host)
+      }
     }
   }
 
@@ -224,14 +254,19 @@ func route(_ arguments: [String]) -> Bool {
   return process.terminationStatus == 0
 }
 
-func hostRouteInterface(_ host: String) -> String? {
+enum HostRouteLookup: Equatable {
+  case interface(String)
+  case absent, unknown
+}
+
+func hostRouteInterface(_ host: String) -> HostRouteLookup {
   let process = Process()
   let pipe = Pipe()
   process.executableURL = URL(fileURLWithPath: "/sbin/route")
   process.arguments = ["-n", "get", "-host", host]
   process.standardOutput = pipe
   process.standardError = FileHandle.nullDevice
-  guard (try? process.run()) != nil else { return nil }
+  guard (try? process.run()) != nil else { return .unknown }
   let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
   process.waitUntilExit()
   var destination: String?
@@ -244,7 +279,8 @@ func hostRouteInterface(_ host: String) -> String? {
     if parts[0] == "destination" { destination = parts[1] }
     if parts[0] == "interface" { interface = parts[1] }
   }
-  return destination == host ? interface : nil
+  guard process.terminationStatus == 0, let destination, let interface else { return .unknown }
+  return destination == host ? .interface(interface) : .absent
 }
 
 func utunInterface(holding ipv4: String) -> String? {
@@ -279,19 +315,29 @@ func serveControl(_ helper: Helper, owner: uid_t) {
     }
   }
   guard bound == 0, listen(fd, 8) == 0 else { fail("control bind") }
-  chown(paths.control, owner, 0)
-  chmod(paths.control, 0o600)
+  guard chown(paths.control, owner, 0) == 0, chmod(paths.control, 0o600) == 0 else {
+    fail("control permissions")
+  }
   log("control socket ready")
+  let slots = DispatchSemaphore(value: 8)
   while true {
     let client = accept(fd, nil, nil)
     if client < 0 { continue }
+    guard slots.wait(timeout: .now()) == .success else {
+      close(client)
+      continue
+    }
     DispatchQueue.global().async {
-      defer { close(client) }
+      defer {
+        close(client)
+        slots.signal()
+      }
       var uid: uid_t = 0
       var gid: gid_t = 0
       guard getpeereid(client, &uid, &gid) == 0, uid == owner || uid == 0 else { return }
       var timeout = timeval(tv_sec: 10, tv_usec: 0)
       setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+      setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
       guard let line = readLine(client, limit: 4_096),
         let request = try? JSONDecoder().decode(NativeHelperRequest.self, from: line)
       else { return }
@@ -322,16 +368,28 @@ func serveControl(_ helper: Helper, owner: uid_t) {
 
 // MARK: entry
 
+if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "verify-install" {
+  exit(NativeInstallValidation.validateTree(CommandLine.arguments[2]) ? 0 : 1)
+}
+if CommandLine.arguments.dropFirst() == ["host-policy"] {
+  struct Target: Decodable { let host: String }
+  struct Configuration: Decodable { let targets: [String: Target] }
+  guard let data = try? FileHandle.standardInput.read(upToCount: 1_048_577),
+    data.count <= 1_048_576,
+    let configuration = try? JSONDecoder().decode(Configuration.self, from: data),
+    let hosts = NativeHostPolicy.parse(
+      configuration.targets.values.map(\.host).joined(separator: "\n"))
+  else { fail("invalid target host policy") }
+  print(hosts.sorted().joined(separator: "\n"))
+  exit(0)
+}
 guard CommandLine.arguments.dropFirst() == ["serve"] else {
   FileHandle.standardError.write(Data("usage: powervpn-native-helper serve (as root)\n".utf8))
   exit(64)
 }
 guard geteuid() == 0 else { fail("must run as root") }
-for path in [paths.home, paths.configuration, paths.owner, paths.charon] {
-  var info = stat()
-  guard lstat(path, &info) == 0, info.st_uid == 0, info.st_mode & 0o022 == 0 else {
-    fail("unsafe or missing install path: \(path)")
-  }
+guard NativeInstallValidation.validateTree(paths.home) else {
+  fail("unsafe install tree; reinstall the native backend")
 }
 guard
   let ownerText = try? String(contentsOfFile: paths.owner, encoding: .utf8)
@@ -340,12 +398,27 @@ guard
 else { fail("owner-uid missing") }
 let owner = uid_t(ownerValue)
 
-mkdir(paths.runDirectory, 0o755)
-chown(paths.runDirectory, 0, 0)
-chmod(paths.runDirectory, 0o755)
+// umask applies before charon binds: there is no world-accessible socket window.
+umask(0o077)
+if mkdir(paths.runDirectory, 0o755) != 0, errno != EEXIST { fail("runtime directory") }
+var runInfo = stat()
+guard lstat(paths.runDirectory, &runInfo) == 0, runInfo.st_uid == 0,
+  runInfo.st_mode & S_IFMT == S_IFDIR, runInfo.st_mode & 0o022 == 0,
+  NativeInstallValidation.hasNoACL(paths.runDirectory), chmod(paths.runDirectory, 0o755) == 0
+else { fail("unsafe runtime directory") }
+if mkdir(paths.privateRunDirectory, 0o700) != 0, errno != EEXIST {
+  fail("private runtime directory")
+}
+guard lstat(paths.privateRunDirectory, &runInfo) == 0, runInfo.st_uid == 0,
+  runInfo.st_mode & S_IFMT == S_IFDIR, runInfo.st_mode & 0o777 == 0o700,
+  NativeInstallValidation.hasNoACL(paths.privateRunDirectory)
+else { fail("unsafe private runtime directory") }
+guard let policy = try? String(contentsOfFile: paths.allowedHosts, encoding: .utf8),
+  let allowedHosts = NativeHostPolicy.parse(policy)
+else { fail("allowed-hosts missing or invalid; reinstall") }
 
 signal(SIGPIPE, SIG_IGN)
-let helper = Helper(owner: owner)
+let helper = Helper(allowedHosts: allowedHosts)
 var signalSources: [DispatchSourceSignal] = []
 for number in [SIGTERM, SIGINT, SIGHUP] {
   signal(number, SIG_IGN)
@@ -354,6 +427,7 @@ for number in [SIGTERM, SIGINT, SIGHUP] {
     log("signal \(number); stopping")
     helper.stop()
     unlink(paths.control)
+    unlink(paths.vici)
     exit(0)
   }
   source.resume()
@@ -366,4 +440,5 @@ reconcileTimer.schedule(deadline: .now() + 5, repeating: 5)
 reconcileTimer.setEventHandler { helper.reconcile() }
 reconcileTimer.resume()
 
+DispatchQueue.global().async { serveVICI(owner: owner) }
 serveControl(helper, owner: owner)

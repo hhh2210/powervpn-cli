@@ -9,9 +9,17 @@ public enum NativeHelperPaths {
   public static let helper = home + "/powervpn-native-helper"
   public static let configuration = home + "/strongswan.conf"
   public static let owner = home + "/owner-uid"
+  /// Target hosts the helper may route, one IPv4 per line, written by install.sh.
+  public static let allowedHosts = home + "/allowed-hosts"
   public static let charon = runtime + "/libexec/ipsec/charon"
+  /// Root-owned, empty: OpenSSL may not load engines or providers from elsewhere.
+  public static let opensslEmpty = home + "/openssl-empty"
   public static let runDirectory = "/var/run/powervpn-native"
-  public static let vici = runDirectory + "/charon.vici"
+  /// charon's own VICI socket; root only.
+  public static let privateRunDirectory = runDirectory + "/private"
+  public static let charonVICI = privateRunDirectory + "/charon.vici"
+  /// The user's VICI endpoint: the helper forwards only allowlisted commands.
+  public static let vici = runDirectory + "/vici.sock"
   public static let control = runDirectory + "/control.sock"
 }
 
@@ -69,6 +77,8 @@ public enum NativeHelperClient {
     let fd = socket(AF_UNIX, SOCK_STREAM, 0)
     guard fd >= 0 else { throw NativeHelperClientError.unavailable }
     defer { close(fd) }
+    var noSignal: Int32 = 1
+    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
     var timeout = timeval(tv_sec: timeoutSeconds, tv_usec: 0)
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
@@ -82,7 +92,7 @@ public enum NativeHelperClient {
     var line = try JSONEncoder().encode(request)
     line.append(0x0A)
     guard writeAll(fd, line) else { throw NativeHelperClientError.protocolError }
-    guard let reply = readLine(fd, limit: 16_384),
+    guard let reply = readLine(fd, limit: 16_384, timeoutSeconds: timeoutSeconds),
       let response = try? JSONDecoder().decode(NativeHelperResponse.self, from: reply)
     else { throw NativeHelperClientError.protocolError }
     return response
@@ -106,6 +116,7 @@ package func writeAll(_ fd: Int32, _ data: Data) -> Bool {
     let written = data.withUnsafeBytes {
       Darwin.write(fd, $0.baseAddress!.advanced(by: offset), data.count - offset)
     }
+    if written < 0, errno == EINTR { continue }
     if written <= 0 { return false }
     offset += written
   }
@@ -113,10 +124,18 @@ package func writeAll(_ fd: Int32, _ data: Data) -> Bool {
 }
 
 /// Reads up to the first newline; nil on EOF, timeout or overflow.
-package func readLine(_ fd: Int32, limit: Int) -> Data? {
+package func readLine(_ fd: Int32, limit: Int, timeoutSeconds: Int = 10) -> Data? {
   var result = Data()
   var byte: UInt8 = 0
+  guard (1...60).contains(timeoutSeconds) else { return nil }
+  let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(timeoutSeconds) * 1_000_000_000
   while result.count < limit {
+    let now = DispatchTime.now().uptimeNanoseconds
+    guard now < deadline else { return nil }
+    var ready = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+    let waited = poll(&ready, 1, Int32(max(1, (deadline - now) / 1_000_000)))
+    if waited < 0, errno == EINTR { continue }
+    guard waited > 0, ready.revents & Int16(POLLIN) != 0 else { return nil }
     let count = Darwin.read(fd, &byte, 1)
     if count <= 0 { return nil }
     if byte == 0x0A { return result }
@@ -146,6 +165,18 @@ public func nativeRoutableHost(_ address: UInt32) -> Bool {
   if first == 0 || first == 127 || first >= 224 { return false }
   if address >> 16 == 0xA9FE { return false }  // 169.254/16
   return true
+}
+
+/// A failed/timed-out query cannot prove that an SA was deleted.
+package enum NativeIKELookup: Sendable {
+  case present(NativeIKESummary)
+  case absent
+  case unknown
+
+  package var confirmsAbsence: Bool {
+    if case .absent = self { return true }
+    return false
+  }
 }
 
 /// Summary of one IKE SA from a VICI `list-sas` event.

@@ -23,6 +23,8 @@ private struct UserProductRecoveryCommandReport: Encodable {
   let nextAction: String?
   let containsSecrets = false
   let snapshotSerialized = false
+  var nativeLocalCleanupVerified: Bool? = nil
+  var nativePortalCleanupVerified: Bool? = nil
 }
 
 func runUserProductRecovery(
@@ -69,6 +71,23 @@ func runUserProductRecovery(
       requiresHumanAction: state.cleanupVerified != true,
       exitCode: state.cleanupVerified == true ? 0 : 74
     )
+  }
+  if state.originatingBackend == .native {
+    if operation == .inspect {
+      return try recoveryResult(
+        operation: operation, outcome: "native_local_recovery",
+        state: state, quarantineCleared: state.nativeLocalRecoveryVerified == true,
+        requiresHumanAction: false, nextAction: "powervpn recovery clear --json", exitCode: 0)
+    }
+    let failure = try await clearNativeLeftovers(state, dependencies: dependencies)
+    return try recoveryResult(
+      operation: operation,
+      outcome: failure == nil
+        ? "native_local_recovered_portal_unverified" : "native_local_recovery_failed",
+      state: try dependencies.stateStore.load(), quarantineCleared: failure == nil,
+      requiresHumanAction: false,
+      nextAction: failure == nil ? nil : "powervpn doctor --json",
+      exitCode: failure?.exitCode ?? 0)
   }
   if let receipt = state.recoveryReceipt, receipt.permitsReconnect {
     return try recoveryResult(
@@ -307,7 +326,7 @@ private func recoveryResult(
   nextAction: String? = nil,
   exitCode: Int32
 ) throws -> UserProductCommandResult {
-  let report = UserProductRecoveryCommandReport(
+  var report = UserProductRecoveryCommandReport(
     operation: operation,
     outcome: outcome,
     target: state?.target,
@@ -320,6 +339,10 @@ private func recoveryResult(
     requiresHumanAction: requiresHumanAction,
     nextAction: nextAction
   )
+  if state?.originatingBackend == .native {
+    report.nativeLocalCleanupVerified = state?.nativeLocalRecoveryVerified == true
+    report.nativePortalCleanupVerified = state?.cleanupVerified == true
+  }
   let encoder = JSONEncoder()
   encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
   return UserProductCommandResult(

@@ -45,8 +45,10 @@ struct UserProductCommandDependencies: Sendable {
   let stateStore: UserProductSessionStateStore
   let executablePath: String
   let mutationLeaseAvailable: @Sendable () -> Bool
+  let acquireMutationLease: @Sendable () throws -> any ProductMutationLeaseHolding
   let systemStatus: @Sendable () -> PowerVPNStatus
   let proxyRunner: @Sendable ([String]) async throws -> ProxyCommandResult
+  let sessionProxyRunner: @Sendable ([String], String) async throws -> ProxyCommandResult
   let recoveryRunner:
     @Sendable (
       ProductCleanupRecoveryRequest, PowerVPNTargetsConfiguration,
@@ -78,12 +80,13 @@ struct UserProductCommandDependencies: Sendable {
         return false
       }
     },
+    acquireMutationLease: @escaping @Sendable () throws -> any ProductMutationLeaseHolding = {
+      try ProductMutationLease.acquireCurrentMachine()
+    },
     systemStatus: @escaping @Sendable () -> PowerVPNStatus = {
       SystemInspector().status()
     },
-    proxyRunner: @escaping @Sendable ([String]) async throws -> ProxyCommandResult = {
-      try await runCurrentMachineProxyCommand($0)
-    },
+    proxyRunner: (@Sendable ([String]) async throws -> ProxyCommandResult)? = nil,
     recoveryRunner:
       @escaping @Sendable (
         ProductCleanupRecoveryRequest, PowerVPNTargetsConfiguration,
@@ -137,8 +140,19 @@ struct UserProductCommandDependencies: Sendable {
     self.stateStore = stateStore
     self.executablePath = executablePath
     self.mutationLeaseAvailable = mutationLeaseAvailable
+    self.acquireMutationLease = acquireMutationLease
     self.systemStatus = systemStatus
-    self.proxyRunner = proxyRunner
+    self.proxyRunner = proxyRunner ?? { try await runCurrentMachineProxyCommand($0) }
+    self.sessionProxyRunner = { arguments, sessionID in
+      if let proxyRunner { return try await proxyRunner(arguments) }
+      return try await runCurrentMachineProxyCommand(
+        arguments,
+        sessionStillOwned: { backend in
+          guard let state = try? stateStore.load() else { return false }
+          return state.sessionID == sessionID && state.originatingBackend == backend
+            && (state.phase == .connecting || state.phase == .connected)
+        })
+    }
     self.recoveryRunner = recoveryRunner
     self.credentialFileSafe = credentialFileSafe
     self.helperArtifactSafe = helperArtifactSafe
@@ -308,11 +322,11 @@ private func runUserProductSSH(
           standardOutput: "", standardError: "", exitCode: result.exitCode)
         : .failure("PowerVPN: could not start /usr/bin/ssh.", exitCode: 70)
     }
-    if usesNativeBackend(dependencies),
-      existing.terminal || dependencies.mutationLeaseAvailable()
-    {
-      guard try await clearNativeLeftovers(existing, dependencies: dependencies) else {
-        return nativeLeftoversFailure()
+    if existing.originatingBackend == .native, existing.cleanupVerified != true {
+      if let failure = try await clearNativeLeftovers(
+        existing, removeState: true, dependencies: dependencies)
+      {
+        return failure
       }
     } else if existing.terminal, existing.reconnectPermitted {
       _ = try dependencies.stateStore.remove(sessionID: existing.sessionID)
@@ -330,7 +344,8 @@ private func runUserProductSSH(
       target: target.key,
       controlPath: dependencies.stateStore.directory
         .appendingPathComponent("ephemeral-\(sessionID).sock").path,
-      phase: .connecting
+      phase: .connecting,
+      backend: try dependencies.loadConfiguration().backend
     )
   )
   let result = dependencies.processRunner.run(
@@ -416,11 +431,11 @@ func runUserProductUp(
         "PowerVPN: already connected to \(existing.target). Run `powervpn down` first."
       )
     }
-    if usesNativeBackend(dependencies),
-      existing.terminal || dependencies.mutationLeaseAvailable()
-    {
-      guard try await clearNativeLeftovers(existing, dependencies: dependencies) else {
-        return nativeLeftoversFailure()
+    if existing.originatingBackend == .native, existing.cleanupVerified != true {
+      if let failure = try await clearNativeLeftovers(
+        existing, removeState: true, dependencies: dependencies)
+      {
+        return failure
       }
     } else if existing.terminal, existing.reconnectPermitted {
       _ = try dependencies.stateStore.remove(sessionID: existing.sessionID)
@@ -471,7 +486,8 @@ func runUserProductUp(
     sessionID: sessionID,
     target: target.key,
     controlPath: sshConfiguration.controlPath,
-    phase: .connecting
+    phase: .connecting,
+    backend: try dependencies.loadConfiguration().backend
   )
   try dependencies.stateStore.save(connecting)
 
@@ -490,7 +506,8 @@ func runUserProductUp(
       final.terminal
     {
       return .failure(
-        userProductFailureMessage(final.failure), exitCode: 69,
+        userProductFailureMessage(final.failure),
+        exitCode: final.cleanupVerified != true ? 74 : (final.failure == "cancelled" ? 130 : 69),
         next: userProductFailureNext(final.failure))
     }
     _ = try dependencies.stateStore.update(sessionID: sessionID) {
@@ -509,7 +526,8 @@ func runUserProductUp(
       final.terminal
     {
       return .failure(
-        userProductFailureMessage(final.failure), exitCode: 69,
+        userProductFailureMessage(final.failure),
+        exitCode: final.cleanupVerified != true ? 74 : (final.failure == "cancelled" ? 130 : 69),
         next: userProductFailureNext(final.failure))
     }
     return .failure(
@@ -557,11 +575,11 @@ private func runUserProductDown(
         "PowerVPN: disconnected\nRecovery: verified cold baseline\nOriginal cleanup: unverified\n"
       )
     }
-    if usesNativeBackend(dependencies) {
-      guard try await clearNativeLeftovers(state, dependencies: dependencies) else {
-        return nativeLeftoversFailure()
+    if state.originatingBackend == .native {
+      if let failure = try await clearNativeLeftovers(state, dependencies: dependencies) {
+        return failure
       }
-      return .success("PowerVPN: disconnected\nCleanup: verified (leftovers removed)\n")
+      return nativeLocalRecoveryResult()
     }
     return .failure(
       "PowerVPN: previous session ended but cleanup was not verified. Run `powervpn recovery inspect --json`.",
@@ -610,11 +628,11 @@ private func runUserProductDown(
     if dependencies.mutationLeaseAvailable(),
       checkMaster(state, dependencies: dependencies).exitCode != 0
     {
-      if usesNativeBackend(dependencies) {
-        guard try await clearNativeLeftovers(state, dependencies: dependencies) else {
-          return nativeLeftoversFailure()
+      if state.originatingBackend == .native {
+        if let failure = try await clearNativeLeftovers(state, dependencies: dependencies) {
+          return failure
         }
-        return .success("PowerVPN: disconnected\nCleanup: verified (leftovers removed)\n")
+        return nativeLocalRecoveryResult()
       }
       _ = try dependencies.stateStore.update(sessionID: state.sessionID) {
         $0.phase = .failed
@@ -693,10 +711,14 @@ private func runUserProductStatus(
         warning: "Session owner is starting or cleanup is still running."
       )
     } else {
-      let recoveryVerified = state.recoveryReceipt?.permitsReconnect == true
+      let recoveryVerified =
+        state.recoveryReceipt?.permitsReconnect == true
+        || state.nativeLocalRecoveryVerified == true
       if !state.reconnectPermitted {
         warning =
           "Previous session ended unexpectedly; cleanup is not verified. Run `powervpn recovery inspect --json`."
+      } else if state.nativeLocalRecoveryVerified == true {
+        warning = "Local native objects were removed; original Portal logout remains unverified."
       } else if state.cleanupVerified != true, recoveryVerified {
         warning =
           "Original cleanup remains unverified; a measured cold baseline permits recovery."
@@ -719,7 +741,8 @@ private func runUserProductStatus(
         previousCleanupVerified: state.cleanupVerified,
         originalCleanupReceipt: state.originalCleanupReceipt,
         recoveryVerified: recoveryVerified,
-        recoveryBasis: state.recoveryReceipt?.basis,
+        recoveryBasis: state.nativeLocalRecoveryVerified == true
+          ? "native_owned_objects" : state.recoveryReceipt?.basis,
         recoveryReceipt: state.recoveryReceipt,
         warning: warning ?? historicalHelperWarning(system)
       )
@@ -804,7 +827,7 @@ private func runUserProductDoctor(
   let session = try dependencies.stateStore.load()
   let recoveryVerified = session?.recoveryReceipt?.permitsReconnect == true
   // Native leftovers are removed automatically by the next up/run/ssh.
-  let sessionCleanupSafe = native || (session.map { !$0.terminal || $0.reconnectPermitted } ?? true)
+  let sessionCleanupSafe = session.map { !$0.terminal || $0.reconnectPermitted } ?? true
   let blocker: String?
   if !configurationSafe {
     blocker = "target_configuration_incomplete"
@@ -872,12 +895,18 @@ private func runInternalProductProxy(
   guard target.host == arguments[2], port == 22 else {
     return .failure("PowerVPN: SSH destination does not match the configured target.", exitCode: 70)
   }
-  let result = try await dependencies.proxyRunner([
+  let proxyArguments = [
     "proxy", "ssh",
     "--resource-display-name", target.resource,
     "--ssh-target", target.key,
     target.host, "22", "--non-interactive",
-  ])
+  ]
+  let result: ProxyCommandResult
+  if let sessionID {
+    result = try await dependencies.sessionProxyRunner(proxyArguments, sessionID)
+  } else {
+    result = try await dependencies.proxyRunner(proxyArguments)
+  }
   let stateBeforeCompletion = sessionID.flatMap { expectedID in
     guard let state = try? dependencies.stateStore.load(), state.sessionID == expectedID else {
       return nil as UserProductSessionState?
@@ -1087,17 +1116,50 @@ func usesNativeBackend(_ dependencies: UserProductCommandDependencies) -> Bool {
   (try? dependencies.loadConfiguration())?.backend == .native
 }
 
-/// Native leftovers are objects we own and can remove and re-check, so a stale
-/// or unverified native session never needs the vendor quarantine.
-private func clearNativeLeftovers(
+/// Hold the cross-process mutation lease through recovery AND the state commit.
+/// Only local objects are recoverable; the original Portal uncertainty survives.
+func clearNativeLeftovers(
   _ existing: UserProductSessionState,
+  removeState: Bool = false,
   dependencies: UserProductCommandDependencies
-) async throws -> Bool {
+) async throws -> UserProductCommandResult? {
+  guard existing.originatingBackend == .native else { return nativeLeftoversFailure() }
+  let mutationLease: any ProductMutationLeaseHolding
+  do { mutationLease = try dependencies.acquireMutationLease() } catch {
+    return .failure(
+      "PowerVPN: native session is busy.", exitCode: 75, next: "retry the same command")
+  }
+  defer { withExtendedLifetime(mutationLease) {} }
+  guard try dependencies.stateStore.load() == existing,
+    checkMaster(existing, dependencies: dependencies).exitCode != 0
+  else {
+    return .failure(
+      "PowerVPN: session ownership changed.", exitCode: 75, next: "retry the same command")
+  }
   guard let configuration = try? dependencies.loadConfiguration(),
     await dependencies.nativeRecoverStale(configuration)
-  else { return false }
-  _ = try dependencies.stateStore.remove(sessionID: existing.sessionID)
-  return true
+  else { return nativeLeftoversFailure() }
+  guard
+    try dependencies.stateStore.compareAndUpdate(
+      expected: existing,
+      { state in
+        state.phase = .failed
+        state.cleanupVerified = false
+        state.nativeLocalRecoveryVerified = true
+      }), let recovered = try dependencies.stateStore.load()
+  else { return nativeLeftoversFailure() }
+  if removeState {
+    guard try dependencies.stateStore.archiveNativeRecoveryAndRemove(expected: recovered) else {
+      return nativeLeftoversFailure()
+    }
+  }
+  return nil
+}
+
+private func nativeLocalRecoveryResult() -> UserProductCommandResult {
+  .success(
+    "PowerVPN: disconnected\nLocal recovery: verified (routes, SAs, connections, credentials removed)\nOriginal Portal cleanup: unverified (receipt retained)\n"
+  )
 }
 
 private func nativeLeftoversFailure() -> UserProductCommandResult {
@@ -1114,6 +1176,9 @@ private func nativeFailureDescription(_ failure: NativeTunnelFailure) -> String 
   case .charonUnavailable: "charon is not running."
   case .targetInvalid: "the target is not configured for a Portal resource."
   case .portalRejected: "Portal login failed."
+  case .portalUnavailable: "the Portal transport or resource catalog is temporarily unavailable."
+  case .portalConfigurationRejected: "the Portal configuration or TLS trust was rejected."
+  case .cleanupUnproven: "an earlier native session has unverified cleanup."
   case .resourceUnavailable: "the Portal resource for this target was not found."
   case .ikeFailed: "IKE negotiation with the gateway failed."
   case .childFailed: "the gateway did not install the tunnel for this resource."

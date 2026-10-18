@@ -98,10 +98,18 @@ func openProductProxyTunnel(
 /// like the vendor runtime, so `up`/`run`/`down` see the same busy signal.
 func openNativeProxyTunnel(
   configuration: PowerVPNTargetsConfiguration,
-  request: ProductM2ConnectRequest
+  request: ProductM2ConnectRequest,
+  sessionStillOwned: @Sendable () -> Bool = { true },
+  acquireMutationLease: @Sendable () throws -> ProductMutationLease = {
+    try ProductMutationLease.acquireCurrentMachine()
+  }
 ) async -> ProxyTunnelOpenResult {
-  guard let mutationLease = try? ProductMutationLease.acquireCurrentMachine() else {
-    return .failed(nativeOpenFailure(.busy))
+  guard let mutationLease = try? acquireMutationLease() else {
+    return .failed(nativeOpenFailure(.init(failure: .busy)))
+  }
+  guard sessionStillOwned() else {
+    withExtendedLifetime(mutationLease) {}
+    return .failed(nativeOpenFailure(.init(failure: .cancelled)))
   }
   switch await NativeTunnel.open(
     configuration: configuration, targetKey: request.sshTarget.rawValue)
@@ -118,14 +126,14 @@ func openNativeProxyTunnel(
   }
 }
 
-private func nativeOpenFailure(_ failure: NativeTunnelFailure) -> ProxyTunnelOpenFailure {
-  // NativeTunnel.open removes whatever it created before it reports a failure.
+func nativeOpenFailure(_ report: NativeTunnelOpenFailure) -> ProxyTunnelOpenFailure {
   ProxyTunnelOpenFailure(
-    failure: failure == .cancelled ? .cancelled : nil,
-    nativeFailure: failure,
-    helperMutationRequested: false,
-    serverContactRequested: failure != .helperUnavailable && failure != .charonUnavailable,
-    cleanupVerified: true
+    failure: !report.cleanupVerified
+      ? .cleanupUnproven : (report.failure == .cancelled ? .cancelled : nil),
+    nativeFailure: report.failure,
+    helperMutationRequested: report.helperMutationRequested,
+    serverContactRequested: report.serverContactRequested,
+    cleanupVerified: report.cleanupVerified
   )
 }
 

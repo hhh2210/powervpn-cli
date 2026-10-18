@@ -16,12 +16,14 @@ powervpn run thu21 -- cmd                       你的用户身份
 
 powervpn-native-helper                          root LaunchDaemon，安装一次
   ├─ 常驻运行打过补丁的 charon（strongSwan 6.0.7）
-  └─ 只接受三种请求：查状态、给目标 IP 加一条走隧道的 /32 路由、删掉它
+  ├─ VICI 代理逐帧检查命令与配置字段；charon 的原始 socket 只供 root 访问
+  └─ 控制接口：查状态、为安装时授权的目标加 /32 路由、删掉它
 ```
 
 - 默认路由、DNS 和 Surge 都不动，只有你配置的目标 IP 走隧道。
 - helper 不执行任何调用方给的命令或路径，控制 socket 只对安装它的用户开放。
-- 每次断开都会逐项核对：路由删了、SA 没了、Portal 登出了。上次没收干净的，下次连接前会自动清掉。
+- 正常断开会核对路由、SA、连接配置、共享密钥和 Portal 登出。异常退出后的恢复只证明本地对象已清理；Portal 登出无法确认时保留原记录，后续连接前归档到 `~/.local/state/powervpn/native-recovery-*.json`。
+- 清理由会话记录中的 backend 决定；修改 `targets.json` 不会清除另一后端的未完成清理。没有 backend 字段的旧记录按 vendor 处理。
 
 ## 需要什么
 
@@ -46,16 +48,7 @@ swift build -c release --arch arm64
 mkdir -p ~/.local/bin && cp .build/release/powervpn ~/.local/bin/   # 或任何在 PATH 里的目录
 ```
 
-**2. 安装 native 后端（只需要一次 sudo）**
-
-```sh
-sudo scripts/native/install.sh
-```
-
-它只装我们自己的东西：`/Library/PrivilegedHelperTools/com.hhh2210.powervpn-native/` 和一个 LaunchDaemon。
-看到 `install: native backend running` 就好了。
-
-**3. 写账号密码**
+**2. 写账号密码**
 
 ```sh
 mkdir -p ~/.config/powervpn
@@ -68,7 +61,7 @@ chmod 600 ~/.config/powervpn/credentials.env
 
 权限不是 `0600` 时命令会直接拒绝运行。密码只从这个文件读，不会出现在命令行参数、日志或报告里。
 
-**4. 写要连的服务器**
+**3. 写要连的服务器**
 
 ```sh
 cp docs/targets.example.json ~/.config/powervpn/targets.json
@@ -92,6 +85,17 @@ chmod 600 ~/.config/powervpn/targets.json
 - `resource` 必须和 Portal 资源列表里的名字一字不差。
 - `backend` 不写时默认是旧的官方 helper 方案，所以这里要写 `"native"`。
 - 可以写多台；同一时间只连其中一台。
+
+**4. 安装 native 后端（只需要一次 sudo）**
+
+```sh
+sudo scripts/native/install.sh
+```
+
+它只装我们自己的东西：`/Library/PrivilegedHelperTools/com.hhh2210.powervpn-native/` 和一个 LaunchDaemon。
+看到 `install: native backend running` 就好了。
+
+安装时会把 `targets.json` 的目标 IP 固定到 root 拥有的路由白名单。以后新增或修改目标 IP，需重新执行安装命令。
 
 **5. 配 SSH**
 
@@ -145,7 +149,7 @@ powervpn run lab-a -- 'nvidia-smi -L'
 |---|---|---|
 | 远端命令自己的码 | 命令已在服务器上跑完 | 按命令本身处理 |
 | 75 | 暂时不行（会话忙、启动失败、中途断开） | 等一会儿原样重跑 |
-| 77 | 需要人（helper 没装、账号被拒、资源名不对） | 看 stderr 最后的 `next:` 行，照着做 |
+| 77 | 需要人（helper 没装、账号被拒、配置或 TLS 信任被拒） | 看 stderr 最后的 `next:` 行，照着做 |
 
 PowerVPN 自己出错时，stderr 最后两行固定是 `powervpn run: <原因>` 和 `next: <下一步>`。
 没有这两行，说明 75/77 是远端命令自己返回的。
@@ -153,6 +157,7 @@ PowerVPN 自己出错时，stderr 最后两行固定是 `powervpn run: <原因>`
 ## 出问题时
 
 - 先跑 `powervpn doctor`，它会指出第一个要修的问题和下一步。
+- `native_portal_unavailable` / `native_resource_unavailable`：Portal 传输或目录暂不可用，`run` 有限重试后返回 75，不误报密码错误。
 - `native_helper_unavailable` / `native_charon_unavailable`：helper 没装或没在跑，重新执行 `sudo scripts/native/install.sh`。
 - 日志（需要 sudo 读）：`/var/log/powervpn-native-helper.log`、`/var/log/powervpn-native-charon.log`。
 - 升级：重新跑 `scripts/native/build_runtime.sh`、`swift build -c release --arch arm64`，再 `sudo scripts/native/install.sh`。

@@ -87,8 +87,10 @@ jobs:
           # conservative: only retries of the same commit reuse build objects.
           key: spm-debug-${{ runner.os }}-${{ runner.arch }}-${{ matrix.toolchain }}-${{ steps.source.outputs.sha }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
 
-      - name: Build (debug, product powervpn)
-        run: swift build --product powervpn -c debug
+      - name: Build (debug, CLI and native helper)
+        run: |
+          swift build --product powervpn -c debug
+          swift build --product powervpn-native-helper -c debug
 
       - name: Test (deterministic suites, offline, real PowerVPN state denied)
         # Serial on purpose: the curl and PTY drivers block a cooperative
@@ -197,7 +199,9 @@ jobs:
           key: spm-release-${{ runner.os }}-${{ runner.arch }}-xcode-27-arm64-${{ steps.source.outputs.sha }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
 
       - name: Build release arm64
-        run: swift build --product powervpn --arch arm64 -c release
+        run: |
+          swift build --product powervpn --arch arm64 -c release
+          swift build --product powervpn-native-helper --arch arm64 -c release
 
       - name: Verify arch and report sha256
         env:

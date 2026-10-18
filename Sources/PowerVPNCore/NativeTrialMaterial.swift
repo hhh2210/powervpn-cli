@@ -55,6 +55,7 @@ package enum NativeTrialMaterial {
     includePrivateRule: Bool = false,
     proposalNumber: UInt8 = 0,
     observeGateway: ((String) throws -> Void)? = nil,
+    diagnosticSink: ((Data) -> Void)? = nil,
     _ body: (VICIMessage, VICIMessage) throws -> Void
   ) throws {
     guard proposalNumber <= 1 else { throw Failure.unsupported }
@@ -124,24 +125,18 @@ package enum NativeTrialMaterial {
     }
     // Trial-only diagnostics. In the product this runs inside an SSH
     // ProxyCommand, where stdout is the SSH stream and stderr is the terminal.
-    let trialDiagnostics = ProcessInfo.processInfo.environment["POWERVPN_CAPTURE_VIP_FIELDS"] == "1"
-    if trialDiagnostics, let vip = common.vip, ipv4(try text(vip)) != nil {
+    if let diagnosticSink, let vip = common.vip, ipv4(try text(vip)) != nil {
       let metadata: [String: Any] = [
         "stage": "portal_vip", "vip": try text(vip),
         "proposalNumber": proposalNumber, "epoch": Date().timeIntervalSince1970,
       ]
-      FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: metadata))
-      FileHandle.standardOutput.write(Data([10]))
+      diagnosticSink(try JSONSerialization.data(withJSONObject: metadata))
     }
     // NC connection type 2 is finalized by vendor _set_adapter_name
     // (0x100122d69..0x100122d7b) with remote TS 0.0.0.0/0. The resource
     // CIDR remains in ADDRULE. Run only with native automatic routes disabled;
     // the existing runner installs the selected target /32 explicitly.
     let remoteTS = "0.0.0.0/0"
-    if trialDiagnostics {
-      FileHandle.standardError.write(
-        Data("native NC remote_ts=\(remoteTS) addrule_scope=selected-resource\n".utf8))
-    }
     var childElements: [VICIElement] = [
       .list("local_ts", [localTS]), .list("remote_ts", [remoteTS]),
       .list("esp_proposals", try text(esp).split(separator: ",").map(String.init)),

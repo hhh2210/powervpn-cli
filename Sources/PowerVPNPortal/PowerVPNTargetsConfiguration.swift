@@ -36,7 +36,7 @@ public struct PowerVPNTargetConfiguration: Equatable, Sendable {
 
 /// Which tunnel implementation `run`/`up`/`ssh` use. Absent means vendor, so
 /// existing configurations keep their behavior until they opt in.
-public enum PowerVPNBackend: String, Equatable, Sendable {
+public enum PowerVPNBackend: String, Codable, Equatable, Sendable {
   /// Patched strongSwan charon run by our own root helper.
   case native
   /// The official PowerVPN privileged helper.
