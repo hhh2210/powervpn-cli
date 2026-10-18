@@ -17,8 +17,18 @@ import Testing
     return url
   }
 
+  private func tar(_ arguments: [String]) throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+    process.arguments = arguments
+    try process.run()
+    process.waitUntilExit()
+    #expect(process.terminationStatus == 0)
+  }
+
   /// A keg laid out like Homebrew's: <keg>/bin/powervpn, <keg>/libexec/powervpn-native/*,
-  /// reached through a <brew>/bin/powervpn symlink.
+  /// reached through a <brew>/bin/powervpn symlink. runtime.tar is a real tar
+  /// holding a charon, a library and a symlink to it.
   private func makeKeg(in root: URL, files: [String] = payloadFiles) throws -> (
     link: String, payload: String
   ) {
@@ -28,8 +38,21 @@ import Testing
       at: keg.appendingPathComponent("bin"), withIntermediateDirectories: true)
     try FileManager.default.createDirectory(at: payload, withIntermediateDirectories: true)
     try Data("cli".utf8).write(to: keg.appendingPathComponent("bin/powervpn"))
-    for file in files {
+    for file in files where file != "runtime.tar" {
       try Data("bundled \(file)".utf8).write(to: payload.appendingPathComponent(file))
+    }
+    if files.contains("runtime.tar") {
+      let tree = root.appendingPathComponent("runtime-tree")
+      for directory in ["libexec/ipsec", "lib/ipsec"] {
+        try FileManager.default.createDirectory(
+          at: tree.appendingPathComponent(directory), withIntermediateDirectories: true)
+      }
+      try Data("charon".utf8).write(to: tree.appendingPathComponent("libexec/ipsec/charon"))
+      try Data("lib".utf8).write(to: tree.appendingPathComponent("lib/ipsec/libcharon.0.dylib"))
+      try FileManager.default.createSymbolicLink(
+        atPath: tree.appendingPathComponent("lib/ipsec/libcharon.dylib").path,
+        withDestinationPath: "libcharon.0.dylib")
+      try tar(["-cf", payload.appendingPathComponent("runtime.tar").path, "-C", tree.path, "."])
     }
     let bin = root.appendingPathComponent("bin")
     try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
@@ -41,11 +64,10 @@ import Testing
 
   /// A root install made from `payload`, as install.sh lays it out.
   private func install(_ payload: NativeBundledPayload, into home: String) throws {
-    for directory in ["runtime/libexec/ipsec"] {
-      try FileManager.default.createDirectory(
-        atPath: home + "/" + directory, withIntermediateDirectories: true)
-    }
-    for file in ["runtime/libexec/ipsec/charon", "strongswan.conf", "allowed-hosts", "owner-uid"] {
+    try FileManager.default.createDirectory(
+      atPath: home + "/runtime", withIntermediateDirectories: true)
+    try tar(["-xf", payload.runtimeArchive, "-C", home + "/runtime"])
+    for file in ["strongswan.conf", "allowed-hosts", "owner-uid"] {
       try Data("installed".utf8).write(to: URL(fileURLWithPath: home + "/" + file))
     }
     try FileManager.default.copyItem(
@@ -91,6 +113,15 @@ import Testing
     }
     #expect(payload.matchesInstalled(home: home) == true)
 
+    // A missing library, or a missing symlink to it, is not up to date.
+    for member in ["lib/ipsec/libcharon.0.dylib", "lib/ipsec/libcharon.dylib"] {
+      let path = home + "/runtime/" + member
+      let backup = home + "/backup"
+      try FileManager.default.moveItem(atPath: path, toPath: backup)
+      #expect(payload.matchesInstalled(home: home) == false)
+      try FileManager.default.moveItem(atPath: backup, toPath: path)
+    }
+    #expect(payload.matchesInstalled(home: home) == true)
     try FileManager.default.removeItem(atPath: home + "/runtime/libexec/ipsec/charon")
     #expect(payload.matchesInstalled(home: home) == false)
   }

@@ -91,14 +91,45 @@ package struct NativeBundledPayload: Equatable, Sendable {
     guard FileManager.default.fileExists(atPath: home + "/powervpn-native-helper") else {
       return nil
     }
-    let required = [
-      "/runtime/libexec/ipsec/charon", "/strongswan.conf", "/allowed-hosts", "/owner-uid",
-    ]
+    let required = ["/strongswan.conf", "/allowed-hosts", "/owner-uid"]
     guard required.allSatisfy({ FileManager.default.fileExists(atPath: home + $0) }),
       let expected = expectedInstalledFrom(),
-      let installed = try? String(contentsOfFile: home + "/installed-from", encoding: .utf8)
+      let installed = try? String(contentsOfFile: home + "/installed-from", encoding: .utf8),
+      installed == expected
     else { return false }
-    return installed == expected
+    return runtimeComplete(home: home)
+  }
+
+  /// Every member of the keg's runtime archive is present in the installed
+  /// runtime (as itself: a symlink stays a symlink), so a deleted library or
+  /// plugin is never "up to date".
+  package func runtimeComplete(home: String) -> Bool {
+    guard let members = Self.archiveMembers(runtimeArchive), !members.isEmpty else { return false }
+    let runtime = home + "/runtime/"
+    return members.allSatisfy { member in
+      var info = stat()
+      return lstat(runtime + member, &info) == 0
+    }
+  }
+
+  /// `tar -tf` member paths, without the leading "./" or a trailing "/".
+  private static func archiveMembers(_ archive: String) -> [String]? {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+    process.arguments = ["-tf", archive]
+    let output = Pipe()
+    process.standardOutput = output
+    process.standardError = FileHandle.nullDevice
+    guard (try? process.run()) != nil else { return nil }
+    let data = output.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else { return nil }
+    return String(decoding: data, as: UTF8.self).split(separator: "\n").compactMap { line in
+      var path = Substring(line)
+      if path.hasPrefix("./") { path = path.dropFirst(2) }
+      while path.hasSuffix("/") { path = path.dropLast() }
+      return path.isEmpty || path == "." ? nil : String(path)
+    }
   }
 
   private static func sha256(ofFile path: String) -> String? {
