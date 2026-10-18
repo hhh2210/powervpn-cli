@@ -108,25 +108,6 @@ jobs:
             exit 1
           fi
 
-      - name: Universal arm64 + arm64e release runs on this macOS
-        # Pointer authentication ships as an arm64e slice beside arm64 (see
-        # docs/security-settings.md). On the macOS 14 leg this proves the
-        # universal binary still runs where third-party arm64e may not.
-        run: |
-          set -euo pipefail
-          for product in powervpn powervpn-native-helper; do
-            swift build -c release --arch arm64 --arch arm64e --product "$product"
-          done
-          bin="$(swift build -c release --arch arm64 --arch arm64e --show-bin-path)"
-          for product in powervpn powervpn-native-helper; do
-            archs="$(lipo -archs "$bin/$product")"
-            echo "$product: $archs"
-            grep -qw arm64e <<<"$archs"
-          done
-          "$bin/powervpn" --version
-          policy="$(printf '{"targets":{"lab":{"host":"192.0.2.21"}}}' | "$bin/powervpn-native-helper" host-policy)"
-          test "$policy" = 192.0.2.21
-
       - name: Static analyzer security checks (own C code)
         run: |
           set -euo pipefail

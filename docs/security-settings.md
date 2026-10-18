@@ -45,13 +45,6 @@ What ships:
   copy of the real charon signed this way loads its plugins exactly like the unsigned one.
   Whether the kernel enforces each protection for an ad hoc signature was not
   independently verified.
-- Pointer authentication for `powervpn` and `powervpn-native-helper`: the Homebrew formula
-  builds them universal arm64 + arm64e (`--arch arm64 --arch arm64e`). On macOS 27.2 a
-  third-party arm64e tool runs with pointer authentication active, and a universal tool runs
-  its arm64e slice by default. CI builds and runs the universal binaries on every leg,
-  including macOS 14. The README source build stays arm64-only: with the older SwiftPM build
-  system a multi-architecture build lands outside `.build/release`, where `install.sh`
-  looks by default.
 - Static analyzer security checkers on our C code in CI: `security.FloatLoopCounter`,
   `security.insecureAPI.rand`, `security.insecureAPI.strcpy` (0 findings at adoption).
 - CI fails if `powervpn-native-helper` references the runtime actor-isolation check
@@ -66,6 +59,15 @@ What ships:
 
 Settings considered but not yet enabled. Revisit them later.
 
+- Pointer authentication for `powervpn` and `powervpn-native-helper` (universal
+  arm64 + arm64e): on macOS 27.2 a third-party arm64e tool runs with pointer
+  authentication active, and a universal tool runs its arm64e slice by default. But on
+  the macOS 14 CI runner (`macos-14-arm64`, Xcode 16.2 build) the universal `powervpn`
+  was killed with SIGKILL at launch instead of falling back to its arm64 slice; whether
+  the arm64e slice or the signature was rejected was not isolated. With a macOS 14
+  deployment target this cannot ship. Revisit when the deployment target reaches a
+  release that runs third-party arm64e (verify the lowest one in CI first), or with
+  per-OS bottles.
 - Pointer authentication for `charon`: an arm64e charon cannot load Homebrew's arm64-only
   `openssl@3` libcrypto. Needs OpenSSL built from source as arm64e inside `build_runtime.sh`.
 - Hardware memory tagging (`com.apple.security.hardened-process.checked-allocations`, soft
