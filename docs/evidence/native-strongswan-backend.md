@@ -68,6 +68,20 @@ QM1–QM3 明文在 VIP 字段归一化后，与 vendor 逐字节一致，所以
   - thu21 第一次连接遇到 Portal 资源目录不完整（已知的间歇问题），现在 open 内会重新登录重试，最多 3 次。
 - child SA 的生存期是 1 小时。现在在到期前 5 分钟 rekey；rekey 是否被网关接受，见下面的长连接记录。
 
+### 15:57 旧版 child rekey 观察
+
+此结果属于已安装的 `c26d94d` 构建，**不代表下节 review 修复后的新版已通过 E2E**。
+2026-10-18 15:57:21（Asia/Taipei）的 `swanctl --list-sas` 与随后同会话命令显示：
+
+- IKE `powervpn-thu21-99dc6eab` 仍为 ESTABLISHED，已建立 3434 秒，没有重建 IKE。
+- 旧 child #3 为 REKEYED，距硬到期还有 166 秒；新 child #4 为 INSTALLED，已建立 134 秒，
+  下一次 rekey 还有 3166 秒。由 `3434 - 134 = 3300` 可见首次 rekey 落在 3600 秒 lifetime 前 300 秒。
+- 新 child 已有双向数据：入 9 包、出 18 包。旧 child 最后流量在 146 秒前；观察时新旧 SA 重叠存在，
+  支持此次 make-before-break 成功。
+- `powervpn run thu21 -- 'echo post-rekey-ok'` 返回 `post-rekey-ok`、`run_exit=0`；目标路由仍在 `utun9`。
+
+证据边界：一次旧版 child rekey 与续传成功。新版仍需重测；sleep/wake、网络切换和 8 小时 IKE rekey 未覆盖。
+
 ## 2026-10-18：PR #3 review 修复（待安装验证）
 
 上节 live 数字来自 `c26d94d` 及其前置构建，不是本节新版 helper 的验证结果。
