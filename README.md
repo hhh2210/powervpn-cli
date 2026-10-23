@@ -168,7 +168,7 @@ powervpn run lab-a -- 'nvidia-smi -L'
 |---|---|---|
 | 远端命令自己的码 | 命令已在服务器上跑完 | 按命令本身处理 |
 | 75 | 暂时不行（会话忙、启动失败、中途断开） | 等一会儿原样重跑 |
-| 77 | 需要人（helper 没装、账号被拒、配置或 TLS 信任被拒） | 看 stderr 最后的 `next:` 行，照着做 |
+| 77 | 需要人（helper 没装、账号被拒、SSH 公钥或主机密钥被拒、配置或 TLS 信任被拒） | 看 stderr 最后的 `next:` 行，照着做 |
 
 PowerVPN 自己出错时，stderr 最后两行固定是 `powervpn run: <原因>` 和 `next: <下一步>`。
 没有这两行，说明 75/77 是远端命令自己返回的。
@@ -179,12 +179,15 @@ PowerVPN 自己出错时，stderr 最后两行固定是 `powervpn run: <原因>`
 - native 登出会用同一会话做前后只读探测：只有确认已失效才报告完整清理。网关的 logout HTTP 302 不会被跟随，也不直接视为成功。若探测明确仍有效，自动重连被阻止；只有本人在 Portal 结束该会话后，才使用 `powervpn recovery clear --json --acknowledge-portal-logout`。这个显式确认保留原始未验证回执，不用于自动重试。
 - `native_portal_unavailable` / `native_resource_unavailable`：Portal 传输或目录暂不可用，`run` 有限重试后返回 75，不误报密码错误。
 - `native_helper_unavailable` / `native_charon_unavailable`：helper 没装或没在跑，按 `next:` 行重新安装 native 后端。
-- `run` 报 `session_start_failed`，且第一行是 `SSH master did not start`：多半是后台 SSH 登录失败。
-  这时退出码虽然是 75，原样重跑也不会好，`powervpn doctor` 也照样显示 ready。
-  用 `powervpn ssh lab-a -- true` 看 ssh 自己怎么说：
-  - 要你输入密码：公钥没装好，按第 6 步重装。
-  - 要你输入 passphrase：密钥不在 ssh-agent 里，按第 6 步最后一条加进去。
-  - 报主机密钥变了：先确认服务器确实换过密钥，再按 ssh 的提示更新 `~/.ssh/known_hosts`。
+- `run` 报 `ssh_auth_rejected`（退出码 77）：服务器不接受你的公钥。后台 SSH 没法输入密码或 passphrase，
+  原样重跑不会好，`powervpn doctor` 也照样显示 ready。
+  - 公钥还没装到服务器上：按第 6 步装。
+  - 密钥设了 passphrase：按第 6 步最后一条把它加进 ssh-agent。
+- `run` 报 `ssh_host_key_rejected`（退出码 77）：`~/.ssh/known_hosts` 里没有这台服务器的主机密钥，或者它变了。
+  - 还没记下：`powervpn ssh lab-a -- true`，按提示输入 `yes`。
+  - 变了：先确认服务器确实换过密钥，再 `ssh-keygen -R <服务器 IP>`，然后同上。
+- 其他 SSH 启动失败仍报 `session_start_failed`（75，第一行是 `SSH master did not start`），可以原样重跑；
+  反复出现时用 `powervpn ssh lab-a -- true` 看 ssh 自己怎么说。
 - 日志（需要 sudo 读）：`/var/log/powervpn-native-helper.log`、`/var/log/powervpn-native-charon.log`。
 - 升级：`brew upgrade powervpn`。只有 helper 或 strongSwan 运行时变了才需要再 sudo 一次；
   `powervpn native status` 或 `powervpn doctor` 会告诉你，并给出要执行的命令。

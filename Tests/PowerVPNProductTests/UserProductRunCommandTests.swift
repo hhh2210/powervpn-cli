@@ -484,6 +484,139 @@ import Testing
     }
   }
 
+  @Test(arguments: [UserProductSSHRejection.authRejected, .hostKeyRejected])
+  func runStopsForHumanWhenSSHRefusesTheMaster(_ rejection: UserProductSSHRejection)
+    async throws
+  {
+    let directory = recoveryTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = UserProductSessionStateStore(directory: directory)
+    let ssh = RunScriptedSSH(execExitCode: 0, startDiagnostics: sshDiagnostics(rejection))
+
+    let result = try await runCurrentMachineUserProductCommand(
+      ["run", "thu21", "--", "hostname"],
+      dependencies: runDependencies(ssh: ssh, store: store)
+    )
+
+    #expect(result.exitCode == 77)
+    #expect(ssh.starts == 1)
+    #expect(ssh.execs.isEmpty)
+    #expect(result.standardError.contains("powervpn run: \(rejection.rawValue)\n"))
+    switch rejection {
+    case .authRejected:
+      #expect(result.standardError.contains("把 SSH 公钥装到服务器上"))
+    case .hostKeyRejected:
+      #expect(result.standardError.contains("ssh-keygen -R 192.0.2.21"))
+      #expect(result.standardError.contains("powervpn ssh thu21 -- true"))
+    }
+    // ssh's own messages name the user and host: classified, never printed or kept.
+    #expect(!result.standardError.contains("synthetic-user@"))
+    #expect(!result.standardError.contains("verification failed"))
+    #expect(ssh.diagnosticLogs.count == 1)
+    #expect(ssh.diagnosticLogs.allSatisfy { !FileManager.default.fileExists(atPath: $0) })
+  }
+
+  @Test func upReportsAnSSHRefusalAsNeedingAHumanAndKeepsTheCleanupMarker() async throws {
+    let directory = recoveryTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = UserProductSessionStateStore(directory: directory)
+    let ssh = RunScriptedSSH(execExitCode: 0, startDiagnostics: sshDiagnostics(.authRejected))
+
+    let result = try await runCurrentMachineUserProductCommand(
+      ["up", "thu21"],
+      dependencies: runDependencies(ssh: ssh, store: store)
+    )
+
+    #expect(result.exitCode == 77)
+    #expect(result.sshRejection == .authRejected)
+    #expect(result.standardError.hasPrefix("PowerVPN: thu21 rejected SSH public-key login"))
+    #expect(
+      result.standardError.hasSuffix(
+        "next: \(UserProductSSHRejection.authRejected.next(target: runTarget))\n"))
+    #expect(try store.load()?.failure == "ssh_master_start_cleanup_unverified")
+  }
+
+  @Test func runReportsAnSSHRefusalEvenWhenTheProxyFinishedFirst() async throws {
+    let directory = recoveryTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = UserProductSessionStateStore(directory: directory)
+    let ssh = RunScriptedSSH(
+      execExitCode: 0, startFailure: "connection_failed",
+      startDiagnostics: sshDiagnostics(.authRejected), store: store)
+
+    let result = try await runCurrentMachineUserProductCommand(
+      ["run", "thu21", "--", "hostname"],
+      dependencies: runDependencies(ssh: ssh, store: store)
+    )
+
+    #expect(result.exitCode == 77)
+    #expect(ssh.starts == 1)
+    #expect(result.standardError.contains("powervpn run: ssh_auth_rejected"))
+  }
+
+  @Test func runStillRetriesSSHFailuresThatAreNotARefusal() async throws {
+    let directory = recoveryTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = UserProductSessionStateStore(directory: directory)
+    let ssh = RunScriptedSSH(
+      execExitCode: 0,
+      startDiagnostics:
+        "kex_exchange_identification: Connection closed by remote host\r\nConnection closed by UNKNOWN port 65535\r\n"
+    )
+
+    let result = try await runCurrentMachineUserProductCommand(
+      ["run", "thu21", "--", "hostname"],
+      dependencies: runDependencies(ssh: ssh, store: store)
+    )
+
+    #expect(result.exitCode == 75)
+    #expect(ssh.starts == 2)
+    #expect(result.standardError.hasPrefix("PowerVPN: SSH master did not start."))
+    #expect(result.standardError.contains("powervpn run: session_start_failed"))
+    #expect(ssh.diagnosticLogs.count == 2)
+    #expect(ssh.diagnosticLogs.allSatisfy { !FileManager.default.fileExists(atPath: $0) })
+  }
+
+  @Test func masterStartRemovesItsDiagnosticLogOnSuccess() async throws {
+    let directory = recoveryTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = UserProductSessionStateStore(directory: directory)
+    let ssh = RunScriptedSSH(execExitCode: 0)
+
+    let result = try await runCurrentMachineUserProductCommand(
+      ["run", "thu21", "--", "hostname"],
+      dependencies: runDependencies(ssh: ssh, store: store)
+    )
+
+    #expect(result.exitCode == 0)
+    #expect(ssh.diagnosticLogs.count == 1)
+    #expect(ssh.diagnosticLogs.allSatisfy { !FileManager.default.fileExists(atPath: $0) })
+  }
+
+  @Test func diagnosticLogIsPrivateBoundedAndClassified() throws {
+    let directory = recoveryTemporaryDirectory()
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let log = try #require(UserProductSSHDiagnosticLog.create(directory: directory.path))
+    defer { log.remove() }
+    var metadata = stat()
+    #expect(lstat(log.path, &metadata) == 0)
+    #expect(metadata.st_mode & S_IFMT == S_IFREG)
+    #expect(metadata.st_mode & 0o777 == 0o600)
+    #expect(log.failureClass() == nil)
+
+    try Data(sshDiagnostics(.hostKeyRejected).utf8).write(to: URL(fileURLWithPath: log.path))
+    #expect(log.failureClass() == .hostKeyRejected)
+
+    let flood = String(repeating: "x", count: UserProductSSHDiagnosticLog.limitBytes)
+    try Data((flood + sshDiagnostics(.authRejected)).utf8).write(
+      to: URL(fileURLWithPath: log.path))
+    #expect(log.failureClass() == nil)
+
+    log.remove()
+    #expect(!FileManager.default.fileExists(atPath: log.path))
+  }
+
   @Test func productFailuresEndWithNextAction() async throws {
     let directory = recoveryTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
@@ -505,7 +638,8 @@ import Testing
 }
 
 /// Scripted `/usr/bin/ssh`: `-G` prints a valid Host block, `-O check` reports sockets marked
-/// alive, `-f` starts a master (or records a proxy-side failure), anything else is the command.
+/// alive, `-f` starts a master (or records a proxy-side failure, or writes `startDiagnostics` to
+/// its `-E` file and exits 255), anything else is the command.
 private final class RunScriptedSSH: UserProductProcessRunning, @unchecked Sendable {
   let socket = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent(".ssh/powervpn-run-\(UUID().uuidString).sock").path
@@ -514,28 +648,34 @@ private final class RunScriptedSSH: UserProductProcessRunning, @unchecked Sendab
   private let execKillsMaster: Bool
   private let startFailure: String?
   private let failingStarts: Int?
+  private let startDiagnostics: String?
   private let store: UserProductSessionStateStore?
   private var alive: Set<String> = []
   private var startCount = 0
   private var execArguments: [[String]] = []
+  private var diagnosticLogPaths: [String] = []
 
   init(
     execExitCode: Int32,
     execKillsMaster: Bool = false,
     startFailure: String? = nil,
     failingStarts: Int? = nil,
+    startDiagnostics: String? = nil,
     store: UserProductSessionStateStore? = nil
   ) {
     self.execExitCode = execExitCode
     self.execKillsMaster = execKillsMaster
     self.startFailure = startFailure
     self.failingStarts = failingStarts
+    self.startDiagnostics = startDiagnostics
     self.store = store
   }
 
   func markAlive(_ path: String) { lock.withLock { _ = alive.insert(path) } }
   var starts: Int { lock.withLock { startCount } }
   var execs: [[String]] { lock.withLock { execArguments } }
+  /// The `-E` file of every master start, in order.
+  var diagnosticLogs: [String] { lock.withLock { diagnosticLogPaths } }
 
   func run(
     executable: String,
@@ -561,6 +701,14 @@ private final class RunScriptedSSH: UserProductProcessRunning, @unchecked Sendab
         startCount += 1
         return startCount
       }
+      if let log = arguments.firstIndex(of: "-E").map({ arguments[$0 + 1] }) {
+        lock.withLock { diagnosticLogPaths.append(log) }
+        if let startDiagnostics, let handle = FileHandle(forWritingAtPath: log) {
+          handle.seekToEndOfFile()
+          handle.write(Data(startDiagnostics.utf8))
+          handle.closeFile()
+        }
+      }
       if let startFailure, let store, attempt <= (failingStarts ?? .max),
         let state = try? store.load()
       {
@@ -571,6 +719,7 @@ private final class RunScriptedSSH: UserProductProcessRunning, @unchecked Sendab
         }
         return .init(started: true, exitCode: 255, output: "")
       }
+      if startDiagnostics != nil { return .init(started: true, exitCode: 255, output: "") }
       markAlive(arguments[index + 1])
       return .init(started: true, exitCode: 0, output: "")
     }
@@ -581,6 +730,22 @@ private final class RunScriptedSSH: UserProductProcessRunning, @unchecked Sendab
     return .init(started: true, exitCode: execExitCode, output: "")
   }
 }
+
+/// What OpenSSH 10 writes to its `-E` file for each refusal, user and host included.
+private func sshDiagnostics(_ rejection: UserProductSSHRejection) -> String {
+  switch rejection {
+  case .authRejected:
+    "no such identity: /Users/test/.ssh/id_ed25519: No such file or directory\r\n"
+      + "synthetic-user@192.0.2.21: Permission denied (publickey,password).\r\n"
+  case .hostKeyRejected:
+    "No ED25519 host key is known for 192.0.2.21 and you have requested strict checking.\r\n"
+      + "Host key verification failed.\r\n"
+  }
+}
+
+/// The target `recoveryConfiguration` defines as thu21.
+private let runTarget = UserProductTarget(
+  key: "thu21", host: "192.0.2.21", user: "synthetic-user", resource: "Campus NC")
 
 private func activeState(controlPath: String) -> UserProductSessionState {
   UserProductSessionState(

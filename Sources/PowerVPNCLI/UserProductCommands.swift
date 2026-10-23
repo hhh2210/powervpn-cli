@@ -18,6 +18,8 @@ struct UserProductCommandResult: Equatable, Sendable {
   let standardOutput: String
   let standardError: String
   let exitCode: Int32
+  /// Set by `up` when the server refused the master's SSH login, so `run` need not parse stderr.
+  var sshRejection: UserProductSSHRejection? = nil
 
   static func success(_ output: String = "") -> Self {
     Self(standardOutput: output, standardError: "", exitCode: 0)
@@ -29,6 +31,13 @@ struct UserProductCommandResult: Equatable, Sendable {
     let action = next ?? userProductNextAction(in: error)
     let text = action.map { "\(error)\nnext: \($0)" } ?? error
     return Self(standardOutput: "", standardError: text + "\n", exitCode: exitCode)
+  }
+
+  static func sshRejected(_ rejection: UserProductSSHRejection, target: UserProductTarget) -> Self {
+    var result = failure(
+      rejection.message(target: target), exitCode: 77, next: rejection.next(target: target))
+    result.sshRejection = rejection
+    return result
   }
 }
 
@@ -506,23 +515,34 @@ func runUserProductUp(
   )
   try dependencies.stateStore.save(connecting)
 
+  let diagnosticLog = UserProductSSHDiagnosticLog.create()
+  defer { diagnosticLog?.remove() }
   let launch = dependencies.processRunner.run(
     executable: "/usr/bin/ssh",
     arguments: UserProductSSHArguments.startMaster(
       target: target.key,
       controlPath: sshConfiguration.controlPath,
       executablePath: dependencies.executablePath,
-      sessionID: sessionID
+      sessionID: sessionID,
+      diagnosticLog: diagnosticLog?.path
     ),
     io: .discarded
   )
   guard launch.started, launch.exitCode == 0 else {
+    // 255 is ssh's own failure; a refused login or host key is not worth a retry. A quarantine
+    // or a cancellation still takes precedence below.
+    let rejection =
+      launch.exitCode == 255
+      ? diagnosticLog?.failureClass().flatMap(UserProductSSHRejection.init) : nil
     if let final = try dependencies.stateStore.load(), final.sessionID == sessionID,
       final.terminal
     {
+      let exitCode: Int32 =
+        final.cleanupVerified != true ? 74 : (final.failure == "cancelled" ? 130 : 69)
+      if exitCode == 69, let rejection { return .sshRejected(rejection, target: target) }
       return .failure(
         userProductFailureMessage(final.failure),
-        exitCode: final.cleanupVerified != true ? 74 : (final.failure == "cancelled" ? 130 : 69),
+        exitCode: exitCode,
         next: userProductFailureNext(final.failure))
     }
     _ = try dependencies.stateStore.update(sessionID: sessionID) {
@@ -530,6 +550,7 @@ func runUserProductUp(
       $0.cleanupVerified = false
       $0.failure = "ssh_master_start_cleanup_unverified"
     }
+    if let rejection { return .sshRejected(rejection, target: target) }
     return .failure(
       "PowerVPN: SSH master did not start. Check SSH keys and run `powervpn doctor --json`."
     )
