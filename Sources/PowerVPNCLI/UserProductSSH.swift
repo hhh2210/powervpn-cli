@@ -75,11 +75,6 @@ struct UserProductSSHEffectiveConfiguration: Equatable, Sendable {
   let port: UInt16
   let controlMaster: String
   let controlPath: String
-  /// The first `UserKnownHostsFile`, where ssh records an accepted host key. `ssh -G` prints the
-  /// list unquoted, so a path containing a space is cut at the space.
-  var knownHostsFile: String? = nil
-  /// The name host keys are recorded under instead of `hostname`.
-  var hostKeyAlias: String? = nil
 
   static func parse(_ output: String) -> Self? {
     var values: [String: String] = [:]
@@ -87,10 +82,7 @@ struct UserProductSSHEffectiveConfiguration: Equatable, Sendable {
       let parts = line.split(separator: " ", maxSplits: 1)
       guard parts.count == 2 else { continue }
       let key = String(parts[0])
-      if [
-        "hostname", "user", "port", "controlmaster", "controlpath", "userknownhostsfile",
-        "hostkeyalias",
-      ].contains(key) {
+      if ["hostname", "user", "port", "controlmaster", "controlpath"].contains(key) {
         values[key] = String(parts[1])
       }
     }
@@ -107,9 +99,7 @@ struct UserProductSSHEffectiveConfiguration: Equatable, Sendable {
       user: user,
       port: port,
       controlMaster: controlMaster,
-      controlPath: controlPath,
-      knownHostsFile: values["userknownhostsfile"]?.split(separator: " ").first.map(String.init),
-      hostKeyAlias: values["hostkeyalias"]
+      controlPath: controlPath
     )
   }
 }
@@ -139,8 +129,7 @@ enum UserProductSSHArguments {
 
   /// `diagnosticLog` receives ssh's own errors (`-E`), at LogLevel ERROR and without LogVerbose
   /// whatever ~/.ssh/config says: QUIET would hide the refusal, and DEBUG or a LogVerbose pattern
-  /// would bury it past the read limit and keep the backgrounded master writing for the whole
-  /// session. Without a log they are discarded.
+  /// would bury it past the read limit. Without a log they are discarded.
   static func startMaster(
     target: String,
     controlPath: String,
@@ -207,69 +196,126 @@ func removeOwnedStaleControlSocket(_ path: String) -> Bool {
   return Darwin.unlink(path) == 0
 }
 
-/// A private file for ssh's own messages (`ssh -E`) while it starts a master.
+/// ssh's own messages while it starts a master, through a FIFO that `ssh -E` writes to.
 ///
 /// The master's stderr cannot be captured instead: ssh hands it to the ProxyCommand, which keeps
-/// it open for the whole session. The messages can name the user and host, so they are only
-/// classified, never printed. The file lives in the session state directory, is emptied and
-/// removed as soon as the start is decided, and a start that was killed first leaves it for the
-/// next `up` to remove.
-struct UserProductSSHDiagnosticLog: Sendable {
+/// it open for the whole session. A regular file would not do either: the master keeps its log
+/// descriptor for the whole session and appends every later error to it. Here a thread drains the
+/// FIFO while the start runs, and `close()` closes it once the start is decided; the master's
+/// later writes then fail with EPIPE, which ssh ignores (it ignores SIGPIPE), so nothing reaches
+/// the disk. The messages can name the user and host, so they are only classified, never printed.
+/// Every instance must be closed.
+final class UserProductSSHDiagnosticPipe: @unchecked Sendable {
   static let limitBytes = 16 * 1_024
   private static let namePrefix = "ssh-master-"
-  private static let nameSuffix = ".log"
+  private static let nameSuffix = ".fifo"
+  /// How long the drain thread waits for data before it checks whether to stop.
+  private static let pollMilliseconds: Int32 = 50
 
   let path: String
+  private let reader: Int32
+  /// Held until `close()` so the FIFO never reports end-of-file while ssh is not writing.
+  private let writer: Int32
+  private let draining = DispatchGroup()
+  private let lock = NSLock()
+  // Guarded by `lock`.
+  private var bytes = Data()
+  private var stopping = false
+  private var closed = false
 
-  /// nil when the file cannot be created; the master then starts with its messages discarded.
-  static func create(directory: String) -> Self? {
-    var template = Array(
-      (directory as NSString)
-        .appendingPathComponent(namePrefix + "XXXXXX" + nameSuffix).utf8CString)
-    let descriptor = mkstemps(&template, Int32(nameSuffix.utf8.count))
-    guard descriptor >= 0 else { return nil }
-    close(descriptor)
-    return Self(path: String(cString: template))
+  /// nil when the FIFO cannot be created; the master then starts with its messages discarded.
+  static func create(directory: String) -> UserProductSSHDiagnosticPipe? {
+    let path = (directory as NSString).appendingPathComponent(
+      namePrefix + UUID().uuidString.lowercased() + nameSuffix)
+    guard mkfifo(path, 0o600) == 0 else { return nil }
+    // The read end first: ssh's own blocking open for writing then returns at once.
+    let reader = open(path, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
+    let writer = reader >= 0 ? open(path, O_WRONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC) : -1
+    var metadata = stat()
+    guard writer >= 0, fstat(reader, &metadata) == 0, metadata.st_mode & S_IFMT == S_IFIFO else {
+      if reader >= 0 { Darwin.close(reader) }
+      if writer >= 0 { Darwin.close(writer) }
+      unlink(path)
+      return nil
+    }
+    return UserProductSSHDiagnosticPipe(path: path, reader: reader, writer: writer)
   }
 
-  /// Removes the logs of starts that were killed before they removed their own. Only `up` creates
-  /// these files, and it holds the session command lock, so none of them is still being decided.
+  private init(path: String, reader: Int32, writer: Int32) {
+    self.path = path
+    self.reader = reader
+    self.writer = writer
+    draining.enter()
+    // A dispatch read source never fires for a FIFO on macOS, so a thread polls instead.
+    let thread = Thread { [self] in
+      var descriptor = pollfd(fd: reader, events: Int16(POLLIN), revents: 0)
+      while !lock.withLock({ stopping }) {
+        if poll(&descriptor, 1, Self.pollMilliseconds) > 0 { readAvailable() }
+      }
+      draining.leave()
+    }
+    thread.name = "powervpn.ssh-master-diagnostics"
+    thread.start()
+  }
+
+  /// Bytes collected so far, at most `limitBytes + 1`.
+  var collectedByteCount: Int { lock.withLock { bytes.count } }
+
+  /// The SSH failure the messages name, once ssh has exited; nil when they are over `limitBytes`
+  /// or name nothing the classifier knows.
+  func failureClass() -> ProductM2SSHFailureClass? {
+    stopDraining()
+    guard !lock.withLock({ closed }) else { return nil }
+    readAvailable()
+    return lock.withLock {
+      guard bytes.count <= Self.limitBytes else { return nil }
+      return bytes.withUnsafeBytes(ProductM2SSHFailureClassifier.classify)
+    }
+  }
+
+  /// Stops collecting, closes the FIFO and removes it. From then on a master that started gets
+  /// EPIPE for every message it logs.
+  func close() {
+    stopDraining()
+    let first = lock.withLock { () -> Bool in
+      guard !closed else { return false }
+      closed = true
+      bytes.resetBytes(in: bytes.indices)
+      bytes.removeAll()
+      return true
+    }
+    guard first else { return }
+    Darwin.close(reader)
+    Darwin.close(writer)
+    unlink(path)
+  }
+
+  /// Removes the FIFOs of starts that were killed before they removed their own. Only `up` creates
+  /// them, and it holds the session command lock, so none of them is still in use.
   static func removeLeftovers(directory: String) {
     let names = (try? FileManager.default.contentsOfDirectory(atPath: directory)) ?? []
     for name in names where name.hasPrefix(namePrefix) && name.hasSuffix(nameSuffix) {
-      Self(path: (directory as NSString).appendingPathComponent(name)).remove()
+      unlink((directory as NSString).appendingPathComponent(name))
     }
   }
 
-  /// The SSH failure the messages name; nil when they are unreadable, over `limitBytes`, or name
-  /// nothing the classifier knows.
-  func failureClass() -> ProductM2SSHFailureClass? {
-    let descriptor = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
-    guard descriptor >= 0 else { return nil }
-    let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
-    var metadata = stat()
-    guard fstat(descriptor, &metadata) == 0,
-      metadata.st_uid == getuid(),
-      metadata.st_mode & S_IFMT == S_IFREG,
-      var bytes = try? handle.read(upToCount: Self.limitBytes + 1),
-      bytes.count <= Self.limitBytes
-    else { return nil }
-    defer { bytes.resetBytes(in: bytes.indices) }
-    return bytes.withUnsafeBytes(ProductM2SSHFailureClassifier.classify)
+  private func stopDraining() {
+    lock.withLock { stopping = true }
+    draining.wait()
   }
 
-  /// Empties the file before unlinking it: a master that started keeps its descriptor (and so
-  /// does its ProxyCommand), so unlinking alone would leave the startup messages on disk.
-  func remove() {
-    let descriptor = open(path, O_WRONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
-    if descriptor >= 0 {
-      var metadata = stat()
-      if fstat(descriptor, &metadata) == 0, metadata.st_mode & S_IFMT == S_IFREG {
-        ftruncate(descriptor, 0)
+  /// Keeps the first `limitBytes + 1` bytes and discards the rest, so a chatty ssh never blocks on
+  /// a full pipe. Called by the drain thread, and after it stopped by `failureClass()`.
+  private func readAvailable() {
+    var buffer = [UInt8](repeating: 0, count: 4_096)
+    while true {
+      let count = read(reader, &buffer, buffer.count)
+      guard count > 0 else { return }
+      lock.withLock {
+        let room = Self.limitBytes + 1 - bytes.count
+        if room > 0 { bytes.append(contentsOf: buffer.prefix(min(room, count))) }
       }
-      close(descriptor)
     }
-    unlink(path)
   }
 }
 
@@ -296,32 +342,12 @@ enum UserProductSSHRejection: String, Equatable, Sendable {
     }
   }
 
-  /// The host-key step names the known_hosts file and lookup name ssh actually uses.
-  func next(
-    target: UserProductTarget,
-    configuration: UserProductSSHEffectiveConfiguration
-  ) -> String {
+  func next(target: UserProductTarget) -> String {
     switch self {
     case .authRejected:
       "install your SSH public key on the server (README step 6, \"把 SSH 公钥装到服务器上\"); if it is already there, README \"出问题时\" covers ssh-agent and IdentitiesOnly"
     case .hostKeyRejected:
-      hostKeyNext(
-        target: target,
-        file: configuration.knownHostsFile ?? "~/.ssh/known_hosts",
-        name: configuration.hostKeyAlias ?? target.host)
+      "run `powervpn ssh \(target.key) -- true` and read what ssh reports: accept a new key after checking its fingerprint; for a changed key, confirm the server really changed it, then delete the line ssh names in `Offending ... key in FILE:LINE` and run it again (with StrictHostKeyChecking yes, add the verified key to known_hosts yourself)"
     }
-  }
-
-  private func hostKeyNext(target: UserProductTarget, file: String, name: String) -> String {
-    let file = shellWord(file)
-    return
-      "verify the server's host key and record it in \(file): if it really changed, `ssh-keygen -f \(file) -R \(shellWord(name))` first; then `powervpn ssh \(target.key) -- true` and accept it (with StrictHostKeyChecking yes, add it to that file yourself)"
-  }
-
-  private func shellWord(_ value: String) -> String {
-    let plain = value.unicodeScalars.allSatisfy {
-      CharacterSet.alphanumerics.contains($0) || "/._~-".unicodeScalars.contains($0)
-    }
-    return plain ? value : "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
   }
 }

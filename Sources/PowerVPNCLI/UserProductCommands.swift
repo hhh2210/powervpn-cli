@@ -33,14 +33,9 @@ struct UserProductCommandResult: Equatable, Sendable {
     return Self(standardOutput: "", standardError: text + "\n", exitCode: exitCode)
   }
 
-  static func sshRejected(
-    _ rejection: UserProductSSHRejection,
-    target: UserProductTarget,
-    configuration: UserProductSSHEffectiveConfiguration
-  ) -> Self {
+  static func sshRejected(_ rejection: UserProductSSHRejection, target: UserProductTarget) -> Self {
     var result = failure(
-      rejection.message(target: target), exitCode: 77,
-      next: rejection.next(target: target, configuration: configuration))
+      rejection.message(target: target), exitCode: 77, next: rejection.next(target: target))
     result.sshRejection = rejection
     return result
   }
@@ -435,7 +430,7 @@ func runUserProductUp(
   }
   defer { withExtendedLifetime(commandLock) {} }
   // Before any early return: a killed start may have left its log while a session is now active.
-  UserProductSSHDiagnosticLog.removeLeftovers(directory: dependencies.stateStore.directory.path)
+  UserProductSSHDiagnosticPipe.removeLeftovers(directory: dependencies.stateStore.directory.path)
   let target = try resolveUserProductTarget(arguments[1], dependencies: dependencies)
   guard
     let sshConfiguration = effectiveSSHConfiguration(
@@ -522,9 +517,9 @@ func runUserProductUp(
   )
   try dependencies.stateStore.save(connecting)
 
-  let diagnosticLog = UserProductSSHDiagnosticLog.create(
+  let diagnosticLog = UserProductSSHDiagnosticPipe.create(
     directory: dependencies.stateStore.directory.path)
-  defer { diagnosticLog?.remove() }
+  defer { diagnosticLog?.close() }
   let launch = dependencies.processRunner.run(
     executable: "/usr/bin/ssh",
     arguments: UserProductSSHArguments.startMaster(
@@ -559,7 +554,7 @@ func runUserProductUp(
       // ssh itself stops the ProxyCommand when the login fails, so a cancelled proxy does not
       // outrank the refusal; unverified cleanup does.
       if exitCode != 74, let rejection {
-        return .sshRejected(rejection, target: target, configuration: sshConfiguration)
+        return .sshRejected(rejection, target: target)
       }
       return .failure(
         userProductFailureMessage(receipt.failure),
@@ -567,7 +562,7 @@ func runUserProductUp(
         next: userProductFailureNext(receipt.failure))
     }
     if let rejection {
-      return .sshRejected(rejection, target: target, configuration: sshConfiguration)
+      return .sshRejected(rejection, target: target)
     }
     return .failure(
       "PowerVPN: SSH master did not start. Check SSH keys and run `powervpn doctor --json`."
