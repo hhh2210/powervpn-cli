@@ -554,6 +554,48 @@ import Testing
     #expect(result.standardError.contains("powervpn run: ssh_auth_rejected"))
   }
 
+  @Test func runReportsAnSSHRefusalOverTheProxyCancellationSSHCaused() async throws {
+    let directory = recoveryTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = UserProductSessionStateStore(directory: directory)
+    // ssh sends SIGHUP to its ProxyCommand when the login fails; the proxy may record that as a
+    // verified-cleanup cancellation before `up` reads the state.
+    let ssh = RunScriptedSSH(
+      execExitCode: 0, startFailure: "cancelled",
+      startDiagnostics: sshDiagnostics(.hostKeyRejected), store: store)
+
+    let result = try await runCurrentMachineUserProductCommand(
+      ["run", "thu21", "--", "hostname"],
+      dependencies: runDependencies(ssh: ssh, store: store)
+    )
+
+    #expect(result.exitCode == 77)
+    #expect(ssh.starts == 1)
+    #expect(result.standardError.contains("powervpn run: ssh_host_key_rejected"))
+  }
+
+  @Test func upRemovesDiagnosticLogsAKilledStartLeftBehind() async throws {
+    let directory = recoveryTemporaryDirectory()
+    try FileManager.default.createDirectory(
+      at: directory, withIntermediateDirectories: true,
+      attributes: [.posixPermissions: 0o700])
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = UserProductSessionStateStore(directory: directory)
+    let leftover = directory.appendingPathComponent("ssh-master-Ab12Cd.log").path
+    #expect(FileManager.default.createFile(atPath: leftover, contents: Data("canary".utf8)))
+    let unrelated = directory.appendingPathComponent("ssh-master-notes.txt").path
+    #expect(FileManager.default.createFile(atPath: unrelated, contents: Data()))
+
+    let result = try await runCurrentMachineUserProductCommand(
+      ["up", "thu21"],
+      dependencies: runDependencies(ssh: RunScriptedSSH(execExitCode: 0), store: store)
+    )
+
+    #expect(result.exitCode == 0)
+    #expect(!FileManager.default.fileExists(atPath: leftover))
+    #expect(FileManager.default.fileExists(atPath: unrelated))
+  }
+
   @Test func runStillRetriesSSHFailuresThatAreNotARefusal() async throws {
     let directory = recoveryTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
@@ -590,6 +632,7 @@ import Testing
 
     #expect(result.exitCode == 0)
     #expect(ssh.diagnosticLogs.count == 1)
+    #expect(ssh.diagnosticLogs.allSatisfy { $0.hasPrefix(directory.path + "/ssh-master-") })
     #expect(ssh.diagnosticLogs.allSatisfy { !FileManager.default.fileExists(atPath: $0) })
   }
 
@@ -599,6 +642,7 @@ import Testing
     defer { try? FileManager.default.removeItem(at: directory) }
     let log = try #require(UserProductSSHDiagnosticLog.create(directory: directory.path))
     defer { log.remove() }
+    #expect(URL(fileURLWithPath: log.path).lastPathComponent.hasPrefix("ssh-master-"))
     var metadata = stat()
     #expect(lstat(log.path, &metadata) == 0)
     #expect(metadata.st_mode & S_IFMT == S_IFREG)
@@ -612,9 +656,35 @@ import Testing
     try Data((flood + sshDiagnostics(.authRejected)).utf8).write(
       to: URL(fileURLWithPath: log.path))
     #expect(log.failureClass() == nil)
+  }
+
+  @Test func diagnosticLogRemovalAlsoEmptiesTheFileAStartedMasterKeepsOpen() throws {
+    let directory = recoveryTemporaryDirectory()
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let log = try #require(UserProductSSHDiagnosticLog.create(directory: directory.path))
+    let master = try #require(FileHandle(forWritingAtPath: log.path))
+    defer { try? master.close() }
+    master.write(Data(sshDiagnostics(.authRejected).utf8))
 
     log.remove()
+
     #expect(!FileManager.default.fileExists(atPath: log.path))
+    var metadata = stat()
+    #expect(fstat(master.fileDescriptor, &metadata) == 0)
+    #expect(metadata.st_size == 0)
+  }
+
+  @Test func masterStartLogsOnlyErrorsToTheDiagnosticLog() {
+    let arguments = UserProductSSHArguments.startMaster(
+      target: "thu21", controlPath: "/Users/test/.ssh/cm", executablePath: "/x/powervpn",
+      sessionID: "s", diagnosticLog: "/state/ssh-master-a.log")
+    #expect(
+      Array(arguments.prefix(4)) == ["-E", "/state/ssh-master-a.log", "-o", "LogLevel=ERROR"])
+    let discarded = UserProductSSHArguments.startMaster(
+      target: "thu21", controlPath: "/Users/test/.ssh/cm", executablePath: "/x/powervpn",
+      sessionID: "s")
+    #expect(!discarded.contains("-E") && !discarded.contains("LogLevel=ERROR"))
   }
 
   @Test func productFailuresEndWithNextAction() async throws {

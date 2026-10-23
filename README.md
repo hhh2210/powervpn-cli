@@ -183,9 +183,10 @@ PowerVPN 自己出错时，stderr 最后两行固定是 `powervpn run: <原因>`
   原样重跑不会好，`powervpn doctor` 也照样显示 ready。
   - 公钥还没装到服务器上：按第 6 步装。
   - 密钥设了 passphrase：按第 6 步最后一条把它加进 ssh-agent。
-- `run` 报 `ssh_host_key_rejected`（退出码 77）：`~/.ssh/known_hosts` 里没有这台服务器的主机密钥，或者它变了。
-  - 还没记下：`powervpn ssh lab-a -- true`，按提示输入 `yes`。
+- `run` 报 `ssh_host_key_rejected`（退出码 77）：`known_hosts` 里没有这台服务器的主机密钥，或者它变了。
+  - 还没记下：`powervpn ssh lab-a -- true`，核对指纹后输入 `yes`。
   - 变了：先确认服务器确实换过密钥，再 `ssh-keygen -R <服务器 IP>`，然后同上。
+  - `~/.ssh/config` 里写了 `StrictHostKeyChecking yes` 时 ssh 不会提示，要自己把核对过的密钥加进 `known_hosts`。
 - 其他 SSH 启动失败仍报 `session_start_failed`（75，第一行是 `SSH master did not start`），可以原样重跑；
   反复出现时用 `powervpn ssh lab-a -- true` 看 ssh 自己怎么说。
 - 日志（需要 sudo 读）：`/var/log/powervpn-native-helper.log`、`/var/log/powervpn-native-charon.log`。

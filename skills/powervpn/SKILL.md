@@ -27,7 +27,7 @@ A PowerVPN-side failure always ends stderr with `powervpn run: <token>` then `ne
 
 ## Native backend
 
-With `"backend": "native"` in targets.json there is no quarantine: a session that ended uncleanly is cleaned up by the next `run` itself. The only native tokens that need Larry are `native_helper_unavailable` and `native_charon_unavailable` (the root helper must be reinstalled by Larry with the command on the `next:` line; never run sudo yourself) and `native_portal_rejected` (credentials). On either backend, `ssh_auth_rejected` and `ssh_host_key_rejected` (exit 77) mean the server refused SSH login (no public key there, or a passphrase key missing from ssh-agent) or ssh does not trust its host key (not yet in known_hosts, or changed). Rerunning does not help; stop and send Larry the stderr lines. The rest are retryable.
+With `"backend": "native"` in targets.json there is no quarantine: a session that ended uncleanly is cleaned up by the next `run` itself. The only native tokens that need Larry are `native_helper_unavailable` and `native_charon_unavailable` (the root helper must be reinstalled by Larry with the command on the `next:` line; never run sudo yourself), `native_portal_rejected` (credentials), and `native_target_invalid` / `native_portal_configuration_rejected` (targets.json). On either backend, `ssh_auth_rejected` and `ssh_host_key_rejected` (exit 77) mean the server refused SSH login (no public key there, or a passphrase key missing from ssh-agent) or ssh does not trust its host key (not yet in known_hosts, or changed). Rerunning does not help; stop and send Larry the stderr lines. Any other token follows the exit-code table: 75 is retryable, 77 needs its `next:` step.
 
 ## Recovery (vendor backend; no human approval needed)
 

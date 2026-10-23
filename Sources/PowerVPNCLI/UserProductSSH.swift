@@ -127,7 +127,9 @@ enum UserProductSSHArguments {
     return arguments
   }
 
-  /// `diagnosticLog` receives ssh's own messages (`-E`); without one they are discarded.
+  /// `diagnosticLog` receives ssh's own errors (`-E`), at LogLevel ERROR whatever ~/.ssh/config
+  /// says: QUIET would hide the refusal, and DEBUG would keep the backgrounded master writing to it
+  /// for the whole session. Without a log they are discarded.
   static func startMaster(
     target: String,
     controlPath: String,
@@ -135,7 +137,7 @@ enum UserProductSSHArguments {
     sessionID: String,
     diagnosticLog: String? = nil
   ) -> [String] {
-    (diagnosticLog.map { ["-E", $0] } ?? []) + [
+    (diagnosticLog.map { ["-E", $0, "-o", "LogLevel=ERROR"] } ?? []) + [
       "-M", "-N", "-f",
       "-S", controlPath,
       "-o", "ControlMaster=yes",
@@ -198,26 +200,40 @@ func removeOwnedStaleControlSocket(_ path: String) -> Bool {
 ///
 /// The master's stderr cannot be captured instead: ssh hands it to the ProxyCommand, which keeps
 /// it open for the whole session. The messages can name the user and host, so they are only
-/// classified, never printed, and the file is removed as soon as the start is decided.
+/// classified, never printed. The file lives in the session state directory, is emptied and
+/// removed as soon as the start is decided, and a start that was killed first leaves it for the
+/// next `up` to remove.
 struct UserProductSSHDiagnosticLog: Sendable {
   static let limitBytes = 16 * 1_024
+  private static let namePrefix = "ssh-master-"
+  private static let nameSuffix = ".log"
 
   let path: String
 
   /// nil when the file cannot be created; the master then starts with its messages discarded.
-  static func create(directory: String = NSTemporaryDirectory()) -> Self? {
+  static func create(directory: String) -> Self? {
     var template = Array(
-      (directory as NSString).appendingPathComponent("powervpn-ssh-XXXXXX.log").utf8CString)
-    let descriptor = mkstemps(&template, 4)
+      (directory as NSString)
+        .appendingPathComponent(namePrefix + "XXXXXX" + nameSuffix).utf8CString)
+    let descriptor = mkstemps(&template, Int32(nameSuffix.utf8.count))
     guard descriptor >= 0 else { return nil }
     close(descriptor)
     return Self(path: String(cString: template))
   }
 
+  /// Removes the logs of starts that were killed before they removed their own. Only `up` creates
+  /// these files, and it holds the session command lock, so none of them is still being decided.
+  static func removeLeftovers(directory: String) {
+    let names = (try? FileManager.default.contentsOfDirectory(atPath: directory)) ?? []
+    for name in names where name.hasPrefix(namePrefix) && name.hasSuffix(nameSuffix) {
+      Self(path: (directory as NSString).appendingPathComponent(name)).remove()
+    }
+  }
+
   /// The SSH failure the messages name; nil when they are unreadable, over `limitBytes`, or name
   /// nothing the classifier knows.
   func failureClass() -> ProductM2SSHFailureClass? {
-    let descriptor = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+    let descriptor = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
     guard descriptor >= 0 else { return nil }
     let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
     var metadata = stat()
@@ -231,7 +247,17 @@ struct UserProductSSHDiagnosticLog: Sendable {
     return bytes.withUnsafeBytes(ProductM2SSHFailureClassifier.classify)
   }
 
+  /// Empties the file before unlinking it: a master that started keeps its descriptor (and so
+  /// does its ProxyCommand), so unlinking alone would leave the startup messages on disk.
   func remove() {
+    let descriptor = open(path, O_WRONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+    if descriptor >= 0 {
+      var metadata = stat()
+      if fstat(descriptor, &metadata) == 0, metadata.st_mode & S_IFMT == S_IFREG {
+        ftruncate(descriptor, 0)
+      }
+      close(descriptor)
+    }
     unlink(path)
   }
 }
@@ -264,7 +290,7 @@ enum UserProductSSHRejection: String, Equatable, Sendable {
     case .authRejected:
       "install your SSH public key on the server (README step 6, \"把 SSH 公钥装到服务器上\"); a passphrase key must also be in ssh-agent"
     case .hostKeyRejected:
-      "update ~/.ssh/known_hosts: if the server's key really changed, `ssh-keygen -R \(target.host)` first; then `powervpn ssh \(target.key) -- true` and accept the key"
+      "verify the server's host key and record it in known_hosts: if it really changed, `ssh-keygen -R \(target.host)` first; then `powervpn ssh \(target.key) -- true` and accept it (with StrictHostKeyChecking yes, add it to known_hosts yourself)"
     }
   }
 }

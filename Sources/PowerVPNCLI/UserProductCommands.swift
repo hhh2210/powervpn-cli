@@ -515,7 +515,9 @@ func runUserProductUp(
   )
   try dependencies.stateStore.save(connecting)
 
-  let diagnosticLog = UserProductSSHDiagnosticLog.create()
+  UserProductSSHDiagnosticLog.removeLeftovers(directory: dependencies.stateStore.directory.path)
+  let diagnosticLog = UserProductSSHDiagnosticLog.create(
+    directory: dependencies.stateStore.directory.path)
   defer { diagnosticLog?.remove() }
   let launch = dependencies.processRunner.run(
     executable: "/usr/bin/ssh",
@@ -529,26 +531,32 @@ func runUserProductUp(
     io: .discarded
   )
   guard launch.started, launch.exitCode == 0 else {
-    // 255 is ssh's own failure; a refused login or host key is not worth a retry. A quarantine
-    // or a cancellation still takes precedence below.
+    // 255 is ssh's own failure; a refused login or host key is not worth a retry.
     let rejection =
       launch.exitCode == 255
       ? diagnosticLog?.failureClass().flatMap(UserProductSSHRejection.init) : nil
-    if let final = try dependencies.stateStore.load(), final.sessionID == sessionID,
-      final.terminal
-    {
-      let exitCode: Int32 =
-        final.cleanupVerified != true ? 74 : (final.failure == "cancelled" ? 130 : 69)
-      if exitCode == 69, let rejection { return .sshRejected(rejection, target: target) }
-      return .failure(
-        userProductFailureMessage(final.failure),
-        exitCode: exitCode,
-        next: userProductFailureNext(final.failure))
-    }
+    // The proxy publishes its own receipt when ssh stops it, possibly right now. Decide under the
+    // state lock: keep a receipt that already arrived, otherwise mark cleanup unverified.
+    var receipt: UserProductSessionState?
     _ = try dependencies.stateStore.update(sessionID: sessionID) {
+      if $0.terminal {
+        receipt = $0
+        return
+      }
       $0.phase = .failed
       $0.cleanupVerified = false
       $0.failure = "ssh_master_start_cleanup_unverified"
+    }
+    if let receipt {
+      let exitCode: Int32 =
+        receipt.cleanupVerified != true ? 74 : (receipt.failure == "cancelled" ? 130 : 69)
+      // ssh itself stops the ProxyCommand when the login fails, so a cancelled proxy does not
+      // outrank the refusal; unverified cleanup does.
+      if exitCode != 74, let rejection { return .sshRejected(rejection, target: target) }
+      return .failure(
+        userProductFailureMessage(receipt.failure),
+        exitCode: exitCode,
+        next: userProductFailureNext(receipt.failure))
     }
     if let rejection { return .sshRejected(rejection, target: target) }
     return .failure(

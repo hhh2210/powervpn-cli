@@ -135,6 +135,10 @@ import Testing
       ),
       ("Host key verification failed.\r\nkey-canary", .hostKeyRejected),
       ("user-canary: Permission denied (publickey).\r\n", .authRejected),
+      (
+        "Received disconnect from secret-host port 22:2: Too many authentication failures\r\n",
+        .authRejected
+      ),
       ("command-line line 0: Bad configuration option: path-canary\r\n", .configError),
     ]
     for (text, expectedClass) in fixtures {

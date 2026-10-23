@@ -185,6 +185,8 @@ package enum ProductM2SSHFailureClassifier {
   private static let permissionDenied = Array("Permission denied (".utf8)
   private static let authExhausted =
     Array("No more authentication methods to try.".utf8)
+  /// The server's disconnect after MaxAuthTries refused keys, e.g. an agent offering too many.
+  private static let authTriesExceeded = Array("Too many authentication failures".utf8)
   private static let commandLineError = Array("command-line line 0:".utf8)
   private static let hostnameResolutionFailed =
     Array("Could not resolve hostname ".utf8)
@@ -211,7 +213,7 @@ package enum ProductM2SSHFailureClassifier {
     {
       return .hostKeyRejected
     }
-    if containsAny(standardError, [permissionDenied, authExhausted]) {
+    if containsAny(standardError, [permissionDenied, authExhausted, authTriesExceeded]) {
       return .authRejected
     }
     if containsAny(standardError, [commandLineError, hostnameResolutionFailed]) {
