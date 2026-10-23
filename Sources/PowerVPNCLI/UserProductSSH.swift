@@ -288,7 +288,7 @@ enum UserProductSSHRejection: String, Equatable, Sendable {
   func next(target: UserProductTarget) -> String {
     switch self {
     case .authRejected:
-      "install your SSH public key on the server (README step 6, \"把 SSH 公钥装到服务器上\"); a passphrase key must also be in ssh-agent"
+      "install your SSH public key on the server (README step 6, \"把 SSH 公钥装到服务器上\"); if it is already there, README \"出问题时\" covers ssh-agent and IdentitiesOnly"
     case .hostKeyRejected:
       "verify the server's host key and record it in known_hosts: if it really changed, `ssh-keygen -R \(target.host)` first; then `powervpn ssh \(target.key) -- true` and accept it (with StrictHostKeyChecking yes, add it to known_hosts yourself)"
     }

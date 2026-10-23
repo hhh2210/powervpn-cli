@@ -113,11 +113,14 @@ Host lab-a
 
 `powervpn run` 和 `powervpn up` 在后台启动 SSH，没法输入密码，所以服务器必须能用公钥登录。
 
-还没有密钥就先生成一把：
+下面的命令假设密钥是默认路径的 Ed25519 密钥 `~/.ssh/id_ed25519`。还没有密钥就先生成一把：
 
 ```sh
 ssh-keygen -t ed25519
 ```
+
+已经有别的密钥（比如 `~/.ssh/id_rsa`）也可以直接用：把下面命令里的路径换成你的 `.pub` 文件。
+ssh 会自动尝试 `id_rsa`、`id_ecdsa`、`id_ed25519` 这些默认文件名；其他路径要在 `Host lab-a` 里写 `IdentityFile`。
 
 然后用一次密码，把公钥追加到服务器的 `~/.ssh/authorized_keys`：
 
@@ -126,9 +129,9 @@ powervpn ssh lab-a -- 'umask 077; mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_ke
 ```
 
 - 它会先问是否信任服务器的主机密钥（输入 `yes`；记下之后，后台的 `run` 才连得上），再问服务器上的 SSH 密码。
-- `ssh-copy-id lab-a` 在这里用不了：服务器只能经由 `powervpn` 注入的 `ProxyCommand` 访问，`~/.ssh/config` 里没有它。
+- 还没有隧道或 SSH master 时，`ssh-copy-id lab-a` 连不上：`~/.ssh/config` 里没有 `ProxyCommand`，只有 `powervpn` 会注入它，所以不会自动建立 VPN。
 - 每台服务器装一次；几台服务器共用同一个家目录时，装一次就够。
-- 密钥设了 passphrase 时，先用 `ssh-add --apple-use-keychain ~/.ssh/id_ed25519` 把它加进 ssh-agent。后台的 SSH 同样没法输入 passphrase。
+- 密钥设了 passphrase 时，先用 `ssh-add --apple-use-keychain ~/.ssh/id_ed25519`（换成你的私钥路径）把它加进 ssh-agent。后台的 SSH 同样没法输入 passphrase。
 
 **7. 自检并连一次**
 
@@ -179,10 +182,12 @@ PowerVPN 自己出错时，stderr 最后两行固定是 `powervpn run: <原因>`
 - native 登出会用同一会话做前后只读探测：只有确认已失效才报告完整清理。网关的 logout HTTP 302 不会被跟随，也不直接视为成功。若探测明确仍有效，自动重连被阻止；只有本人在 Portal 结束该会话后，才使用 `powervpn recovery clear --json --acknowledge-portal-logout`。这个显式确认保留原始未验证回执，不用于自动重试。
 - `native_portal_unavailable` / `native_resource_unavailable`：Portal 传输或目录暂不可用，`run` 有限重试后返回 75，不误报密码错误。
 - `native_helper_unavailable` / `native_charon_unavailable`：helper 没装或没在跑，按 `next:` 行重新安装 native 后端。
-- `run` 报 `ssh_auth_rejected`（退出码 77）：服务器不接受你的公钥。后台 SSH 没法输入密码或 passphrase，
-  原样重跑不会好，`powervpn doctor` 也照样显示 ready。
+- `run` 报 `ssh_auth_rejected`（退出码 77）：服务器不接受 ssh 递上去的任何一把密钥。后台 SSH 没法输入密码或 passphrase，
+  原样重跑不会好。`powervpn doctor` 不检查 SSH 登录，它显示 ready 也不代表能登录。
   - 公钥还没装到服务器上：按第 6 步装。
   - 密钥设了 passphrase：按第 6 步最后一条把它加进 ssh-agent。
+  - 公钥装了、也在 ssh-agent 里，但 agent 里密钥太多，服务器在试到正确那把之前就断开（`Too many authentication failures`）：
+    在 `Host lab-a` 里写 `IdentityFile <你的私钥路径>` 和 `IdentitiesOnly yes`，只递这一把。第 6 步的安装命令遇到同样的报错时也这样处理。
 - `run` 报 `ssh_host_key_rejected`（退出码 77）：`known_hosts` 里没有这台服务器的主机密钥，或者它变了。
   - 还没记下：`powervpn ssh lab-a -- true`，核对指纹后输入 `yes`。
   - 变了：先确认服务器确实换过密钥，再 `ssh-keygen -R <服务器 IP>`，然后同上。
