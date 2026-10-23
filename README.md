@@ -2,7 +2,7 @@
 
 在 Apple Silicon Mac 上用命令行连清华 LeadSec PowerVPN 后面的服务器。
 隧道由我们自己打过补丁的 strongSwan 建立，原生 arm64，**不需要安装官方 PowerVPN 客户端**。
-第一次由你本人在终端里构建、安装、写配置，确认能 SSH 上去；之后的日常命令可以全部交给 coding agent。
+第一次由你本人在终端里构建、安装、写配置、往服务器装好 SSH 公钥，确认能 SSH 上去；之后的日常命令可以全部交给 coding agent。
 
 <img width="700" height="112" alt="image" src="https://github.com/user-attachments/assets/2baf3ae8-d342-44de-a3ea-0c0da8c93265" />
 
@@ -31,6 +31,7 @@ powervpn-native-helper                          root LaunchDaemon，安装一次
 - Homebrew。它会顺带装好 Xcode Command Line Tools，编译只需要这个，不需要完整的 Xcode。
 
 - 你自己的 Portal 账号，以及要连的服务器 IP、SSH 用户名，和它在 Portal 里对应的资源名。
+- 这个 SSH 账号的密码（只在第一次往服务器装公钥时用一次）。之后都是公钥登录。
 
 ## 第一次使用（你本人在终端里做）
 
@@ -77,7 +78,7 @@ chmod 600 ~/.config/powervpn/targets.json
 - `portalOrigin` 就是你在浏览器里登录 VPN 门户的地址。
 - `resource` 必须和 Portal 资源列表里的名字一字不差。
 - `backend` 不写时默认是旧的官方 helper 方案，所以这里要写 `"native"`。
-- 可以写多台；同一时间只连其中一台。
+- 可以写多台；同一时间只连其中一台。换另一台之前先 `powervpn down`，否则会报 `connected_to_other_target`。
 
 **4. 安装 native 后端（只需要一次 sudo）**
 
@@ -105,16 +106,39 @@ Host lab-a
   ControlPersist 8h
 ```
 
-`HostName` 和 `User` 必须和 `targets.json` 对上。不要在这里写 `ProxyCommand`，`powervpn` 会自己注入。
+`HostName` 和 `User` 必须和 `targets.json` 对上，端口用默认的 22，`ControlPath` 要放在 `~/.ssh/` 下。
+不要在这里写 `ProxyCommand`，`powervpn` 会自己注入。
 
-**6. 自检并连一次**
+**6. 把 SSH 公钥装到服务器上**
+
+`powervpn run` 和 `powervpn up` 在后台启动 SSH，没法输入密码，所以服务器必须能用公钥登录。
+
+还没有密钥就先生成一把：
 
 ```sh
-powervpn doctor              # 应显示 ready；否则会指出第一个要修的问题
-powervpn ssh lab-a -- hostname
+ssh-keygen -t ed25519
 ```
 
-第二条能打印出服务器的主机名，就说明 Portal 登录、隧道和 SSH 全都通了。
+然后用一次密码，把公钥追加到服务器的 `~/.ssh/authorized_keys`：
+
+```sh
+powervpn ssh lab-a -- 'umask 077; mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys' < ~/.ssh/id_ed25519.pub
+```
+
+- 它会先问是否信任服务器的主机密钥（输入 `yes`；记下之后，后台的 `run` 才连得上），再问服务器上的 SSH 密码。
+- `ssh-copy-id lab-a` 在这里用不了：服务器只能经由 `powervpn` 注入的 `ProxyCommand` 访问，`~/.ssh/config` 里没有它。
+- 每台服务器装一次；几台服务器共用同一个家目录时，装一次就够。
+- 密钥设了 passphrase 时，先用 `ssh-add --apple-use-keychain ~/.ssh/id_ed25519` 把它加进 ssh-agent。后台的 SSH 同样没法输入 passphrase。
+
+**7. 自检并连一次**
+
+```sh
+powervpn doctor                  # 检查本机这边，应显示 ready；它不检查 SSH 登录
+powervpn run lab-a -- hostname
+```
+
+第二条能打印出服务器的主机名，就说明 Portal 登录、隧道和公钥登录全都通了。
+这和 agent 用的是同一条命令：这里能过，交给 agent 也能用。
 
 想长时间挂着（比如给 VS Code / Cursor Remote-SSH 用）：
 
@@ -155,6 +179,12 @@ PowerVPN 自己出错时，stderr 最后两行固定是 `powervpn run: <原因>`
 - native 登出会用同一会话做前后只读探测：只有确认已失效才报告完整清理。网关的 logout HTTP 302 不会被跟随，也不直接视为成功。若探测明确仍有效，自动重连被阻止；只有本人在 Portal 结束该会话后，才使用 `powervpn recovery clear --json --acknowledge-portal-logout`。这个显式确认保留原始未验证回执，不用于自动重试。
 - `native_portal_unavailable` / `native_resource_unavailable`：Portal 传输或目录暂不可用，`run` 有限重试后返回 75，不误报密码错误。
 - `native_helper_unavailable` / `native_charon_unavailable`：helper 没装或没在跑，按 `next:` 行重新安装 native 后端。
+- `run` 报 `session_start_failed`，且第一行是 `SSH master did not start`：多半是后台 SSH 登录失败。
+  这时退出码虽然是 75，原样重跑也不会好，`powervpn doctor` 也照样显示 ready。
+  用 `powervpn ssh lab-a -- true` 看 ssh 自己怎么说：
+  - 要你输入密码：公钥没装好，按第 6 步重装。
+  - 要你输入 passphrase：密钥不在 ssh-agent 里，按第 6 步最后一条加进去。
+  - 报主机密钥变了：先确认服务器确实换过密钥，再按 ssh 的提示更新 `~/.ssh/known_hosts`。
 - 日志（需要 sudo 读）：`/var/log/powervpn-native-helper.log`、`/var/log/powervpn-native-charon.log`。
 - 升级：`brew upgrade powervpn`。只有 helper 或 strongSwan 运行时变了才需要再 sudo 一次；
   `powervpn native status` 或 `powervpn doctor` 会告诉你，并给出要执行的命令。
