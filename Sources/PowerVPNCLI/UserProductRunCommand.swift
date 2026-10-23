@@ -173,6 +173,14 @@ func runUserProductRun(
     }
 
     let up = try await runUserProductUp(arguments: ["up", target.key], dependencies: dependencies)
+    if let rejection = up.sshRejection {
+      return runFailure(
+        rejection.rawValue,
+        firstLine(of: up.standardError),
+        exitCode: UserProductRunExit.needsHuman,
+        next: rejection.next(target: target, configuration: sshConfiguration)
+      )
+    }
     switch up.exitCode {
     case 0:
       notes.append("powervpn run: session_started (kept for reuse; `powervpn down` stops it)")

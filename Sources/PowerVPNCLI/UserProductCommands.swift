@@ -18,6 +18,8 @@ struct UserProductCommandResult: Equatable, Sendable {
   let standardOutput: String
   let standardError: String
   let exitCode: Int32
+  /// Set by `up` when the server refused the master's SSH login, so `run` need not parse stderr.
+  var sshRejection: UserProductSSHRejection? = nil
 
   static func success(_ output: String = "") -> Self {
     Self(standardOutput: output, standardError: "", exitCode: 0)
@@ -29,6 +31,18 @@ struct UserProductCommandResult: Equatable, Sendable {
     let action = next ?? userProductNextAction(in: error)
     let text = action.map { "\(error)\nnext: \($0)" } ?? error
     return Self(standardOutput: "", standardError: text + "\n", exitCode: exitCode)
+  }
+
+  static func sshRejected(
+    _ rejection: UserProductSSHRejection,
+    target: UserProductTarget,
+    configuration: UserProductSSHEffectiveConfiguration
+  ) -> Self {
+    var result = failure(
+      rejection.message(target: target), exitCode: 77,
+      next: rejection.next(target: target, configuration: configuration))
+    result.sshRejection = rejection
+    return result
   }
 }
 
@@ -420,6 +434,8 @@ func runUserProductUp(
       next: "retry the same command in a few seconds")
   }
   defer { withExtendedLifetime(commandLock) {} }
+  // Before any early return: a killed start may have left its log while a session is now active.
+  UserProductSSHDiagnosticLog.removeLeftovers(directory: dependencies.stateStore.directory.path)
   let target = try resolveUserProductTarget(arguments[1], dependencies: dependencies)
   guard
     let sshConfiguration = effectiveSSHConfiguration(
@@ -506,29 +522,52 @@ func runUserProductUp(
   )
   try dependencies.stateStore.save(connecting)
 
+  let diagnosticLog = UserProductSSHDiagnosticLog.create(
+    directory: dependencies.stateStore.directory.path)
+  defer { diagnosticLog?.remove() }
   let launch = dependencies.processRunner.run(
     executable: "/usr/bin/ssh",
     arguments: UserProductSSHArguments.startMaster(
       target: target.key,
       controlPath: sshConfiguration.controlPath,
       executablePath: dependencies.executablePath,
-      sessionID: sessionID
+      sessionID: sessionID,
+      diagnosticLog: diagnosticLog?.path
     ),
     io: .discarded
   )
   guard launch.started, launch.exitCode == 0 else {
-    if let final = try dependencies.stateStore.load(), final.sessionID == sessionID,
-      final.terminal
-    {
-      return .failure(
-        userProductFailureMessage(final.failure),
-        exitCode: final.cleanupVerified != true ? 74 : (final.failure == "cancelled" ? 130 : 69),
-        next: userProductFailureNext(final.failure))
-    }
+    // 255 is ssh's own failure; a refused login or host key is not worth a retry.
+    let rejection =
+      launch.exitCode == 255
+      ? diagnosticLog?.failureClass().flatMap(UserProductSSHRejection.init) : nil
+    // The proxy publishes its own receipt when ssh stops it, possibly right now. Decide under the
+    // state lock: keep a receipt that already arrived, otherwise mark cleanup unverified.
+    var receipt: UserProductSessionState?
     _ = try dependencies.stateStore.update(sessionID: sessionID) {
+      if $0.terminal {
+        receipt = $0
+        return
+      }
       $0.phase = .failed
       $0.cleanupVerified = false
       $0.failure = "ssh_master_start_cleanup_unverified"
+    }
+    if let receipt {
+      let exitCode: Int32 =
+        receipt.cleanupVerified != true ? 74 : (receipt.failure == "cancelled" ? 130 : 69)
+      // ssh itself stops the ProxyCommand when the login fails, so a cancelled proxy does not
+      // outrank the refusal; unverified cleanup does.
+      if exitCode != 74, let rejection {
+        return .sshRejected(rejection, target: target, configuration: sshConfiguration)
+      }
+      return .failure(
+        userProductFailureMessage(receipt.failure),
+        exitCode: exitCode,
+        next: userProductFailureNext(receipt.failure))
+    }
+    if let rejection {
+      return .sshRejected(rejection, target: target, configuration: sshConfiguration)
     }
     return .failure(
       "PowerVPN: SSH master did not start. Check SSH keys and run `powervpn doctor --json`."
