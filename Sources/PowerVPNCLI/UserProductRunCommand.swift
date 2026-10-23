@@ -178,7 +178,7 @@ func runUserProductRun(
         rejection.rawValue,
         firstLine(of: up.standardError),
         exitCode: UserProductRunExit.needsHuman,
-        next: rejection.next(target: target)
+        next: rejection.next(target: target, configuration: sshConfiguration)
       )
     }
     switch up.exitCode {

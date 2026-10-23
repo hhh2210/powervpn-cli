@@ -75,6 +75,11 @@ struct UserProductSSHEffectiveConfiguration: Equatable, Sendable {
   let port: UInt16
   let controlMaster: String
   let controlPath: String
+  /// The first `UserKnownHostsFile`, where ssh records an accepted host key. `ssh -G` prints the
+  /// list unquoted, so a path containing a space is cut at the space.
+  var knownHostsFile: String? = nil
+  /// The name host keys are recorded under instead of `hostname`.
+  var hostKeyAlias: String? = nil
 
   static func parse(_ output: String) -> Self? {
     var values: [String: String] = [:]
@@ -82,7 +87,10 @@ struct UserProductSSHEffectiveConfiguration: Equatable, Sendable {
       let parts = line.split(separator: " ", maxSplits: 1)
       guard parts.count == 2 else { continue }
       let key = String(parts[0])
-      if ["hostname", "user", "port", "controlmaster", "controlpath"].contains(key) {
+      if [
+        "hostname", "user", "port", "controlmaster", "controlpath", "userknownhostsfile",
+        "hostkeyalias",
+      ].contains(key) {
         values[key] = String(parts[1])
       }
     }
@@ -99,7 +107,9 @@ struct UserProductSSHEffectiveConfiguration: Equatable, Sendable {
       user: user,
       port: port,
       controlMaster: controlMaster,
-      controlPath: controlPath
+      controlPath: controlPath,
+      knownHostsFile: values["userknownhostsfile"]?.split(separator: " ").first.map(String.init),
+      hostKeyAlias: values["hostkeyalias"]
     )
   }
 }
@@ -127,9 +137,10 @@ enum UserProductSSHArguments {
     return arguments
   }
 
-  /// `diagnosticLog` receives ssh's own errors (`-E`), at LogLevel ERROR whatever ~/.ssh/config
-  /// says: QUIET would hide the refusal, and DEBUG would keep the backgrounded master writing to it
-  /// for the whole session. Without a log they are discarded.
+  /// `diagnosticLog` receives ssh's own errors (`-E`), at LogLevel ERROR and without LogVerbose
+  /// whatever ~/.ssh/config says: QUIET would hide the refusal, and DEBUG or a LogVerbose pattern
+  /// would bury it past the read limit and keep the backgrounded master writing for the whole
+  /// session. Without a log they are discarded.
   static func startMaster(
     target: String,
     controlPath: String,
@@ -137,7 +148,7 @@ enum UserProductSSHArguments {
     sessionID: String,
     diagnosticLog: String? = nil
   ) -> [String] {
-    (diagnosticLog.map { ["-E", $0, "-o", "LogLevel=ERROR"] } ?? []) + [
+    (diagnosticLog.map { ["-E", $0, "-o", "LogLevel=ERROR", "-o", "LogVerbose=none"] } ?? []) + [
       "-M", "-N", "-f",
       "-S", controlPath,
       "-o", "ControlMaster=yes",
@@ -281,16 +292,36 @@ enum UserProductSSHRejection: String, Equatable, Sendable {
     case .authRejected:
       "PowerVPN: \(target.key) rejected SSH public-key login; background SSH cannot type a password or passphrase."
     case .hostKeyRejected:
-      "PowerVPN: ssh does not trust the host key of \(target.key) (\(target.host)): it is not in ~/.ssh/known_hosts or has changed."
+      "PowerVPN: ssh does not trust the host key of \(target.key) (\(target.host)): it is not in known_hosts or has changed."
     }
   }
 
-  func next(target: UserProductTarget) -> String {
+  /// The host-key step names the known_hosts file and lookup name ssh actually uses.
+  func next(
+    target: UserProductTarget,
+    configuration: UserProductSSHEffectiveConfiguration
+  ) -> String {
     switch self {
     case .authRejected:
       "install your SSH public key on the server (README step 6, \"把 SSH 公钥装到服务器上\"); if it is already there, README \"出问题时\" covers ssh-agent and IdentitiesOnly"
     case .hostKeyRejected:
-      "verify the server's host key and record it in known_hosts: if it really changed, `ssh-keygen -R \(target.host)` first; then `powervpn ssh \(target.key) -- true` and accept it (with StrictHostKeyChecking yes, add it to known_hosts yourself)"
+      hostKeyNext(
+        target: target,
+        file: configuration.knownHostsFile ?? "~/.ssh/known_hosts",
+        name: configuration.hostKeyAlias ?? target.host)
     }
+  }
+
+  private func hostKeyNext(target: UserProductTarget, file: String, name: String) -> String {
+    let file = shellWord(file)
+    return
+      "verify the server's host key and record it in \(file): if it really changed, `ssh-keygen -f \(file) -R \(shellWord(name))` first; then `powervpn ssh \(target.key) -- true` and accept it (with StrictHostKeyChecking yes, add it to that file yourself)"
+  }
+
+  private func shellWord(_ value: String) -> String {
+    let plain = value.unicodeScalars.allSatisfy {
+      CharacterSet.alphanumerics.contains($0) || "/._~-".unicodeScalars.contains($0)
+    }
+    return plain ? value : "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
   }
 }

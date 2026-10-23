@@ -190,7 +190,7 @@ PowerVPN 自己出错时，stderr 最后两行固定是 `powervpn run: <原因>`
     在 `Host lab-a` 里写 `IdentityFile <你的私钥路径>` 和 `IdentitiesOnly yes`，只递这一把。第 6 步的安装命令遇到同样的报错时也这样处理。
 - `run` 报 `ssh_host_key_rejected`（退出码 77）：`known_hosts` 里没有这台服务器的主机密钥，或者它变了。
   - 还没记下：`powervpn ssh lab-a -- true`，核对指纹后输入 `yes`。
-  - 变了：先确认服务器确实换过密钥，再 `ssh-keygen -R <服务器 IP>`，然后同上。
+  - 变了：先确认服务器确实换过密钥，再用 `next:` 行里的 `ssh-keygen -f <文件> -R <名字>` 删掉旧记录（文件和名字已按你的 `UserKnownHostsFile` / `HostKeyAlias` 填好），然后同上。
   - `~/.ssh/config` 里写了 `StrictHostKeyChecking yes` 时 ssh 不会提示，要自己把核对过的密钥加进 `known_hosts`。
 - 其他 SSH 启动失败仍报 `session_start_failed`（75，第一行是 `SSH master did not start`），可以原样重跑；
   反复出现时用 `powervpn ssh lab-a -- true` 看 ssh 自己怎么说。
