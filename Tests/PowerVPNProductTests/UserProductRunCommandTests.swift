@@ -792,8 +792,14 @@ import Testing
   @Test func runNamesTheStaleKnownHostsLineSSHReported() async throws {
     let directory = recoveryTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
+    let keys = recoveryTemporaryDirectory().appendingPathComponent("My Keys 中文")
+    try FileManager.default.createDirectory(at: keys, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: keys.deletingLastPathComponent()) }
+    let knownHosts = keys.appendingPathComponent("known_hosts").path
+    #expect(FileManager.default.createFile(atPath: knownHosts, contents: Data()))
     let store = UserProductSessionStateStore(directory: directory)
-    let ssh = RunScriptedSSH(execExitCode: 0, startDiagnostics: changedHostKeyDiagnostics)
+    let diagnostics = changedHostKeyDiagnostics(location: sshEscaped(knownHosts) + ":2")
+    let ssh = RunScriptedSSH(execExitCode: 0, startDiagnostics: diagnostics)
 
     let result = try await runCurrentMachineUserProductCommand(
       ["run", "thu21", "--", "hostname"],
@@ -809,34 +815,72 @@ import Testing
     #expect(result.standardError.contains("powervpn run: ssh_host_key_rejected\n"))
     #expect(
       result.standardError.contains(
-        "next: if the server really changed its host key, delete line 2 of `/Users/synthetic-user/My Keys 中文/known_hosts`,"
-      ))
+        "next: if the server really changed its host key, delete line 2 of `\(knownHosts)`,"))
     // Only the file and line are shown; the warning and the server's fingerprint are not.
     #expect(!result.standardError.contains("IDENTIFICATION"))
     #expect(!result.standardError.contains("SHA256:"))
   }
 
+  @Test(arguments: [UnnamableStaleKey.knownHostsCommand, .newlineInPath])
+  func runNamesNoLineToDeleteWhenSSHNamesNoFileOfItsOwn(_ stale: UnnamableStaleKey)
+    async throws
+  {
+    let directory = recoveryTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let files = recoveryTemporaryDirectory()
+    try FileManager.default.createDirectory(at: files, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: files) }
+    // A real file, so only the newline after it gives the path away.
+    let decoy = files.appendingPathComponent("known_hosts").path
+    #expect(FileManager.default.createFile(atPath: decoy, contents: Data()))
+    let location: String
+    switch stale {
+    case .knownHostsCommand:
+      location = "KnownHostsCommand-192.0.2.21:1"
+    case .newlineInPath:
+      // UserKnownHostsFile `<decoy>:7<LF>archive/known_hosts`: ssh logs the LF as it is.
+      location = decoy + ":7\narchive/known_hosts:2"
+    }
+    let store = UserProductSessionStateStore(directory: directory)
+    let ssh = RunScriptedSSH(
+      execExitCode: 0, startDiagnostics: changedHostKeyDiagnostics(location: location))
+
+    let result = try await runCurrentMachineUserProductCommand(
+      ["run", "thu21", "--", "hostname"],
+      dependencies: runDependencies(ssh: ssh, store: store)
+    )
+
+    #expect(result.exitCode == 77)
+    #expect(result.standardError.contains("powervpn run: ssh_host_key_rejected\n"))
+    #expect(!result.standardError.contains("delete line"))
+  }
+
   @Test func knownHostsEntryIsReadFromWhatSSHLogs() {
-    func entry(_ bytes: [UInt8]) -> UserProductKnownHostsEntry? {
+    func entry(bytes: [UInt8]) -> UserProductKnownHostsEntry? {
       UserProductKnownHostsEntry(sshMessages: Data(bytes))
     }
-    func entry(_ text: String) -> UserProductKnownHostsEntry? { entry(Array(text.utf8)) }
-    let chinese = UserProductKnownHostsEntry(
-      file: "/Users/synthetic-user/My Keys 中文/known_hosts", line: 2)
+    func entry(_ text: String) -> UserProductKnownHostsEntry? { entry(bytes: Array(text.utf8)) }
+    let path = "/Users/synthetic-user/My Keys 中文/known_hosts"
+    let chinese = UserProductKnownHostsEntry(file: path, line: 2)
 
     // OpenSSH 10.5 in the C locale escapes every byte outside ASCII.
-    #expect(entry(changedHostKeyDiagnostics) == chinese)
+    let escaped = "/Users/synthetic-user/My Keys \\344\\270\\255\\346\\226\\207/known_hosts"
+    #expect(sshEscaped(path) == escaped)
+    #expect(entry(changedHostKeyDiagnostics(location: escaped + ":2")) == chinese)
     // In a UTF-8 locale it leaves some of them raw.
-    #expect(
-      entry(
-        Array("Offending ED25519 key in /Users/synthetic-user/My Keys ".utf8) + [0xE4, 0xB8]
-          + Array("\\255".utf8) + [0xE6] + Array("\\226\\207/known_hosts:2\r\n".utf8)) == chinese)
-    #expect(
-      entry("Offending RSA key in /tmp/a\\\\b:c/known_hosts:17\n")
-        == UserProductKnownHostsEntry(file: "/tmp/a\\b:c/known_hosts", line: 17))
-    // CheckHostIP's line is no refusal, and a path that would drive the terminal is not shown.
+    var mixed: [UInt8] = Array("Offending ED25519 key in /Users/synthetic-user/My Keys ".utf8)
+    mixed += [0xE4, 0xB8]
+    mixed += Array("\\255".utf8)
+    mixed += [0xE6]
+    mixed += Array("\\226\\207/known_hosts:2\r\n".utf8)
+    #expect(entry(bytes: mixed) == chinese)
+    let backslash = UserProductKnownHostsEntry(file: "/tmp/a\\b:c/known_hosts", line: 17)
+    #expect(entry("Offending RSA key in /tmp/a\\\\b:c/known_hosts:17\r\n") == backslash)
+    // CheckHostIP's line is no refusal; a path that would drive the terminal is not shown, nor
+    // one with a newline, which ssh does not escape.
     #expect(entry("Offending key for IP in /Users/me/.ssh/known_hosts:3\r\n") == nil)
     #expect(entry("Offending ED25519 key in /tmp/\\033[31m/known_hosts:1\r\n") == nil)
+    #expect(entry("Offending ED25519 key in /tmp/known_hosts:7\narchive/known_hosts:2\r\n") == nil)
     #expect(entry(sshDiagnostics(.hostKeyRejected(staleEntry: nil))) == nil)
   }
 
@@ -1155,23 +1199,47 @@ func sshDiagnostics(_ rejection: UserProductSSHRejection) -> String {
   }
 }
 
-/// What OpenSSH 10.5 logs in the C locale when the host key changed and the stale one is on line
-/// 2 of `/Users/synthetic-user/My Keys 中文/known_hosts`; the fingerprint is made up.
-let changedHostKeyDiagnostics = [
-  "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@",
-  "@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @",
-  "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@",
-  "IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!",
-  "Someone could be eavesdropping on you right now (man-in-the-middle attack)!",
-  "It is also possible that a host key has just been changed.",
-  "The fingerprint for the ED25519 key sent by the remote host is",
-  "SHA256:Synthetic0Fingerprint0For0Tests0Only0000000.",
-  "Please contact your system administrator.",
-  "Add correct host key in /Users/synthetic-user/My Keys \\344 to get rid of this message.",
-  "Offending ED25519 key in /Users/synthetic-user/My Keys \\344\\270\\255\\346\\226\\207/known_hosts:2",
-  "Host key for 192.0.2.21 has changed and you have requested strict checking.",
-  "Host key verification failed.",
-].map { $0 + "\r\n" }.joined()
+/// What OpenSSH 10.5 logs when the host key changed and the stale one is at `location`
+/// (`FILE:LINE`, as ssh writes it); the fingerprint is made up.
+func changedHostKeyDiagnostics(location: String) -> String {
+  let lines: [String] = [
+    "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@",
+    "@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @",
+    "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@",
+    "IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!",
+    "Someone could be eavesdropping on you right now (man-in-the-middle attack)!",
+    "It is also possible that a host key has just been changed.",
+    "The fingerprint for the ED25519 key sent by the remote host is",
+    "SHA256:Synthetic0Fingerprint0For0Tests0Only0000000.",
+    "Please contact your system administrator.",
+    "Add correct host key in /Users/synthetic-user/.ssh/known_hosts to get rid of this message.",
+    "Offending ED25519 key in " + location,
+    "Host key for 192.0.2.21 has changed and you have requested strict checking.",
+    "Host key verification failed.",
+  ]
+  return lines.map { (line: String) -> String in line + "\r\n" }.joined()
+}
+
+/// `path` as OpenSSH 10.5 logs it in the C locale: each byte outside ASCII as `\ooo`, and a
+/// backslash as `\\`.
+func sshEscaped(_ path: String) -> String {
+  var escaped = ""
+  for byte in path.utf8 {
+    if byte == UInt8(ascii: "\\") {
+      escaped += "\\\\"
+    } else if byte < 0x80 {
+      escaped.unicodeScalars.append(UnicodeScalar(byte))
+    } else {
+      escaped += "\\" + String(byte, radix: 8)
+    }
+  }
+  return escaped
+}
+
+enum UnnamableStaleKey: Sendable {
+  case knownHostsCommand
+  case newlineInPath
+}
 
 private func vendorCleanupReceipt(verified: Bool) -> UserProductOriginalCleanupReceipt {
   UserProductOriginalCleanupReceipt(

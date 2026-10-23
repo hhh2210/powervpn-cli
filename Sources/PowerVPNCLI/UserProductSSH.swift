@@ -332,7 +332,8 @@ enum UserProductSSHRejection: Equatable, Sendable {
     switch sshMessages.withUnsafeBytes(ProductM2SSHFailureClassifier.classify) {
     case .authRejected: self = .authRejected
     case .hostKeyRejected:
-      self = .hostKeyRejected(staleEntry: UserProductKnownHostsEntry(sshMessages: sshMessages))
+      let entry = UserProductKnownHostsEntry(sshMessages: sshMessages)
+      self = .hostKeyRejected(staleEntry: entry.flatMap { $0.isRegularFile ? $0 : nil })
     default: return nil
     }
   }
@@ -370,7 +371,8 @@ enum UserProductSSHRejection: Equatable, Sendable {
 
 /// A known_hosts line, as ssh names the one holding a host key the server no longer presents:
 /// `Offending ED25519 key in /Users/me/.ssh/known_hosts:3`. It is the real file, whatever
-/// UserKnownHostsFile or HostKeyAlias say, so `next:` can name it.
+/// UserKnownHostsFile or HostKeyAlias say, so `next:` can name it, but only once `isRegularFile`
+/// confirms it: keys from KnownHostsCommand come with a label such as `KnownHostsCommand-HOST`.
 struct UserProductKnownHostsEntry: Equatable, Sendable {
   let file: String
   let line: Int
@@ -381,16 +383,17 @@ struct UserProductKnownHostsEntry: Equatable, Sendable {
   }
 
   /// The first entry ssh's messages name; nil when they name none, or one whose path would put
-  /// control characters on the terminal.
+  /// control characters on the terminal or does not end its message.
   init?(sshMessages: Data) {
     let prefix = Array("Offending ".utf8)
     let keyIn = Array(" key in ".utf8)
     for message in sshMessages.split(separator: UInt8(ascii: "\n")) {
-      var message = Array(message)
-      if message.last == UInt8(ascii: "\r") { message.removeLast() }
+      guard message.starts(with: prefix) else { continue }
+      // ssh ends every message with CRLF; a bare LF is one in the path, which it leaves as is.
+      guard message.last == UInt8(ascii: "\r") else { return nil }
+      let message = Array(message.dropLast())
       // "Offending <type> key in FILE:LINE"; not "Offending key for IP in", which is no refusal.
-      guard message.starts(with: prefix),
-        let typeEnd = message[prefix.count...].firstIndex(of: UInt8(ascii: " ")),
+      guard let typeEnd = message[prefix.count...].firstIndex(of: UInt8(ascii: " ")),
         message[typeEnd...].starts(with: keyIn),
         let colon = message.lastIndex(of: UInt8(ascii: ":")),
         colon > typeEnd + keyIn.count,
@@ -402,6 +405,12 @@ struct UserProductKnownHostsEntry: Equatable, Sendable {
       return
     }
     return nil
+  }
+
+  /// Whether `file` is an absolute path to a regular file, symbolic links followed.
+  var isRegularFile: Bool {
+    var metadata = stat()
+    return file.hasPrefix("/") && stat(file, &metadata) == 0 && metadata.st_mode & S_IFMT == S_IFREG
   }
 
   /// Undoes the escapes ssh's log applies to a message (strnvis with VIS_SAFE | VIS_OCTAL): a
