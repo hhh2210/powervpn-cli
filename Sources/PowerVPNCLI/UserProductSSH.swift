@@ -6,6 +6,8 @@ enum UserProductProcessIO: Equatable, Sendable {
   case inherited
   case captured
   case discarded
+  /// As `discarded`, except that standard output goes to `descriptor`, which the caller closes.
+  case outputOnly(to: Int32)
 }
 
 struct UserProductProcessResult: Equatable, Sendable {
@@ -46,6 +48,10 @@ struct FoundationUserProductProcessRunner: UserProductProcessRunning {
     case .discarded:
       process.standardInput = FileHandle(forReadingAtPath: "/dev/null")
       process.standardOutput = FileHandle(forWritingAtPath: "/dev/null")
+      process.standardError = FileHandle(forWritingAtPath: "/dev/null")
+    case .outputOnly(let descriptor):
+      process.standardInput = FileHandle(forReadingAtPath: "/dev/null")
+      process.standardOutput = FileHandle(fileDescriptor: descriptor, closeOnDealloc: false)
       process.standardError = FileHandle(forWritingAtPath: "/dev/null")
     }
     do {
@@ -127,17 +133,22 @@ enum UserProductSSHArguments {
     return arguments
   }
 
-  /// `diagnosticLog` receives ssh's own errors (`-E`), at LogLevel ERROR and without LogVerbose
-  /// whatever ~/.ssh/config says: QUIET would hide the refusal, and DEBUG or a LogVerbose pattern
-  /// would bury it past the read limit. Without a log they are discarded.
+  /// With `logsToStandardOutput`, ssh writes its own errors (`-E`) to its standard output, at
+  /// LogLevel ERROR and without LogVerbose whatever ~/.ssh/config says: QUIET would hide the
+  /// refusal, and DEBUG or a LogVerbose pattern would bury it past the read limit. Standard output
+  /// because ssh closes every descriptor above standard error when it starts, and hands standard
+  /// error on to the ProxyCommand. Otherwise its messages are discarded.
   static func startMaster(
     target: String,
     controlPath: String,
     executablePath: String,
     sessionID: String,
-    diagnosticLog: String? = nil
+    logsToStandardOutput: Bool = false
   ) -> [String] {
-    (diagnosticLog.map { ["-E", $0, "-o", "LogLevel=ERROR", "-o", "LogVerbose=none"] } ?? []) + [
+    let logging =
+      logsToStandardOutput
+      ? ["-E", "/dev/fd/1", "-o", "LogLevel=ERROR", "-o", "LogVerbose=none"] : []
+    return logging + [
       "-M", "-N", "-f",
       "-S", controlPath,
       "-o", "ControlMaster=yes",
@@ -196,26 +207,26 @@ func removeOwnedStaleControlSocket(_ path: String) -> Bool {
   return Darwin.unlink(path) == 0
 }
 
-/// ssh's own messages while it starts a master, through a FIFO that `ssh -E` writes to.
+/// ssh's own messages while it starts a master: `ssh -E /dev/fd/1` writes them to its standard
+/// output, the write end of this pipe.
 ///
 /// The master's stderr cannot be captured instead: ssh hands it to the ProxyCommand, which keeps
-/// it open for the whole session. A regular file would not do either: the master keeps its log
-/// descriptor for the whole session and appends every later error to it. Here a thread drains the
-/// FIFO while the start runs, and `close()` closes it once the start is decided; the master's
-/// later writes then fail with EPIPE, which ssh ignores (it ignores SIGPIPE), so nothing reaches
-/// the disk. The messages can name the user and host, so they are only classified, never printed.
+/// it open for the whole session. A file would not do either: the master keeps its log descriptor
+/// for the whole session and appends every later error to it. ssh gets the pipe already open, not
+/// a path to open, so nothing it does waits for `up`: once the read end is gone (`up` closed it or
+/// died), its writes fail with EPIPE, which ssh ignores (it ignores SIGPIPE), and nothing is kept.
+/// A thread drains the pipe while the start runs, and `close()` closes it once the start is
+/// decided. The messages can name the user and host, so they are only classified, never printed.
 /// Every instance must be closed.
 final class UserProductSSHDiagnosticPipe: @unchecked Sendable {
   static let limitBytes = 16 * 1_024
-  private static let namePrefix = "ssh-master-"
-  private static let nameSuffix = ".fifo"
   /// How long the drain thread waits for data before it checks whether to stop.
   private static let pollMilliseconds: Int32 = 50
 
-  let path: String
+  /// The end ssh gets as its standard output. This copy stays open until `close()`, so the pipe
+  /// never reports end-of-file while ssh is not writing.
+  let writer: Int32
   private let reader: Int32
-  /// Held until `close()` so the FIFO never reports end-of-file while ssh is not writing.
-  private let writer: Int32
   private let draining = DispatchGroup()
   private let lock = NSLock()
   // Guarded by `lock`.
@@ -223,34 +234,33 @@ final class UserProductSSHDiagnosticPipe: @unchecked Sendable {
   private var stopping = false
   private var closed = false
 
-  /// nil when the FIFO cannot be created; the master then starts with its messages discarded.
-  static func create(directory: String) -> UserProductSSHDiagnosticPipe? {
-    let path = (directory as NSString).appendingPathComponent(
-      namePrefix + UUID().uuidString.lowercased() + nameSuffix)
-    guard mkfifo(path, 0o600) == 0 else { return nil }
-    // The read end first: ssh's own blocking open for writing then returns at once.
-    let reader = open(path, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
-    let writer = reader >= 0 ? open(path, O_WRONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC) : -1
-    var metadata = stat()
-    guard writer >= 0, fstat(reader, &metadata) == 0, metadata.st_mode & S_IFMT == S_IFIFO else {
-      if reader >= 0 { Darwin.close(reader) }
-      if writer >= 0 { Darwin.close(writer) }
-      unlink(path)
+  /// nil when no pipe can be made; the master then starts with its messages discarded.
+  static func create() -> UserProductSSHDiagnosticPipe? {
+    var descriptors: [Int32] = [-1, -1]
+    guard pipe(&descriptors) == 0 else { return nil }
+    // No child inherits either end except as the standard output it is given, and reading never
+    // blocks, so draining ends when the pipe is empty even while the ProxyCommand holds a writer.
+    guard fcntl(descriptors[0], F_SETFD, FD_CLOEXEC) == 0,
+      fcntl(descriptors[1], F_SETFD, FD_CLOEXEC) == 0,
+      fcntl(descriptors[0], F_SETFL, O_NONBLOCK) == 0
+    else {
+      Darwin.close(descriptors[0])
+      Darwin.close(descriptors[1])
       return nil
     }
-    return UserProductSSHDiagnosticPipe(path: path, reader: reader, writer: writer)
+    return UserProductSSHDiagnosticPipe(reader: descriptors[0], writer: descriptors[1])
   }
 
-  private init(path: String, reader: Int32, writer: Int32) {
-    self.path = path
+  private init(reader: Int32, writer: Int32) {
     self.reader = reader
     self.writer = writer
     draining.enter()
-    // A dispatch read source never fires for a FIFO on macOS, so a thread polls instead.
+    // A thread rather than a dispatch source, so that `stopDraining()` returns only once nothing
+    // reads any more.
     let thread = Thread { [self] in
       var descriptor = pollfd(fd: reader, events: Int16(POLLIN), revents: 0)
       while !lock.withLock({ stopping }) {
-        if poll(&descriptor, 1, Self.pollMilliseconds) > 0 { readAvailable() }
+        if poll(&descriptor, 1, Self.pollMilliseconds) > 0 { readChunk() }
       }
       draining.leave()
     }
@@ -266,15 +276,15 @@ final class UserProductSSHDiagnosticPipe: @unchecked Sendable {
   func failureClass() -> ProductM2SSHFailureClass? {
     stopDraining()
     guard !lock.withLock({ closed }) else { return nil }
-    readAvailable()
+    while collectedByteCount <= Self.limitBytes, readChunk() {}
     return lock.withLock {
       guard bytes.count <= Self.limitBytes else { return nil }
       return bytes.withUnsafeBytes(ProductM2SSHFailureClassifier.classify)
     }
   }
 
-  /// Stops collecting, closes the FIFO and removes it. From then on a master that started gets
-  /// EPIPE for every message it logs.
+  /// Stops collecting and closes the pipe. From then on a master that started gets EPIPE for every
+  /// message it logs.
   func close() {
     stopDraining()
     let first = lock.withLock { () -> Bool in
@@ -287,16 +297,6 @@ final class UserProductSSHDiagnosticPipe: @unchecked Sendable {
     guard first else { return }
     Darwin.close(reader)
     Darwin.close(writer)
-    unlink(path)
-  }
-
-  /// Removes the FIFOs of starts that were killed before they removed their own. Only `up` creates
-  /// them, and it holds the session command lock, so none of them is still in use.
-  static func removeLeftovers(directory: String) {
-    let names = (try? FileManager.default.contentsOfDirectory(atPath: directory)) ?? []
-    for name in names where name.hasPrefix(namePrefix) && name.hasSuffix(nameSuffix) {
-      unlink((directory as NSString).appendingPathComponent(name))
-    }
   }
 
   private func stopDraining() {
@@ -304,18 +304,19 @@ final class UserProductSSHDiagnosticPipe: @unchecked Sendable {
     draining.wait()
   }
 
-  /// Keeps the first `limitBytes + 1` bytes and discards the rest, so a chatty ssh never blocks on
-  /// a full pipe. Called by the drain thread, and after it stopped by `failureClass()`.
-  private func readAvailable() {
+  /// One read, keeping the first `limitBytes + 1` bytes in all and discarding the rest, so a
+  /// chatty ssh never blocks on a full pipe. One read at a time, so the drain thread still sees a
+  /// stop request while ssh keeps writing. False once the pipe is empty.
+  @discardableResult
+  private func readChunk() -> Bool {
     var buffer = [UInt8](repeating: 0, count: 4_096)
-    while true {
-      let count = read(reader, &buffer, buffer.count)
-      guard count > 0 else { return }
-      lock.withLock {
-        let room = Self.limitBytes + 1 - bytes.count
-        if room > 0 { bytes.append(contentsOf: buffer.prefix(min(room, count))) }
-      }
+    let count = read(reader, &buffer, buffer.count)
+    guard count > 0 else { return false }
+    lock.withLock {
+      let room = Self.limitBytes + 1 - bytes.count
+      if room > 0 { bytes.append(contentsOf: buffer.prefix(min(room, count))) }
     }
+    return true
   }
 }
 

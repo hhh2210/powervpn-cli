@@ -429,8 +429,6 @@ func runUserProductUp(
       next: "retry the same command in a few seconds")
   }
   defer { withExtendedLifetime(commandLock) {} }
-  // Before any early return: a killed start may have left its log while a session is now active.
-  UserProductSSHDiagnosticPipe.removeLeftovers(directory: dependencies.stateStore.directory.path)
   let target = try resolveUserProductTarget(arguments[1], dependencies: dependencies)
   guard
     let sshConfiguration = effectiveSSHConfiguration(
@@ -517,8 +515,7 @@ func runUserProductUp(
   )
   try dependencies.stateStore.save(connecting)
 
-  let diagnosticLog = UserProductSSHDiagnosticPipe.create(
-    directory: dependencies.stateStore.directory.path)
+  let diagnosticLog = UserProductSSHDiagnosticPipe.create()
   defer { diagnosticLog?.close() }
   let launch = dependencies.processRunner.run(
     executable: "/usr/bin/ssh",
@@ -527,9 +524,9 @@ func runUserProductUp(
       controlPath: sshConfiguration.controlPath,
       executablePath: dependencies.executablePath,
       sessionID: sessionID,
-      diagnosticLog: diagnosticLog?.path
+      logsToStandardOutput: diagnosticLog != nil
     ),
-    io: .discarded
+    io: diagnosticLog.map { .outputOnly(to: $0.writer) } ?? .discarded
   )
   guard launch.started, launch.exitCode == 0 else {
     // 255 is ssh's own failure; a refused login or host key is not worth a retry.
