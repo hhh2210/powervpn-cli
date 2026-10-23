@@ -33,14 +33,9 @@ struct UserProductCommandResult: Equatable, Sendable {
     return Self(standardOutput: "", standardError: text + "\n", exitCode: exitCode)
   }
 
-  static func sshRejected(
-    _ rejection: UserProductSSHRejection,
-    target: UserProductTarget,
-    configuration: UserProductSSHEffectiveConfiguration
-  ) -> Self {
+  static func sshRejected(_ rejection: UserProductSSHRejection, target: UserProductTarget) -> Self {
     var result = failure(
-      rejection.message(target: target), exitCode: 77,
-      next: rejection.next(target: target, configuration: configuration))
+      rejection.message(target: target), exitCode: 77, next: rejection.next(target: target))
     result.sshRejection = rejection
     return result
   }
@@ -434,8 +429,6 @@ func runUserProductUp(
       next: "retry the same command in a few seconds")
   }
   defer { withExtendedLifetime(commandLock) {} }
-  // Before any early return: a killed start may have left its log while a session is now active.
-  UserProductSSHDiagnosticLog.removeLeftovers(directory: dependencies.stateStore.directory.path)
   let target = try resolveUserProductTarget(arguments[1], dependencies: dependencies)
   guard
     let sshConfiguration = effectiveSSHConfiguration(
@@ -522,9 +515,8 @@ func runUserProductUp(
   )
   try dependencies.stateStore.save(connecting)
 
-  let diagnosticLog = UserProductSSHDiagnosticLog.create(
-    directory: dependencies.stateStore.directory.path)
-  defer { diagnosticLog?.remove() }
+  let diagnosticLog = UserProductSSHDiagnosticPipe.create()
+  defer { diagnosticLog?.close() }
   let launch = dependencies.processRunner.run(
     executable: "/usr/bin/ssh",
     arguments: UserProductSSHArguments.startMaster(
@@ -532,15 +524,15 @@ func runUserProductUp(
       controlPath: sshConfiguration.controlPath,
       executablePath: dependencies.executablePath,
       sessionID: sessionID,
-      diagnosticLog: diagnosticLog?.path
+      logsToStandardOutput: diagnosticLog != nil
     ),
-    io: .discarded
+    io: diagnosticLog.map { .outputOnly(to: $0.writer) } ?? .discarded
   )
   guard launch.started, launch.exitCode == 0 else {
     // 255 is ssh's own failure; a refused login or host key is not worth a retry.
     let rejection =
       launch.exitCode == 255
-      ? diagnosticLog?.failureClass().flatMap(UserProductSSHRejection.init) : nil
+      ? diagnosticLog?.rejection() : nil
     // The proxy publishes its own receipt when ssh stops it, possibly right now. Decide under the
     // state lock: keep a receipt that already arrived, otherwise mark cleanup unverified.
     var receipt: UserProductSessionState?
@@ -559,7 +551,7 @@ func runUserProductUp(
       // ssh itself stops the ProxyCommand when the login fails, so a cancelled proxy does not
       // outrank the refusal; unverified cleanup does.
       if exitCode != 74, let rejection {
-        return .sshRejected(rejection, target: target, configuration: sshConfiguration)
+        return .sshRejected(rejection, target: target)
       }
       return .failure(
         userProductFailureMessage(receipt.failure),
@@ -567,7 +559,7 @@ func runUserProductUp(
         next: userProductFailureNext(receipt.failure))
     }
     if let rejection {
-      return .sshRejected(rejection, target: target, configuration: sshConfiguration)
+      return .sshRejected(rejection, target: target)
     }
     return .failure(
       "PowerVPN: SSH master did not start. Check SSH keys and run `powervpn doctor --json`."
