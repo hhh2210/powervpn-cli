@@ -782,13 +782,18 @@ import Testing
         target: "verbose-target", controlPath: directory.appendingPathComponent("cm").path,
         executablePath: "/usr/bin/false", sessionID: UUID().uuidString.lowercased(),
         diagnosticLog: log.path)
+    // ssh reports a rejected command-line option on stderr before `-E` takes over, which would
+    // also leave the log empty; so stderr must stay empty too.
+    let standardError = Pipe()
     process.standardInput = FileHandle.nullDevice
     process.standardOutput = FileHandle.nullDevice
-    process.standardError = FileHandle.nullDevice
+    process.standardError = standardError
     try process.run()
+    let complaints = standardError.fileHandleForReading.readDataToEndOfFile()
     process.waitUntilExit()
 
     #expect(process.terminationStatus == 255)
+    #expect(String(decoding: complaints, as: UTF8.self) == "")
     let written = try Data(contentsOf: URL(fileURLWithPath: log.path))
     #expect(!String(decoding: written, as: UTF8.self).contains("debug"))
     #expect(written.count < 1_024)
