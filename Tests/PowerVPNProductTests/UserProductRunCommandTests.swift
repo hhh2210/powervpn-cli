@@ -484,7 +484,7 @@ import Testing
     }
   }
 
-  @Test(arguments: [UserProductSSHRejection.authRejected, .hostKeyRejected])
+  @Test(arguments: [UserProductSSHRejection.authRejected, .hostKeyRejected(staleEntry: nil)])
   func runStopsForHumanWhenSSHRefusesTheMaster(_ rejection: UserProductSSHRejection)
     async throws
   {
@@ -501,13 +501,13 @@ import Testing
     #expect(result.exitCode == 77)
     #expect(ssh.starts == 1)
     #expect(ssh.execs.isEmpty)
-    #expect(result.standardError.contains("powervpn run: \(rejection.rawValue)\n"))
+    #expect(result.standardError.contains("powervpn run: \(rejection.token)\n"))
     switch rejection {
     case .authRejected:
       #expect(result.standardError.contains("把 SSH 公钥装到服务器上"))
     case .hostKeyRejected:
       #expect(result.standardError.contains("next: run `powervpn ssh thu21 -- true`"))
-      #expect(result.standardError.contains("`Offending ... key in FILE:LINE`"))
+      #expect(result.standardError.contains("`LogLevel QUIET` in ~/.ssh/config hides why"))
     }
     // ssh's own messages name the user and host: classified, never printed or kept.
     #expect(!result.standardError.contains("synthetic-user@"))
@@ -560,7 +560,7 @@ import Testing
     // verified-cleanup cancellation before `up` reads the state.
     let ssh = RunScriptedSSH(
       execExitCode: 0, startFailure: "cancelled",
-      startDiagnostics: sshDiagnostics(.hostKeyRejected), store: store)
+      startDiagnostics: sshDiagnostics(.hostKeyRejected(staleEntry: nil)), store: store)
 
     let result = try await runCurrentMachineUserProductCommand(
       ["run", "thu21", "--", "hostname"],
@@ -615,9 +615,9 @@ import Testing
     let pipe = try #require(UserProductSSHDiagnosticPipe.create())
     // Only ssh gets the write end, as its standard output; no other child inherits it.
     #expect(fcntl(pipe.writer, F_GETFD) & FD_CLOEXEC != 0)
-    #expect(pipe.failureClass() == nil)
-    try writeAsSSH(sshDiagnostics(.hostKeyRejected), to: pipe)
-    #expect(pipe.failureClass() == .hostKeyRejected)
+    #expect(pipe.rejection() == nil)
+    try writeAsSSH(sshDiagnostics(.hostKeyRejected(staleEntry: nil)), to: pipe)
+    #expect(pipe.rejection() == .hostKeyRejected(staleEntry: nil))
     pipe.close()
 
     // More than the limit, and more than a pipe buffers, is drained (ssh never blocks) but not
@@ -626,7 +626,7 @@ import Testing
     defer { flooded.close() }
     let flood = String(repeating: "x", count: 8 * UserProductSSHDiagnosticPipe.limitBytes)
     #expect(writesWithinTwoSeconds(flood + sshDiagnostics(.authRejected), to: flooded))
-    #expect(flooded.failureClass() == nil)
+    #expect(flooded.rejection() == nil)
     #expect(flooded.collectedByteCount == UserProductSSHDiagnosticPipe.limitBytes + 1)
   }
 
@@ -717,13 +717,15 @@ import Testing
     #expect(saved.failure != "ssh_master_start_cleanup_unverified")
   }
 
-  @Test func masterStartKeepsSSHQuietWhateverTheConfigAsksFor() throws {
+  /// Without the overrides the first config logs about 3 KB of debug lines, and the second nothing.
+  @Test(arguments: ["LogLevel DEBUG3\n  LogVerbose *", "LogLevel QUIET"])
+  func masterStartLogsJustErrorsWhateverTheConfigAsksFor(_ setting: String) throws {
     let directory = recoveryTemporaryDirectory()
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     let configuration = directory.appendingPathComponent("ssh_config").path
     try Data(
-      "Host verbose-target\n  HostName 192.0.2.9\n  LogLevel DEBUG3\n  LogVerbose *\n".utf8
+      "Host configured-target\n  HostName 192.0.2.9\n  \(setting)\n".utf8
     ).write(to: URL(fileURLWithPath: configuration))
     let pipe = try #require(UserProductSSHDiagnosticPipe.create())
     defer { pipe.close() }
@@ -734,17 +736,16 @@ import Testing
       executable: "/usr/bin/ssh",
       arguments: ["-F", configuration]
         + UserProductSSHArguments.startMaster(
-          target: "verbose-target", controlPath: directory.appendingPathComponent("cm").path,
+          target: "configured-target", controlPath: directory.appendingPathComponent("cm").path,
           executablePath: try sshOneServer(in: directory), sessionID: "s",
           logsToStandardOutput: true),
       io: .outputOnly(to: pipe.writer))
 
     #expect(launch.exitCode == 255)
-    #expect(pipe.failureClass() == nil)
-    // The ERROR line arrived: a rejected command-line option would have left the log empty.
+    #expect(pipe.rejection() == nil)
+    // The ERROR line arrived, so neither QUIET nor a rejected command-line option silenced it;
+    // ERROR alone is at most a line or two.
     #expect(pipe.collectedByteCount > 0)
-    // Without the overrides this config produces about 3 KB of debug lines; ERROR alone is at
-    // most a line or two.
     #expect(pipe.collectedByteCount < 512)
   }
 
@@ -786,6 +787,57 @@ import Testing
     // It logged its ERROR line into the void (EPIPE, not SIGPIPE) and failed only on the server.
     #expect(process.terminationReason == .exit)
     #expect(process.terminationStatus == 255)
+  }
+
+  @Test func runNamesTheStaleKnownHostsLineSSHReported() async throws {
+    let directory = recoveryTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = UserProductSessionStateStore(directory: directory)
+    let ssh = RunScriptedSSH(execExitCode: 0, startDiagnostics: changedHostKeyDiagnostics)
+
+    let result = try await runCurrentMachineUserProductCommand(
+      ["run", "thu21", "--", "hostname"],
+      dependencies: runDependencies(ssh: ssh, store: store)
+    )
+
+    #expect(result.exitCode == 77)
+    #expect(ssh.starts == 1)
+    #expect(
+      result.standardError.hasPrefix(
+        "PowerVPN: ssh does not trust the host key of thu21 (192.0.2.21): it differs from the one known_hosts recorded.\n"
+      ))
+    #expect(result.standardError.contains("powervpn run: ssh_host_key_rejected\n"))
+    #expect(
+      result.standardError.contains(
+        "next: if the server really changed its host key, delete line 2 of `/Users/synthetic-user/My Keys 中文/known_hosts`,"
+      ))
+    // Only the file and line are shown; the warning and the server's fingerprint are not.
+    #expect(!result.standardError.contains("IDENTIFICATION"))
+    #expect(!result.standardError.contains("SHA256:"))
+  }
+
+  @Test func knownHostsEntryIsReadFromWhatSSHLogs() {
+    func entry(_ bytes: [UInt8]) -> UserProductKnownHostsEntry? {
+      UserProductKnownHostsEntry(sshMessages: Data(bytes))
+    }
+    func entry(_ text: String) -> UserProductKnownHostsEntry? { entry(Array(text.utf8)) }
+    let chinese = UserProductKnownHostsEntry(
+      file: "/Users/synthetic-user/My Keys 中文/known_hosts", line: 2)
+
+    // OpenSSH 10.5 in the C locale escapes every byte outside ASCII.
+    #expect(entry(changedHostKeyDiagnostics) == chinese)
+    // In a UTF-8 locale it leaves some of them raw.
+    #expect(
+      entry(
+        Array("Offending ED25519 key in /Users/synthetic-user/My Keys ".utf8) + [0xE4, 0xB8]
+          + Array("\\255".utf8) + [0xE6] + Array("\\226\\207/known_hosts:2\r\n".utf8)) == chinese)
+    #expect(
+      entry("Offending RSA key in /tmp/a\\\\b:c/known_hosts:17\n")
+        == UserProductKnownHostsEntry(file: "/tmp/a\\b:c/known_hosts", line: 17))
+    // CheckHostIP's line is no refusal, and a path that would drive the terminal is not shown.
+    #expect(entry("Offending key for IP in /Users/me/.ssh/known_hosts:3\r\n") == nil)
+    #expect(entry("Offending ED25519 key in /tmp/\\033[31m/known_hosts:1\r\n") == nil)
+    #expect(entry(sshDiagnostics(.hostKeyRejected(staleEntry: nil))) == nil)
   }
 
   @Test func productFailuresEndWithNextAction() async throws {
@@ -1075,7 +1127,8 @@ struct ProxyReceiptCase: Sendable, CustomTestStringConvertible {
     Self(
       testDescription: "failed proxy, verified receipt, refused host key",
       phase: .failed, cleanupVerified: true, receiptVerified: true,
-      failure: "connection_failed", diagnostics: sshDiagnostics(.hostKeyRejected), exitCode: 77),
+      failure: "connection_failed", diagnostics: sshDiagnostics(.hostKeyRejected(staleEntry: nil)),
+      exitCode: 77),
     Self(
       testDescription: "normal stream close, verified receipt, no refusal",
       phase: .disconnected, cleanupVerified: true, receiptVerified: true, failure: nil,
@@ -1101,6 +1154,24 @@ func sshDiagnostics(_ rejection: UserProductSSHRejection) -> String {
       + "Host key verification failed.\r\n"
   }
 }
+
+/// What OpenSSH 10.5 logs in the C locale when the host key changed and the stale one is on line
+/// 2 of `/Users/synthetic-user/My Keys 中文/known_hosts`; the fingerprint is made up.
+let changedHostKeyDiagnostics = [
+  "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@",
+  "@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @",
+  "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@",
+  "IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!",
+  "Someone could be eavesdropping on you right now (man-in-the-middle attack)!",
+  "It is also possible that a host key has just been changed.",
+  "The fingerprint for the ED25519 key sent by the remote host is",
+  "SHA256:Synthetic0Fingerprint0For0Tests0Only0000000.",
+  "Please contact your system administrator.",
+  "Add correct host key in /Users/synthetic-user/My Keys \\344 to get rid of this message.",
+  "Offending ED25519 key in /Users/synthetic-user/My Keys \\344\\270\\255\\346\\226\\207/known_hosts:2",
+  "Host key for 192.0.2.21 has changed and you have requested strict checking.",
+  "Host key verification failed.",
+].map { $0 + "\r\n" }.joined()
 
 private func vendorCleanupReceipt(verified: Bool) -> UserProductOriginalCleanupReceipt {
   UserProductOriginalCleanupReceipt(

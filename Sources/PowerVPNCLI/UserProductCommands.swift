@@ -532,7 +532,7 @@ func runUserProductUp(
     // 255 is ssh's own failure; a refused login or host key is not worth a retry.
     let rejection =
       launch.exitCode == 255
-      ? diagnosticLog?.failureClass().flatMap(UserProductSSHRejection.init) : nil
+      ? diagnosticLog?.rejection() : nil
     // The proxy publishes its own receipt when ssh stops it, possibly right now. Decide under the
     // state lock: keep a receipt that already arrived, otherwise mark cleanup unverified.
     var receipt: UserProductSessionState?

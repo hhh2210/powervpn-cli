@@ -216,8 +216,8 @@ func removeOwnedStaleControlSocket(_ path: String) -> Bool {
 /// a path to open, so nothing it does waits for `up`: once the read end is gone (`up` closed it or
 /// died), its writes fail with EPIPE, which ssh ignores (it ignores SIGPIPE), and nothing is kept.
 /// A thread drains the pipe while the start runs, and `close()` closes it once the start is
-/// decided. The messages can name the user and host, so they are only classified, never printed.
-/// Every instance must be closed.
+/// decided. The messages can name the user and host, so they are only classified, never printed;
+/// only the known_hosts line of a changed host key is shown. Every instance must be closed.
 final class UserProductSSHDiagnosticPipe: @unchecked Sendable {
   static let limitBytes = 16 * 1_024
   /// How long the drain thread waits for data before it checks whether to stop.
@@ -271,15 +271,14 @@ final class UserProductSSHDiagnosticPipe: @unchecked Sendable {
   /// Bytes collected so far, at most `limitBytes + 1`.
   var collectedByteCount: Int { lock.withLock { bytes.count } }
 
-  /// The SSH failure the messages name, once ssh has exited; nil when they are over `limitBytes`
-  /// or name nothing the classifier knows.
-  func failureClass() -> ProductM2SSHFailureClass? {
+  /// The refusal the messages report, once ssh has exited; nil when they are over `limitBytes`
+  /// or report none.
+  func rejection() -> UserProductSSHRejection? {
     stopDraining()
     guard !lock.withLock({ closed }) else { return nil }
     while collectedByteCount <= Self.limitBytes, readChunk() {}
     return lock.withLock {
-      guard bytes.count <= Self.limitBytes else { return nil }
-      return bytes.withUnsafeBytes(ProductM2SSHFailureClassifier.classify)
+      bytes.count <= Self.limitBytes ? UserProductSSHRejection(sshMessages: bytes) : nil
     }
   }
 
@@ -322,15 +321,27 @@ final class UserProductSSHDiagnosticPipe: @unchecked Sendable {
 
 /// SSH refusals that rerunning cannot fix: the server accepted no key, or ssh will not trust the
 /// host key without asking. A background master can neither type a secret nor answer a prompt.
-enum UserProductSSHRejection: String, Equatable, Sendable {
-  case authRejected = "ssh_auth_rejected"
-  case hostKeyRejected = "ssh_host_key_rejected"
+enum UserProductSSHRejection: Equatable, Sendable {
+  case authRejected
+  /// `staleEntry` holds the key ssh recorded for the host, which the server no longer presents.
+  /// ssh names it for a changed key; for a key it never recorded there is none.
+  case hostKeyRejected(staleEntry: UserProductKnownHostsEntry?)
 
-  init?(_ failureClass: ProductM2SSHFailureClass) {
-    switch failureClass {
+  /// The refusal ssh's own messages report, if any.
+  init?(sshMessages: Data) {
+    switch sshMessages.withUnsafeBytes(ProductM2SSHFailureClassifier.classify) {
     case .authRejected: self = .authRejected
-    case .hostKeyRejected: self = .hostKeyRejected
+    case .hostKeyRejected:
+      self = .hostKeyRejected(staleEntry: UserProductKnownHostsEntry(sshMessages: sshMessages))
     default: return nil
+    }
+  }
+
+  /// The `powervpn run` failure token.
+  var token: String {
+    switch self {
+    case .authRejected: "ssh_auth_rejected"
+    case .hostKeyRejected: "ssh_host_key_rejected"
     }
   }
 
@@ -338,7 +349,9 @@ enum UserProductSSHRejection: String, Equatable, Sendable {
     switch self {
     case .authRejected:
       "PowerVPN: \(target.key) rejected SSH public-key login; background SSH cannot type a password or passphrase."
-    case .hostKeyRejected:
+    case .hostKeyRejected(staleEntry: .some):
+      "PowerVPN: ssh does not trust the host key of \(target.key) (\(target.host)): it differs from the one known_hosts recorded."
+    case .hostKeyRejected(staleEntry: nil):
       "PowerVPN: ssh does not trust the host key of \(target.key) (\(target.host)): it is not in known_hosts or has changed."
     }
   }
@@ -347,8 +360,71 @@ enum UserProductSSHRejection: String, Equatable, Sendable {
     switch self {
     case .authRejected:
       "install your SSH public key on the server (README step 6, \"把 SSH 公钥装到服务器上\"); if it is already there, README \"出问题时\" covers ssh-agent and IdentitiesOnly"
-    case .hostKeyRejected:
-      "run `powervpn ssh \(target.key) -- true` and read what ssh reports: accept a new key after checking its fingerprint; for a changed key, confirm the server really changed it, then delete the line ssh names in `Offending ... key in FILE:LINE` and run it again (with StrictHostKeyChecking yes, add the verified key to known_hosts yourself)"
+    case .hostKeyRejected(let staleEntry?):
+      "if the server really changed its host key, delete line \(staleEntry.line) of `\(staleEntry.file)`, which holds the old one, then run `powervpn ssh \(target.key) -- true` and accept the new key after checking its fingerprint (with StrictHostKeyChecking yes, add the verified key to that file yourself)"
+    case .hostKeyRejected(staleEntry: nil):
+      "run `powervpn ssh \(target.key) -- true` and act on what ssh reports: accept a new key after checking its fingerprint (with StrictHostKeyChecking yes, add the verified key to known_hosts yourself); if it reports nothing, `LogLevel QUIET` in ~/.ssh/config hides why, so set `LogLevel ERROR` for this host while you fix it"
     }
+  }
+}
+
+/// A known_hosts line, as ssh names the one holding a host key the server no longer presents:
+/// `Offending ED25519 key in /Users/me/.ssh/known_hosts:3`. It is the real file, whatever
+/// UserKnownHostsFile or HostKeyAlias say, so `next:` can name it.
+struct UserProductKnownHostsEntry: Equatable, Sendable {
+  let file: String
+  let line: Int
+
+  init(file: String, line: Int) {
+    self.file = file
+    self.line = line
+  }
+
+  /// The first entry ssh's messages name; nil when they name none, or one whose path would put
+  /// control characters on the terminal.
+  init?(sshMessages: Data) {
+    let prefix = Array("Offending ".utf8)
+    let keyIn = Array(" key in ".utf8)
+    for message in sshMessages.split(separator: UInt8(ascii: "\n")) {
+      var message = Array(message)
+      if message.last == UInt8(ascii: "\r") { message.removeLast() }
+      // "Offending <type> key in FILE:LINE"; not "Offending key for IP in", which is no refusal.
+      guard message.starts(with: prefix),
+        let typeEnd = message[prefix.count...].firstIndex(of: UInt8(ascii: " ")),
+        message[typeEnd...].starts(with: keyIn),
+        let colon = message.lastIndex(of: UInt8(ascii: ":")),
+        colon > typeEnd + keyIn.count,
+        let line = Int(String(decoding: message[(colon + 1)...], as: UTF8.self)), line > 0
+      else { continue }
+      let path = Self.unescaped(message[(typeEnd + keyIn.count)..<colon])
+      guard !path.contains(where: { $0 < 0x20 || $0 == 0x7f }) else { return nil }
+      self.init(file: String(decoding: path, as: UTF8.self), line: line)
+      return
+    }
+    return nil
+  }
+
+  /// Undoes the escapes ssh's log applies to a message (strnvis with VIS_SAFE | VIS_OCTAL): a
+  /// byte outside printable ASCII may be `\ooo`, and a backslash is `\\`.
+  private static func unescaped(_ bytes: ArraySlice<UInt8>) -> [UInt8] {
+    let backslash = UInt8(ascii: "\\")
+    let octalDigits = UInt8(ascii: "0")...UInt8(ascii: "7")
+    var result: [UInt8] = []
+    var index = bytes.startIndex
+    while index < bytes.endIndex {
+      let escape = bytes[(index + 1)...].prefix(3)
+      if bytes[index] == backslash, escape.count == 3, escape.allSatisfy(octalDigits.contains) {
+        result.append(
+          UInt8(truncatingIfNeeded: escape.reduce(0) { $0 * 8 + Int($1 - UInt8(ascii: "0")) }))
+        index += 4
+      } else if bytes[index] == backslash, escape.first == backslash {
+        result.append(backslash)
+        index += 2
+      } else {
+        result.append(bytes[index])
+        index += 1
+      }
+    }
+    return result
   }
 }

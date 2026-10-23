@@ -190,8 +190,10 @@ PowerVPN 自己出错时，stderr 最后两行固定是 `powervpn run: <原因>`
     在 `Host lab-a` 里写 `IdentityFile <你的私钥路径>` 和 `IdentitiesOnly yes`，只递这一把。第 6 步的安装命令遇到同样的报错时也这样处理。
 - `run` 报 `ssh_host_key_rejected`（退出码 77）：`known_hosts` 里没有这台服务器的主机密钥，或者它变了。
   - 还没记下：`powervpn ssh lab-a -- true`，核对指纹后输入 `yes`。
-  - 变了：先确认服务器确实换过密钥。再跑 `powervpn ssh lab-a -- true`，ssh 会指出旧记录 `Offending … key in <文件>:<行号>`；删掉那一行，然后同上。
+  - 变了：`next:` 会写明旧记录在哪个文件的第几行。这取自 ssh 自己报的 `Offending … key in <文件>:<行号>`，所以自定义的 `UserKnownHostsFile` 也不会指错。
+    先确认服务器确实换过密钥，删掉那一行，然后同上。
   - `~/.ssh/config` 里写了 `StrictHostKeyChecking yes` 时 ssh 不会提示，要自己把核对过的密钥加进 `known_hosts`。
+  - `~/.ssh/config` 里写了 `LogLevel QUIET` 时，`powervpn ssh` 不会显示 ssh 的原因；排查期间先改成 `LogLevel ERROR`。
 - 其他 SSH 启动失败仍报 `session_start_failed`（75，第一行是 `SSH master did not start`），可以原样重跑；
   反复出现时用 `powervpn ssh lab-a -- true` 看 ssh 自己怎么说。
 - 日志（需要 sudo 读）：`/var/log/powervpn-native-helper.log`、`/var/log/powervpn-native-charon.log`。
