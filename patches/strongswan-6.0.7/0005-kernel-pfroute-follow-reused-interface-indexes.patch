@@ -1,0 +1,386 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: hhh2210 <hzy2210@gmail.com>
+Date: Fri, 13 Nov 2026 19:31:31 +0800
+Subject: [PATCH] kernel-pfroute: follow interface indexes that are reused
+ under another name
+
+Messages on the PF_ROUTE socket identify interfaces by index only.  macOS
+has no RTM_IFANNOUNCE, so an interface that is destroyed stays in the cache
+forever, and the kernel assigns the index of a destroyed utun device to a
+new one, which gets the lowest free unit and therefore possibly another
+name.
+
+The address of the new device was then recorded under the old name, and
+the next RTM_IFINFO repopulated the entry with getifaddrs() by that name,
+which removed it again.  add_ip() waited for an address that could not
+appear and failed with "virtual IP ... did not appear on utunN" until the
+daemon was restarted.
+
+- Compare the cached name with if_indextoname() when a message arrives for
+  a known index.  If the index belongs to another interface, rebuild the
+  entry under its name.
+- Remove an entry whose index has no interface anymore when the message
+  says it is down, and entries that claim the name of another interface.
+- Before add_ip() gives up, look at the TUN device itself once, so a lost
+  event does not fail the virtual IP either.
+---
+ .../kernel_pfroute/kernel_pfroute_net.c       | 269 ++++++++++++++++--
+ 1 file changed, 253 insertions(+), 16 deletions(-)
+
+diff --git a/src/libcharon/plugins/kernel_pfroute/kernel_pfroute_net.c b/src/libcharon/plugins/kernel_pfroute/kernel_pfroute_net.c
+index 5caf5f2..3f0001c 100644
+--- a/src/libcharon/plugins/kernel_pfroute/kernel_pfroute_net.c
++++ b/src/libcharon/plugins/kernel_pfroute/kernel_pfroute_net.c
+@@ -678,6 +678,23 @@ static enumerator_t *create_ifamsg_enumerator(struct ifa_msghdr *hdr)
+ 								(struct sockaddr *)(hdr + 1));
+ }
+ 
++/**
++ * How a cached interface relates to the interface that owns its index
++ */
++typedef enum {
++	/** the entry describes the interface that owns the index */
++	IFACE_CURRENT,
++	/** the index belongs to an interface with another name, entry rebuilt */
++	IFACE_REPLACED,
++	/** no interface has this index */
++	IFACE_GONE,
++} iface_state_t;
++
++static iface_state_t refresh_iface(private_kernel_pfroute_net_t *this,
++								   iface_entry_t *iface);
++static void drop_stale_ifaces(private_kernel_pfroute_net_t *this,
++							  iface_entry_t *current);
++
+ /**
+  * Process an RTM_*ADDR message from the kernel
+  */
+@@ -687,7 +704,7 @@ static void process_addr(private_kernel_pfroute_net_t *this,
+ 	struct sockaddr *sockaddr;
+ 	host_t *host = NULL;
+ 	enumerator_t *ifaces, *addrs;
+-	iface_entry_t *iface;
++	iface_entry_t *iface, *replaced = NULL;
+ 	addr_entry_t *addr;
+ 	bool found = FALSE, changed = FALSE, roam = FALSE;
+ 	enumerator_t *enumerator;
+@@ -717,6 +734,14 @@ static void process_addr(private_kernel_pfroute_net_t *this,
+ 	{
+ 		if (iface->ifindex == ifa->ifam_index)
+ 		{
++			if (ifa->ifam_type == RTM_NEWADDR &&
++				refresh_iface(this, iface) == IFACE_REPLACED)
++			{	/* the address may arrive before the RTM_IFINFO of a new
++				 * interface that got the index of an old one */
++				replaced = iface;
++				changed = TRUE;
++				ifname = strdup(iface->ifname);
++			}
+ 			addrs = iface->addrs->create_enumerator(iface->addrs);
+ 			while (addrs->enumerate(addrs, &addr))
+ 			{
+@@ -745,7 +770,10 @@ static void process_addr(private_kernel_pfroute_net_t *this,
+ 					.ip = host->clone(host),
+ 				);
+ 				changed = TRUE;
+-				ifname = strdup(iface->ifname);
++				if (!ifname)
++				{
++					ifname = strdup(iface->ifname);
++				}
+ 				iface->addrs->insert_last(iface->addrs, addr);
+ 				addr_map_entry_add(this, addr, iface);
+ 				if (iface->usable)
+@@ -762,6 +790,10 @@ static void process_addr(private_kernel_pfroute_net_t *this,
+ 		}
+ 	}
+ 	ifaces->destroy(ifaces);
++	if (replaced)
++	{
++		drop_stale_ifaces(this, replaced);
++	}
+ 	this->lock->unlock(this->lock);
+ 	host->destroy(host);
+ 
+@@ -857,6 +889,169 @@ static void repopulate_iface(private_kernel_pfroute_net_t *this,
+ 	addrs->destroy(addrs);
+ }
+ 
++/**
++ * Remove all addresses of an interface, also from the address map
++ */
++static void purge_iface_addrs(private_kernel_pfroute_net_t *this,
++							  iface_entry_t *iface)
++{
++	addr_entry_t *addr;
++
++	while (iface->addrs->remove_last(iface->addrs, (void**)&addr) == SUCCESS)
++	{
++		addr_map_entry_remove(addr, iface, this);
++		addr_entry_destroy(addr);
++	}
++}
++
++/**
++ * Interface flags as reported by getifaddrs(), 0 if the interface is not
++ * listed
++ */
++static u_int get_iface_flags(char *ifname)
++{
++	struct ifaddrs *ifap, *ifa;
++	u_int flags = 0;
++
++	if (getifaddrs(&ifap) == 0)
++	{
++		for (ifa = ifap; ifa != NULL; ifa = ifa->ifa_next)
++		{
++			if (streq(ifa->ifa_name, ifname))
++			{
++				flags = ifa->ifa_flags;
++				break;
++			}
++		}
++		freeifaddrs(ifap);
++	}
++	return flags;
++}
++
++/**
++ * Drop cached interfaces that claim the name of the given one.  A name belongs
++ * to a single interface, so any other entry with it describes an interface
++ * that does not exist anymore.
++ */
++static void drop_stale_ifaces(private_kernel_pfroute_net_t *this,
++							  iface_entry_t *current)
++{
++	enumerator_t *enumerator;
++	iface_entry_t *iface;
++
++	enumerator = this->ifaces->create_enumerator(this->ifaces);
++	while (enumerator->enumerate(enumerator, &iface))
++	{
++		if (iface != current && streq(iface->ifname, current->ifname))
++		{
++			DBG1(DBG_KNL, "interface %s with index %d disappeared",
++				 iface->ifname, iface->ifindex);
++			this->ifaces->remove_at(this->ifaces, enumerator);
++			purge_iface_addrs(this, iface);
++			iface_entry_destroy(iface);
++		}
++	}
++	enumerator->destroy(enumerator);
++}
++
++/**
++ * Make sure a cached interface still is the interface that owns its index.
++ *
++ * Messages on the PF_ROUTE socket identify interfaces by index only.  Without
++ * RTM_IFANNOUNCE (not available on macOS) we never learn that an interface is
++ * gone, and the kernel assigns the index of a destroyed utun device to a new
++ * one, which gets the lowest free unit and therefore possibly another name.
++ * The addresses of that device would be tracked under the old name, and get
++ * lost whenever the entry is repopulated via getifaddrs(), so that a virtual
++ * IP never appears on the TUN device we created for it.
++ */
++static iface_state_t refresh_iface(private_kernel_pfroute_net_t *this,
++								   iface_entry_t *iface)
++{
++	char ifname[IFNAMSIZ];
++
++	if (!if_indextoname(iface->ifindex, ifname))
++	{
++		return IFACE_GONE;
++	}
++	if (streq(ifname, iface->ifname))
++	{
++		return IFACE_CURRENT;
++	}
++	DBG1(DBG_KNL, "interface %s disappeared, index %d is now %s",
++		 iface->ifname, iface->ifindex, ifname);
++	purge_iface_addrs(this, iface);
++	snprintf(iface->ifname, sizeof(iface->ifname), "%s", ifname);
++	iface->flags = get_iface_flags(iface->ifname);
++	iface->usable = charon->kernel->is_interface_usable(charon->kernel,
++														iface->ifname);
++	repopulate_iface(this, iface);
++	return IFACE_REPLACED;
++}
++
++/**
++ * Bring the cached entry of an interface in line with the kernel, creating it
++ * if no event for the interface has been processed.
++ */
++static void resync_iface(private_kernel_pfroute_net_t *this, char *ifname)
++{
++	enumerator_t *enumerator;
++	iface_entry_t *iface, *found = NULL;
++	int ifindex;
++
++	ifindex = if_nametoindex(ifname);
++	if (!ifindex)
++	{
++		return;
++	}
++	this->lock->write_lock(this->lock);
++	enumerator = this->ifaces->create_enumerator(this->ifaces);
++	while (enumerator->enumerate(enumerator, &iface))
++	{
++		if (iface->ifindex == ifindex)
++		{
++			found = iface;
++			break;
++		}
++	}
++	enumerator->destroy(enumerator);
++
++	if (found)
++	{
++		switch (refresh_iface(this, found))
++		{
++			case IFACE_CURRENT:
++				found->flags = get_iface_flags(found->ifname);
++				repopulate_iface(this, found);
++				break;
++			case IFACE_REPLACED:
++				break;
++			case IFACE_GONE:
++				found = NULL;
++				break;
++		}
++	}
++	else
++	{
++		INIT(found,
++			.ifindex = ifindex,
++			.flags = get_iface_flags(ifname),
++			.addrs = linked_list_create(),
++			.usable = charon->kernel->is_interface_usable(charon->kernel,
++														  ifname),
++		);
++		snprintf(found->ifname, sizeof(found->ifname), "%s", ifname);
++		DBG1(DBG_KNL, "interface %s appeared", found->ifname);
++		repopulate_iface(this, found);
++		this->ifaces->insert_last(this->ifaces, found);
++	}
++	if (found)
++	{
++		drop_stale_ifaces(this, found);
++	}
++	this->lock->unlock(this->lock);
++}
++
+ /**
+  * Process an RTM_IFINFO message from the kernel
+  */
+@@ -864,7 +1059,7 @@ static void process_link(private_kernel_pfroute_net_t *this,
+ 						 struct if_msghdr *msg)
+ {
+ 	enumerator_t *enumerator;
+-	iface_entry_t *iface;
++	iface_entry_t *iface, *replaced = NULL;
+ 	bool roam = FALSE, found = FALSE, update_routes = FALSE;
+ 
+ 	this->lock->write_lock(this->lock);
+@@ -873,6 +1068,45 @@ static void process_link(private_kernel_pfroute_net_t *this,
+ 	{
+ 		if (iface->ifindex == msg->ifm_index)
+ 		{
++			found = TRUE;
++#ifdef __APPLE__
++			/* There seems to be a race condition on 10.10, where we get
++			 * the RTM_IFINFO, but getifaddrs() does not return the virtual
++			 * IP installed on a tun device, but we also don't get a
++			 * RTM_NEWADDR. We therefore could miss the new address, letting
++			 * virtual IP installation fail. Delaying getifaddrs() helps,
++			 * but is obviously not a clean fix. */
++			usleep(50000);
++#endif
++			switch (refresh_iface(this, iface))
++			{
++				case IFACE_REPLACED:
++					replaced = iface;
++					if (iface->usable)
++					{
++						roam = update_routes = TRUE;
++					}
++					break;
++				case IFACE_GONE:
++					if (!(msg->ifm_flags & IFF_UP))
++					{	/* the last message of an interface, which we'd
++						 * otherwise keep forever without RTM_IFANNOUNCE */
++						DBG1(DBG_KNL, "interface %s disappeared",
++							 iface->ifname);
++						roam = iface_entry_up_and_usable(iface);
++						this->ifaces->remove_at(this->ifaces, enumerator);
++						purge_iface_addrs(this, iface);
++						iface_entry_destroy(iface);
++						iface = NULL;
++					}
++					break;
++				case IFACE_CURRENT:
++					break;
++			}
++			if (!iface)
++			{
++				break;
++			}
+ 			if (iface->usable)
+ 			{
+ 				if (!(iface->flags & IFF_UP) && (msg->ifm_flags & IFF_UP))
+@@ -886,22 +1120,16 @@ static void process_link(private_kernel_pfroute_net_t *this,
+ 					DBG1(DBG_KNL, "interface %s deactivated", iface->ifname);
+ 				}
+ 			}
+-#ifdef __APPLE__
+-			/* There seems to be a race condition on 10.10, where we get
+-			 * the RTM_IFINFO, but getifaddrs() does not return the virtual
+-			 * IP installed on a tun device, but we also don't get a
+-			 * RTM_NEWADDR. We therefore could miss the new address, letting
+-			 * virtual IP installation fail. Delaying getifaddrs() helps,
+-			 * but is obviously not a clean fix. */
+-			usleep(50000);
+-#endif
+ 			iface->flags = msg->ifm_flags;
+ 			repopulate_iface(this, iface);
+-			found = TRUE;
+ 			break;
+ 		}
+ 	}
+ 	enumerator->destroy(enumerator);
++	if (replaced)
++	{
++		drop_stale_ifaces(this, replaced);
++	}
+ 
+ 	if (!found)
+ 	{
+@@ -922,6 +1150,7 @@ static void process_link(private_kernel_pfroute_net_t *this,
+ 																iface->ifname);
+ 			repopulate_iface(this, iface);
+ 			this->ifaces->insert_last(this->ifaces, iface);
++			drop_stale_ifaces(this, iface);
+ 			if (iface->usable)
+ 			{
+ 				roam = update_routes = TRUE;
+@@ -1298,10 +1527,18 @@ METHOD(kernel_net_t, add_ip, status_t,
+ 	this->mutex->unlock(this->mutex);
+ 	if (timeout)
+ 	{
+-		DBG1(DBG_KNL, "virtual IP %H did not appear on %s",
++		/* an event may have been lost, or recorded for another interface:
++		 * look at the TUN device itself before giving up */
++		resync_iface(this, tun->get_name(tun));
++		if (!get_interface_name(this, vip, NULL))
++		{
++			DBG1(DBG_KNL, "virtual IP %H did not appear on %s",
++				 vip, tun->get_name(tun));
++			tun->destroy(tun);
++			return FAILED;
++		}
++		DBG1(DBG_KNL, "virtual IP %H found on %s after resynchronizing",
+ 			 vip, tun->get_name(tun));
+-		tun->destroy(tun);
+-		return FAILED;
+ 	}
+ 
+ 	this->lock->write_lock(this->lock);
