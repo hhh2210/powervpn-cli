@@ -78,8 +78,25 @@
 `installing new virtual IP <VIP>` 之后只有一行 `interface utunM appeared`（helper 随后记
 `route add <host> -> utunM`），并没有 `<VIP> appeared on utunM` 这一行：2026-11-13 的两次成功连接
 都是如此，所以不要拿那一行当判据。若失败那次 `virtual IP <VIP> did not appear on utunN` 里的 utunN
-与同一次尝试的 `interface utunM appeared` 里的 utunM 不同，或者根本没有对应的 `interface … appeared`，
+与同一次尝试的 `interface utunM appeared` 里的 utunM 不同，或者根本没有对应的 `interface … appeared`
+（缓存里已有这个 ifindex 时，charon 记的是 `interface utunM activated`，名字是旧的），
 即支持候选一；若看到 `unable to receive from PF_ROUTE event socket`，则支持候选二。
+
+## 复现记录（2026-11-13 18:52–18:55 CST）
+
+charon 连续运行约 2 小时 52 分（07:59:46Z 启动）后，同一故障复现，证据支持候选一：
+
+- 至少 5 次连续尝试（10:53:04Z–10:55:37Z）都是同一组日志：`installing new virtual IP <VIP>` 之后是
+  `interface utun11 activated`，约 1 秒后 `virtual IP <VIP> did not appear on utun6`，随后
+  `interface utun11 deactivated`。charon 新建的 TUN 叫 utun6，而它缓存里同一 ifindex 的名字还是 utun11
+  （上一个会话在 08:00:41Z 用的正是 utun11），所以地址事件记到了旧名字下，等 utun6 的那一方超时。
+  期间没有 `unable to receive from PF_ROUTE event socket`。
+- 自愈按设计生效：10:55:38Z helper 记 `restart-charon granted (owner request; charon idle)`，
+  重启后的下一次尝试是 `interface utun6 appeared`、`route add <host> -> utun6`，连接建立。
+  重启前后 TUN 名字同为 utun6，区别只在 charon 的缓存是否为空。
+- 前 4 次由 Homebrew 0.2.2 的旧 CLI 发起：它不认识这个故障，报的是“the gateway did not install the
+  tunnel for this resource”，也不会请求 `restart-charon`，所以一直失败（`session_start_failed`，75）。
+  同一时刻换成本分支的 CLI 就自动恢复了，整次 `run` 用时 8.9 秒。
 
 ## 待决定的根因修复
 
