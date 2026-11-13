@@ -907,6 +907,138 @@ import Testing
         == "powervpn doctor --json")
     #expect(userProductNextAction(in: "Close it before `powervpn up`.") == nil)
   }
+
+  @Test func runWaitsForTheOwnerToCloseASessionWhoseTunnelIsGoneThenReconnects() async throws {
+    let directory = recoveryTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = UserProductSessionStateStore(directory: directory)
+    let ssh = RunScriptedSSH(execExitCode: 0)
+    let stale = nativeActiveState(controlPath: ssh.socket, tunnelWatchdog: true)
+    try store.save(stale)
+    ssh.markAlive(ssh.socket)
+    let events = RunEventLog()
+    let probes = RecoveryInvocationCounter()
+
+    let result = try await runCurrentMachineUserProductCommand(
+      ["run", "thu21", "--", "hostname"],
+      dependencies: runDependencies(
+        ssh: ssh, store: store, events: events,
+        liveness: { target in
+          events.record("probe:\(target)")
+          probes.increment()
+          if probes.value == 3 {
+            // The owning proxy's watchdog: the master exits, then its receipt.
+            ssh.markDead(ssh.socket)
+            _ = try? store.update(sessionID: stale.sessionID) {
+              $0.phase = .disconnected
+              $0.cleanupVerified = true
+            }
+          }
+          return .absent
+        })
+    )
+
+    #expect(result.exitCode == 0)
+    #expect(ssh.starts == 1)
+    #expect(ssh.execs.count == 1)
+    #expect(
+      events.all == [
+        "probe:thu21", "sleep:2000", "probe:thu21", "sleep:2000", "probe:thu21", "sleep:2000",
+      ])
+    #expect(result.standardError.contains("powervpn run: tunnel_lost"))
+    #expect(result.standardError.contains("powervpn run: session_started"))
+    #expect(try store.load()?.sessionID != stale.sessionID)
+  }
+
+  @Test(arguments: [NativeTunnelLiveness.installed, .unknown])
+  func runSendsTheCommandAtOnceUnlessTheTunnelIsPositivelyAbsent(
+    _ liveness: NativeTunnelLiveness
+  ) async throws {
+    let directory = recoveryTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = UserProductSessionStateStore(directory: directory)
+    let ssh = RunScriptedSSH(execExitCode: 7)
+    try store.save(nativeActiveState(controlPath: ssh.socket, tunnelWatchdog: true))
+    ssh.markAlive(ssh.socket)
+    let events = RunEventLog()
+
+    let result = try await runCurrentMachineUserProductCommand(
+      ["run", "thu21", "--", "hostname"],
+      dependencies: runDependencies(
+        ssh: ssh, store: store, events: events, liveness: { _ in liveness })
+    )
+
+    #expect(result.exitCode == 7)
+    #expect(result.standardError.isEmpty)
+    #expect(ssh.starts == 0)
+    #expect(events.sleeps.isEmpty)
+  }
+
+  @Test func runNeverProbesASessionWhoseOwnerHasNoWatchdog() async throws {
+    let directory = recoveryTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = UserProductSessionStateStore(directory: directory)
+    let ssh = RunScriptedSSH(execExitCode: 0)
+    try store.save(nativeActiveState(controlPath: ssh.socket, tunnelWatchdog: nil))
+    ssh.markAlive(ssh.socket)
+    let probes = RecoveryInvocationCounter()
+
+    let result = try await runCurrentMachineUserProductCommand(
+      ["run", "thu21", "--", "hostname"],
+      dependencies: runDependencies(
+        ssh: ssh, store: store,
+        liveness: { _ in
+          probes.increment()
+          return .absent
+        })
+    )
+
+    #expect(result.exitCode == 0)
+    #expect(probes.value == 0)
+    #expect(ssh.execs.count == 1)
+  }
+
+  @Test func runSendsTheCommandAnywayWhenTheOwnerNeverClosesTheSession() async throws {
+    let directory = recoveryTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = UserProductSessionStateStore(directory: directory)
+    let ssh = RunScriptedSSH(execExitCode: 0)
+    try store.save(nativeActiveState(controlPath: ssh.socket, tunnelWatchdog: true))
+    ssh.markAlive(ssh.socket)
+    let events = RunEventLog()
+
+    let result = try await runCurrentMachineUserProductCommand(
+      ["run", "thu21", "--", "hostname"],
+      dependencies: runDependencies(
+        ssh: ssh, store: store, events: events, liveness: { _ in .absent })
+    )
+
+    // `run` only waits; ending a session stays with its owner.
+    #expect(result.exitCode == 0)
+    #expect(ssh.starts == 0)
+    #expect(ssh.execs.count == 1)
+    #expect(events.sleeps == Array(repeating: 2_000, count: 15))
+  }
+
+  @Test func runRecordsALostNativeSessionInTheAttemptsLog() async throws {
+    let directory = recoveryTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = UserProductSessionStateStore(directory: directory)
+    let ssh = RunScriptedSSH(execExitCode: 255, execKillsMaster: true)
+    try store.save(nativeActiveState(controlPath: ssh.socket, tunnelWatchdog: true))
+    ssh.markAlive(ssh.socket)
+    let notes = RunEventLog()
+
+    let result = try await runCurrentMachineUserProductCommand(
+      ["run", "thu21", "--", "hostname"],
+      dependencies: runDependencies(
+        ssh: ssh, store: store, liveness: { _ in .installed }, attemptNote: notes.record)
+    )
+
+    #expect(result.exitCode == 75)
+    #expect(result.standardError.contains("powervpn run: session_lost"))
+    #expect(notes.all == ["run target=thu21 failed=session_lost ssh_exit=255"])
+  }
 }
 
 /// Scripted `/usr/bin/ssh`: `-G` prints a valid Host block, `-O check` reports sockets marked
@@ -948,6 +1080,7 @@ private final class RunScriptedSSH: UserProductProcessRunning, @unchecked Sendab
   }
 
   func markAlive(_ path: String) { lock.withLock { _ = alive.insert(path) } }
+  func markDead(_ path: String) { lock.withLock { _ = alive.remove(path) } }
   var starts: Int { lock.withLock { startCount } }
   var execs: [[String]] { lock.withLock { execArguments } }
   /// How many master starts got their `-E` log as standard output.
@@ -1033,6 +1166,16 @@ private func activeState(controlPath: String) -> UserProductSessionState {
     phase: .connected, ownerPID: 4321)
 }
 
+private func nativeActiveState(
+  controlPath: String, tunnelWatchdog: Bool?
+) -> UserProductSessionState {
+  var state = UserProductSessionState(
+    sessionID: UUID().uuidString.lowercased(), target: "thu21", controlPath: controlPath,
+    phase: .connected, ownerPID: 4321, backend: .native)
+  state.tunnelWatchdog = tunnelWatchdog
+  return state
+}
+
 private func runDependencies(
   ssh: RunScriptedSSH,
   store: UserProductSessionStateStore = UserProductSessionStateStore(
@@ -1044,7 +1187,9 @@ private func runDependencies(
   recoveryPasses: Bool = true,
   rejection: ProductCleanupRecoveryReport = ProductCleanupRecoveryReport(
     failure: .coldBaselineRejected, source: .nativePortal, mutationLeaseAcquired: true),
-  rejectionsBeforePass: Int? = nil
+  rejectionsBeforePass: Int? = nil,
+  liveness: @escaping @Sendable (String) async -> NativeTunnelLiveness = { _ in .unknown },
+  attemptNote: @escaping @Sendable (String) -> Void = { _ in }
 ) -> UserProductCommandDependencies {
   UserProductCommandDependencies(
     loadConfiguration: recoveryConfiguration,
@@ -1073,7 +1218,9 @@ private func runDependencies(
     },
     signalMonitorFactory: { RecoveryNoopSignalMonitor() },
     sleepMilliseconds: { events.record("sleep:\($0)") },
-    cleanupPollLimit: 1
+    cleanupPollLimit: 1,
+    nativeTunnelLiveness: liveness,
+    nativeAttemptNote: attemptNote
   )
 }
 

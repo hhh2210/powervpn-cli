@@ -20,17 +20,36 @@ final class ProxyTestLease: ProxyTunnelLeasing, @unchecked Sendable {
   private let blocksPostStopDrain: Bool
   private let shutdownStarted = AsyncTestSignal()
   private let shutdownGate = ProxyTestShutdownGate()
+  /// Probe results, repeated in order; nil is a backend without a probe.
+  private let livenessScript: [NativeTunnelLiveness]?
+  private var probes = 0
   private var events: [String] = []
 
   init(
     permitted: Bool = true,
     cleanupVerified: Bool = true,
-    blocksPostStopDrain: Bool = false
+    blocksPostStopDrain: Bool = false,
+    liveness: [NativeTunnelLiveness]? = nil
   ) {
     self.permitted = permitted
     verified = cleanupVerified
     self.blocksPostStopDrain = blocksPostStopDrain
+    livenessScript = liveness
   }
+
+  func liveness() async -> NativeTunnelLiveness? {
+    lock.withLock {
+      guard let livenessScript, !livenessScript.isEmpty else { return nil }
+      defer { probes += 1 }
+      return livenessScript[probes % livenessScript.count]
+    }
+  }
+
+  func tunnelLost(consecutiveAbsent: Int) async {
+    lock.withLock { events.append("lost:\(consecutiveAbsent)") }
+  }
+
+  var probeCount: Int { lock.withLock { probes } }
 
   func permitsIPv4(_ address: UInt32) async -> Bool {
     lock.withLock { events.append("permit:\(address)") }
@@ -122,6 +141,32 @@ final class ProxyTestChildRunner: ProxyChildRunning, @unchecked Sendable {
   var specification: ProxyChildSpecification? { lock.withLock { specifications.last } }
   var readiness: ProxyChildReadiness? { lock.withLock { readinessValues.last } }
 }
+/// A child that runs until the test releases it, or until it is cancelled.
+final class ProxyGatedChildRunner: ProxyChildRunning, @unchecked Sendable {
+  private let lock = NSLock()
+  private var released = false
+  private var cancelled = false
+
+  func run(
+    _: ProxyChildSpecification,
+    readiness _: ProxyChildReadiness,
+    onReady _: @escaping @Sendable () -> Void
+  ) async -> ProxyChildRunResult {
+    while !lock.withLock({ released }) {
+      do {
+        try await Task.sleep(for: .milliseconds(2))
+      } catch {
+        lock.withLock { cancelled = true }
+        return ProxyChildRunResult(outcome: .cancelled, becameReady: false)
+      }
+    }
+    return ProxyChildRunResult(outcome: .exited(0), becameReady: false)
+  }
+
+  func release() { lock.withLock { released = true } }
+  var wasCancelled: Bool { lock.withLock { cancelled } }
+}
+
 final class ProxyCancellationOpenRuntime: @unchecked Sendable {
   private let started = AsyncTestSignal()
   private let failure: ProxyTunnelOpenFailure

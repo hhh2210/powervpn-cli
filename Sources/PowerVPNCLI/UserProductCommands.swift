@@ -75,6 +75,11 @@ struct UserProductCommandDependencies: Sendable {
   /// nil unless a Homebrew keg ships the native payload; false when the root
   /// install no longer matches it (a `brew upgrade` changed the helper/runtime).
   let nativeInstallCurrent: @Sendable () -> Bool?
+  /// One probe of the native session of a target, by a process that does not
+  /// own it.
+  let nativeTunnelLiveness: @Sendable (String) async -> NativeTunnelLiveness
+  /// One line in the native attempts log.
+  let nativeAttemptNote: @Sendable (String) -> Void
 
   init(
     loadConfiguration: @escaping @Sendable () throws -> PowerVPNTargetsConfiguration = {
@@ -148,7 +153,11 @@ struct UserProductCommandDependencies: Sendable {
     },
     nativeInstallCurrent: @escaping @Sendable () -> Bool? = {
       NativeBundledPayload.current?.matchesInstalled()
-    }
+    },
+    nativeTunnelLiveness: @escaping @Sendable (String) async -> NativeTunnelLiveness = {
+      await NativeTunnel.liveness(target: $0)
+    },
+    nativeAttemptNote: @escaping @Sendable (String) -> Void = { NativeAttemptLog.note($0) }
   ) {
     self.loadConfiguration = loadConfiguration
     self.processRunner = processRunner
@@ -179,6 +188,8 @@ struct UserProductCommandDependencies: Sendable {
     self.nativeBackendFailure = nativeBackendFailure
     self.nativeRecoverStale = nativeRecoverStale
     self.nativeInstallCurrent = nativeInstallCurrent
+    self.nativeTunnelLiveness = nativeTunnelLiveness
+    self.nativeAttemptNote = nativeAttemptNote
   }
 
   private static var currentExecutablePath: String {
@@ -506,13 +517,15 @@ func runUserProductUp(
   }
 
   let sessionID = UUID().uuidString.lowercased()
-  let connecting = UserProductSessionState(
+  var connecting = UserProductSessionState(
     sessionID: sessionID,
     target: target.key,
     controlPath: sshConfiguration.controlPath,
     phase: .connecting,
     backend: try dependencies.loadConfiguration().backend
   )
+  // The master's ProxyCommand is this same executable, so it has the watchdog.
+  if connecting.originatingBackend == .native { connecting.tunnelWatchdog = true }
   try dependencies.stateStore.save(connecting)
 
   let diagnosticLog = UserProductSSHDiagnosticPipe.create()
@@ -1136,6 +1149,7 @@ private func userProductProxyFailure(_ raw: String) -> String {
   if raw.contains("resource_not_found") { return "target_resource_unavailable" }
   if raw.contains("cleanup_unproven") { return "cleanup_unproven" }
   if raw.contains("runtime_unavailable") { return "runtime_unavailable" }
+  if raw.contains(proxyTunnelLostToken) { return proxyTunnelLostToken }
   return "connection_failed"
 }
 
@@ -1162,6 +1176,9 @@ private func userProductFailureMessage(
     return "PowerVPN: Portal credentials or target configuration are unavailable."
   case "ssh_master_start_failed":
     return "PowerVPN: the persistent SSH owner could not start."
+  case proxyTunnelLostToken:
+    return
+      "PowerVPN: the tunnel was lost (the native backend restarted or the gateway closed it); the session was closed."
   case "stale_session_cleanup_unverified":
     return
       "PowerVPN: a stale session was quarantined because cleanup is unverified. Run `powervpn recovery inspect --json`."

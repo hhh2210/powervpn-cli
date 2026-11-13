@@ -102,6 +102,7 @@ func runProxySSHCommand(
     ProductM2CleanupBudget.start()
   },
   childRunner: any ProxyChildRunning = FoundationProxyChildRunner(),
+  watchPolicy: ProxyTunnelWatchPolicy = .standard,
   runtime: @escaping ProxyTunnelOpenOperation
 ) async throws -> ProxyCommandResult {
   let invocation = try parseProxySSHInvocation(arguments, resolveTarget: resolveTarget)
@@ -123,6 +124,7 @@ func runProxySSHCommand(
       startupBudget: startupBudgetFactory(),
       cleanupBudgetFactory: cleanupBudgetFactory,
       childRunner: childRunner,
+      watchPolicy: watchPolicy,
       runtime: runtime
     )
   }
@@ -206,6 +208,7 @@ private func performProxySSH(
   startupBudget: ProductM2AbsoluteBudget,
   cleanupBudgetFactory: @escaping @Sendable () -> ProductM2CleanupBudget,
   childRunner: any ProxyChildRunning,
+  watchPolicy: ProxyTunnelWatchPolicy,
   runtime: @escaping ProxyTunnelOpenOperation
 ) async -> ProxyCommandResult {
   let execution = await openAndRun(
@@ -218,17 +221,19 @@ private func performProxySSH(
       return .preChildFailure("target_not_covered", 70)
     }
     guard !Task.isCancelled else { return .cancelled }
-    let result = await childRunner.run(
-      ProxyChildSpecification(
-        executable: "/usr/bin/nc",
-        arguments: [invocation.destinationText, String(invocation.destinationPort)],
-        standardInput: .inherited,
-        standardOutput: .inherited
-      ),
-      readiness: .none,
-      onReady: {}
-    )
-    return .child(result)
+    // ssh only notices a dead tunnel when its TCP times out; watch it here.
+    return await runChildWatchingTunnel(lease: lease, policy: watchPolicy) {
+      await childRunner.run(
+        ProxyChildSpecification(
+          executable: "/usr/bin/nc",
+          arguments: [invocation.destinationText, String(invocation.destinationPort)],
+          standardInput: .inherited,
+          standardOutput: .inherited
+        ),
+        readiness: .none,
+        onReady: {}
+      )
+    }
   }
   return proxyHumanResult(execution: execution)
 }

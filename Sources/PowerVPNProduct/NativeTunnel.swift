@@ -168,6 +168,11 @@ package struct NativeAttemptLog: Sendable {
     attemptID = String(UUID().uuidString.prefix(8)).lowercased()
   }
 
+  /// One line from a process that is not opening a tunnel (`powervpn run`).
+  package static func note(_ message: String, log: NativeRotatingLog? = standard()) {
+    NativeAttemptLog(log).record(message)
+  }
+
   func record(_ message: String) {
     let stamp = ISO8601DateFormatter().string(from: Date())
     log?.append("\(stamp) \(attemptID) " + NativeLogSanitizer.sanitize(message))
@@ -186,13 +191,17 @@ package final class NativeTunnel: @unchecked Sendable {
   private let helper: String
   /// What the running helper reported in `status` before this attempt.
   private let helperCapabilities: Set<String>
+  /// The open attempt's log, so a later loss line carries the same id.
+  private let trail: NativeAttemptLog
+  private let openedAt = ContinuousClock.now
   private let lock = NSLock()
   private var shutdownTask: Task<NativeTunnelCleanupReport, Never>?
   private var mutationRequested = false
 
   init(
     targetIPv4: UInt32, targetHost: String, name: String, lease: AuthenticatedPortalLease,
-    vici: String, helper: String, helperCapabilities: Set<String> = []
+    vici: String, helper: String, helperCapabilities: Set<String> = [],
+    trail: NativeAttemptLog = NativeAttemptLog(nil)
   ) {
     self.targetIPv4 = targetIPv4
     self.targetHost = targetHost
@@ -201,6 +210,7 @@ package final class NativeTunnel: @unchecked Sendable {
     self.vici = vici
     self.helper = helper
     self.helperCapabilities = helperCapabilities
+    self.trail = trail
   }
 
   /// True when the root helper and charon are both up.
@@ -263,7 +273,7 @@ package final class NativeTunnel: @unchecked Sendable {
       }
       let tunnel = NativeTunnel(
         targetIPv4: target.ipv4, targetHost: target.host, name: name, lease: lease,
-        vici: vici, helper: helper, helperCapabilities: backend.capabilities)
+        vici: vici, helper: helper, helperCapabilities: backend.capabilities, trail: trail)
       let current = attempt
       let outcome = await onBlockingThread {
         tunnel.establish(target: target, trail: trail, attempt: current)
@@ -475,14 +485,17 @@ package final class NativeTunnel: @unchecked Sendable {
     return NativeIKESummary.parse(result.events).first { $0.name == name }
   }
 
-  /// True while the IKE SA still carries an installed child.
-  package func isAlive() async -> Bool {
-    await onBlockingThread {
-      guard let session = try? VICISession(socketPath: self.vici, timeoutMilliseconds: 3_000)
-      else { return false }
-      defer { session.close() }
-      return self.summary(session)?.hasInstalledChild == true
-    }
+  /// One probe of this session's IKE SAs (see `NativeTunnelLiveness`).
+  package func liveness() async -> NativeTunnelLiveness {
+    await onBlockingThread { Self.liveness(vici: self.vici) { $0 == self.name } }
+  }
+
+  /// The owner's watchdog confirmed the loss and is about to end the session.
+  package func recordLost(consecutiveAbsent: Int) {
+    let uptime = openedAt.duration(to: .now).components.seconds
+    trail.record(
+      "tunnel_lost reason=ike_sa_absent probes=\(consecutiveAbsent) uptime_s=\(uptime); closing the session"
+    )
   }
 
   /// Removes the route, the SA, the loaded connection and the Portal session.

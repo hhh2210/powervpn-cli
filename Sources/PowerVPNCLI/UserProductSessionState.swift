@@ -35,6 +35,9 @@ struct UserProductSessionState: Codable, Equatable, Sendable {
   var nativeLocalRecoveryVerified: Bool?
   var nativeCleanup: NativeTunnelCleanupReport?
   var nativePortalLogoutAcknowledged: Bool?
+  /// True when the owning proxy ends the session by itself once its tunnel is
+  /// gone. Absent in records written by a version without that watchdog.
+  var tunnelWatchdog: Bool?
 
   init(
     sessionID: String,

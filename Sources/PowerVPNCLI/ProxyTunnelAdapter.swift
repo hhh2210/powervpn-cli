@@ -50,6 +50,15 @@ struct ProxyTunnelShutdown: Equatable, Sendable {
 protocol ProxyTunnelLeasing: Sendable {
   func permitsIPv4(_ address: UInt32) async -> Bool
   func shutdown(budget: ProductM2CleanupBudget) async -> ProxyTunnelShutdown
+  /// One liveness probe; nil when the backend has none, so no watchdog runs.
+  func liveness() async -> NativeTunnelLiveness?
+  /// Called once when the watchdog confirmed the loss, before the child stops.
+  func tunnelLost(consecutiveAbsent: Int) async
+}
+
+extension ProxyTunnelLeasing {
+  func liveness() async -> NativeTunnelLiveness? { nil }
+  func tunnelLost(consecutiveAbsent _: Int) async {}
 }
 
 struct ProxyTunnelOpenFailure: Equatable, Sendable {
@@ -161,6 +170,14 @@ private final class NativeProxyTunnelLease: ProxyTunnelLeasing, @unchecked Senda
 
   func permitsIPv4(_ address: UInt32) async -> Bool {
     address == tunnel.targetIPv4
+  }
+
+  func liveness() async -> NativeTunnelLiveness? {
+    await tunnel.liveness()
+  }
+
+  func tunnelLost(consecutiveAbsent: Int) async {
+    tunnel.recordLost(consecutiveAbsent: consecutiveAbsent)
   }
 
   func shutdown(budget _: ProductM2CleanupBudget) async -> ProxyTunnelShutdown {
