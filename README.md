@@ -203,6 +203,11 @@ PowerVPN 自己出错时，stderr 最后两行固定是 `powervpn run: <原因>`
   `sudo launchctl kickstart -k system/com.hhh2210.powervpn-native` 再重跑。失败消息会带上 charon 自己的报错
   （如 `establishing CHILD_SA 'selected-resource' failed`）和证明原因的那行日志，`recovery inspect --json` 的
   `originalFailureDetail` 里也有。原因分析见 `docs/evidence/native-vip-stale-interface-cache.md`。
+- 隧道在会话存活期间消失（helper 或 charon 重启会删掉 IKE SA，SSH master 进程却还在）：持有隧道的代理进程
+  每 5 秒经 VICI 查一次自己的 IKE SA，连续 3 次确认不存在才结束会话并照常清理，`powervpn status` 随之变为
+  `disconnected`，尝试日志里记一行 `tunnel_lost`。查询失败或超时不算数，不会因此断开正在跑命令的会话。
+  这期间执行 `powervpn run` 会先等旧会话收尾再自动重连（stderr 有一行 `powervpn run: tunnel_lost`）；
+  命令执行到一半隧道才断时仍报 `session_lost`（75），并记入尝试日志。由旧版本 CLI 建立的会话没有这个检查。
 - 日志：`powervpn native log [行数]`（不需要 sudo）列出最近的连接尝试（每个阶段的结果和耗时，
   `~/.local/state/powervpn/native-attempts.log`），以及经 helper 取回的 helper/charon 日志。
   后者存在 root-only 的 `/var/log/powervpn-native/native.log`（按大小轮转，最多约 5 MB），charon 的 IKE、CFG、KNL

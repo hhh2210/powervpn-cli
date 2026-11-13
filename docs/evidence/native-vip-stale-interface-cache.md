@@ -74,9 +74,12 @@
 
 ## 下一次复现时如何确认
 
-在 `powervpn native log 200` 里找同一次尝试的 KNL 行：若 `<VIP> appeared on utunM` 的名字与
-`virtual IP <VIP> did not appear on utunN` 不同，或之前出现 `interface utunN activated` 却没有对应的
-`appeared`，即支持候选一；若看到 `unable to receive from PF_ROUTE event socket`，则支持候选二。
+在 `powervpn native log 200` 里找同一次尝试的 KNL 行，比的是接口名。正常连接在
+`installing new virtual IP <VIP>` 之后只有一行 `interface utunM appeared`（helper 随后记
+`route add <host> -> utunM`），并没有 `<VIP> appeared on utunM` 这一行：2026-11-13 的两次成功连接
+都是如此，所以不要拿那一行当判据。若失败那次 `virtual IP <VIP> did not appear on utunN` 里的 utunN
+与同一次尝试的 `interface utunM appeared` 里的 utunM 不同，或者根本没有对应的 `interface … appeared`，
+即支持候选一；若看到 `unable to receive from PF_ROUTE event socket`，则支持候选二。
 
 ## 待决定的根因修复
 
