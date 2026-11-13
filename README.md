@@ -196,7 +196,16 @@ PowerVPN 自己出错时，stderr 最后两行固定是 `powervpn run: <原因>`
   - `~/.ssh/config` 里写了 `LogLevel QUIET` 时，`powervpn ssh` 不会显示 ssh 的原因；排查期间先改成 `LogLevel ERROR`。
 - 其他 SSH 启动失败仍报 `session_start_failed`（75，第一行是 `SSH master did not start`），可以原样重跑；
   反复出现时用 `powervpn ssh lab-a -- true` 看 ssh 自己怎么说。
-- 日志（需要 sudo 读）：`/var/log/powervpn-native-helper.log`、`/var/log/powervpn-native-charon.log`。
+- `native_local_vip_failed`（77）：charon 没能在本机把隧道的虚拟 IP 装到 utun 上，是本机故障，不是网关拒绝。
+  helper 空闲时会自动重启一次 charon 并重试一次（30 分钟内最多 3 次、两次之间至少 60 秒）；仍失败时按 `next:` 行
+  `sudo launchctl kickstart -k system/com.hhh2210.powervpn-native` 再重跑。失败消息会带上 charon 自己的报错
+  （如 `establishing CHILD_SA 'selected-resource' failed`）和证明原因的那行日志，`recovery inspect --json` 的
+  `originalFailureDetail` 里也有。原因分析见 `docs/evidence/native-vip-stale-interface-cache.md`。
+- 日志：`powervpn native log [行数]`（不需要 sudo）列出最近的连接尝试（每个阶段的结果和耗时，
+  `~/.local/state/powervpn/native-attempts.log`），以及经 helper 取回的 helper/charon 日志。
+  后者存在 root-only 的 `/var/log/powervpn-native/native.log`（按大小轮转，最多约 5 MB），charon 的 IKE、CFG、KNL
+  消息写入前都已脱敏：Portal session id 就是本机的 IKE 身份，所以引号和方括号里的身份、长十六进制和类 token 字符串
+  一律替换成 `<redacted>`。launchd 的 `/var/log/powervpn-native-helper.log` 只剩 helper 无法写入轮转日志时的行。
 - 升级：`brew upgrade powervpn`。只有 helper 或 strongSwan 运行时变了才需要再 sudo 一次；
   `powervpn native status` 或 `powervpn doctor` 会告诉你，并给出要执行的命令。
 - 卸载：`sudo "$(brew --prefix)/bin/powervpn" native uninstall`，再 `brew uninstall powervpn`。
