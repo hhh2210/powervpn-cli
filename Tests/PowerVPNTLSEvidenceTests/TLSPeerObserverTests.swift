@@ -231,10 +231,13 @@ private final class FakeTLSTrustSource: TLSTrustSource, @unchecked Sendable {
     progress.record(.basicCompleted)
   }
 
+  /// Bounded by time, not by a count of yields: on a loaded runner the
+  /// observer task can take longer than a thousand yields to reach `start`.
   func waitUntilStarted() async {
-    for _ in 0..<1_000 {
+    let deadline = ContinuousClock.now + .seconds(5)
+    while ContinuousClock.now < deadline {
       if startCount == 1 { return }
-      await Task.yield()
+      try? await Task.sleep(for: .milliseconds(1))
     }
     Issue.record("fake TLS source did not start")
   }
