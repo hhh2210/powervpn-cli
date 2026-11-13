@@ -667,6 +667,11 @@ import Testing
     process.standardInput = FileHandle.nullDevice
     process.standardOutput = FileHandle(fileDescriptor: pipe.writer, closeOnDealloc: false)
     process.standardError = FileHandle.nullDevice
+    // Not waitUntilExit(): from a cooperative thread it can miss the exit,
+    // which Foundation delivers on a dispatch queue, and park the whole
+    // serial run forever. A handler installed before run() cannot miss it.
+    let exited = AsyncTestSignal()
+    process.terminationHandler = { _ in exited.signal() }
     try process.run()
     // Process leaves the parent's end alone, so `close()` closes it once and nothing else.
     #expect(fcntl(pipe.writer, F_GETFD) != -1)
@@ -675,7 +680,7 @@ import Testing
     }
     #expect(pipe.collectedByteCount > 0, "ssh logged to its standard output")
     pipe.close()
-    process.waitUntilExit()
+    try #require(await exited.wait(timeout: .seconds(30)), "ssh exited")
 
     // Killed by SIGPIPE would be `.uncaughtSignal`; ssh ignores it and fails only on the proxy.
     #expect(process.terminationReason == .exit)
