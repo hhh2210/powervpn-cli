@@ -35,11 +35,13 @@ enum HelperLog {
     return NativeRotatingLog(path: NativeHelperPaths.log)
   }()
 
-  /// `echo` also writes the line to stderr (launchd's file) when the rotated
-  /// log took it, for messages that must survive a broken log directory.
+  /// A helper line the rotated log cannot take goes to stderr (launchd's
+  /// file, 0644); `echo` sends it there as well. charon lines never do: even
+  /// sanitized, they stay in the root-only log or are dropped.
   static func write(_ source: String, _ message: String, echo: Bool = false) {
-    let line = "\(Date().formatted(.iso8601)) [\(source)] " + NativeLogSanitizer.sanitize(message)
-    if file?.append(line) != true || echo {
+    let line = NativeHelperLogFormat.line(source: source, message: message)
+    let stored = file?.append(line) == true
+    if source != "charon", !stored || echo {
       FileHandle.standardError.write(Data((line + "\n").utf8))
     }
   }
@@ -486,15 +488,7 @@ func drainCharonLog(_ descriptor: Int32) {
 func tailLog(lines: Int?, since: Double?) -> [String] {
   let count = min(max(lines ?? 80, 1), NativeHelperRequest.maximumLogLines)
   let all = HelperLog.tail(lines: since == nil ? count : 2_000)
-  guard let since else { return all }
-  let parser = ISO8601DateFormatter()
-  let recent = all.filter { line in
-    guard let stamp = line.split(separator: " ", maxSplits: 1).first,
-      let date = parser.date(from: String(stamp))
-    else { return true }
-    return date.timeIntervalSince1970 >= since.rounded(.down)
-  }
-  return Array(recent.suffix(count))
+  return NativeHelperLogFormat.recent(all, sinceEpoch: since, count: count)
 }
 
 // MARK: control socket

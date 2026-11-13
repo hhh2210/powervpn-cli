@@ -109,4 +109,31 @@ import Testing
     #expect(NativeFailureDetail.parse(token: noisy) == detail)
     #expect(NativeFailureDetail.parse(token: "ssh says :cause=local_virtual_ip:phase=child") == nil)
   }
+
+  /// The self-heal fires only if `log-tail`'s time window returns the line the
+  /// helper wrote and the classifier recognises it: test that chain end to end
+  /// with the helper's own stamp and charon's `NN[GRP] <name|id>` prefix.
+  @Test func helperStampedLinesSurviveTheTailWindowAndClassify() {
+    let attemptStart = Date(timeIntervalSince1970: 1_763_010_600.7)
+    let stale = NativeHelperLogFormat.line(
+      source: "charon", message: "09[IKE] <\(session)|1> scoped Portal VIP preparation failed",
+      at: attemptStart.addingTimeInterval(-120))
+    let fresh = [
+      NativeHelperLogFormat.line(
+        source: "charon",
+        message: "09[KNL] <\(session)|2> virtual IP 1.1.1.122 did not appear on utun11",
+        at: attemptStart.addingTimeInterval(1.2)),
+      NativeHelperLogFormat.line(
+        source: "charon", message: "09[IKE] <\(session)|2> scoped Portal VIP preparation failed",
+        at: attemptStart.addingTimeInterval(1.3)),
+    ]
+    let tail = NativeHelperLogFormat.recent(
+      [stale] + fresh, sinceEpoch: attemptStart.timeIntervalSince1970 - 1, count: 120)
+    #expect(tail == fresh)
+    let detail = NativeFailureClassifier.classify(
+      phase: .child, charonMessage: errmsg, logLines: tail, session: session,
+      elapsedMilliseconds: 1_312)
+    #expect(detail.cause == .localVirtualIP)
+    #expect(detail.evidence == "scoped Portal VIP preparation failed")
+  }
 }
