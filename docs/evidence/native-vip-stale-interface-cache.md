@@ -1,7 +1,9 @@
 # native：长时间运行后 Quick Mode 前的虚拟 IP 准备失败
 
-状态：失败路径已由源码确定；导致缓存失步的具体机制 **未确认**，下面是两个候选。已加可观测的自愈与日志，
-等待下一次复现的 KNL 日志区分它们。
+状态（2026-11-13 晚）：**根因已确认并修复**。是候选一：内核把已销毁 utun 的 ifindex 重新分给另一个名字的
+utun，而 charon 的 kernel-pfroute 在 macOS 上从不删除离开的接口，继续用旧名字。修复是 strongSwan 补丁
+`patches/strongswan-6.0.7/0005-kernel-pfroute-follow-reused-interface-indexes.patch`，证据见文末
+“根因确认与修复”。下面保留当时的分析过程。
 
 ## 现象（2026-11-12/13）
 
@@ -87,7 +89,7 @@
 charon 连续运行约 2 小时 52 分（07:59:46Z 启动）后，同一故障复现，证据支持候选一：
 
 - 至少 5 次连续尝试（10:53:04Z–10:55:37Z）都是同一组日志：`installing new virtual IP <VIP>` 之后是
-  `interface utun11 activated`，约 1 秒后 `virtual IP <VIP> did not appear on utun6`，随后
+  `<VIP> appeared on utun11` 和 `interface utun11 activated`（地址确实到了，但记在旧名字下），约 1 秒后 `virtual IP <VIP> did not appear on utun6`，随后
   `interface utun11 deactivated`。charon 新建的 TUN 叫 utun6，而它缓存里同一 ifindex 的名字还是 utun11
   （上一个会话在 08:00:41Z 用的正是 utun11），所以地址事件记到了旧名字下，等 utun6 的那一方超时。
   期间没有 `unable to receive from PF_ROUTE event socket`。
@@ -98,9 +100,47 @@ charon 连续运行约 2 小时 52 分（07:59:46Z 启动）后，同一故障�
   tunnel for this resource”，也不会请求 `restart-charon`，所以一直失败（`session_start_failed`，75）。
   同一时刻换成本分支的 CLI 就自动恢复了，整次 `run` 用时 8.9 秒。
 
-## 待决定的根因修复
+## 根因确认与修复（2026-11-13 19:42–19:44 CST）
 
-在 kernel-pfroute 上加一个补丁：`process_link()` 找到条目时用 `if_indextoname()` 刷新名字
-（名字变了就记一行 KNL 并按新名字重建），解析不到名字就删掉该条目；`add_ip()` 超时前再按 TUN 名字
-`getifaddrs()` 核对一次。需要新增 patch、重建 runtime、改安装清单哈希，并且只能在 root 安装后验证，
-因此没有放进这个分支。
+### 复现工具
+
+`scripts/native/utun_index_reuse_probe.c`（需 root，不建任何 VPN 连接）按 charon 配置自己 TUN 的方式
+（`IFF_UP|IFF_RUNNING`、MTU 1400、一个 TEST-NET-1 的 /32 地址）先后建两个 utun，各存活约 1 秒，并打印内核
+为这个 ifindex 发出的路由消息。第一个要高单元号（utun100），第二个取最小空闲单元号，和 charon 一样。
+`prime` 只建第一个。
+
+### 证据
+
+1. **内核确实换名重用 ifindex**：三次运行都是 `reused: index 50 was utun100 and became utun6`。
+   每个设备收到的消息相同：`RTM_NEWADDR`、`RTM_ADD`、`RTM_IFINFO flags 0x8051`（up），关闭时
+   `RTM_DELETE`、`RTM_DELADDR`、`RTM_IFINFO flags 0x8050`（down），全部只带序号 50，不带名字。
+2. **旧 charon 用错名字**：安装前对运行中的未打补丁 charon 跑探针，第一个设备明明叫 utun100，charon
+   记的却是 `<addr> appeared on utun6`、`interface utun6 activated`：它缓存里序号 50 还挂着之前会话的
+   utun6，于是把 utun100 的事件全记到 utun6 名下。这就是线上故障的同一机制，只是名字对调。
+3. **打补丁的 charon 名字正确，并删除离开的接口**：安装后同样的探针，charon 记
+   `interface utun100 appeared`，关闭时 `interface utun100 disappeared`；第二个设备是全新的
+   `interface utun6 appeared`、`interface utun6 disappeared`。缓存里不再留下陈旧条目。
+4. **端到端**：`prime` 让 utun100 用掉序号 50 后，立即发起真实连接。会话的 TUN 是 `utun6`，序号正是 50
+   （`netstat -in`：`utun6 <Link#50>`），也就是旧 charon 必然失败的情形。打补丁的 charon 首次尝试即建立
+   （attempt a1154e34：ike 137 ms、child 177 ms，`interface utun6 appeared`、`route add … -> utun6`），
+   整次 `run` 1.65 秒，没有 `native_local_vip_failed`，没有 `restart-charon`。
+
+### 补丁做了什么（只改 `kernel_pfroute_net.c`）
+
+- 收到某序号的 `RTM_IFINFO` 且接口已关闭、`if_indextoname()` 已解析不到时，删除该条目
+  （macOS 没有 `RTM_IFANNOUNCE`，原来没有任何删除路径）。证据 3、4 走的就是这一条。
+- 序号仍在但已属于另一个名字时，按新名字重建条目，记 `interface X disappeared, index N is now Y`；
+  `RTM_NEWADDR` 先于 `RTM_IFINFO` 到达时同样处理。顺带清除声称同一名字的其他陈旧条目。
+- `add_ip()` 等地址超时前，再按 TUN 名字直接核对一次（`virtual IP … found on … after resynchronizing`），
+  防止丢事件时误判失败。
+
+后两条是后备：只有离开消息被错过（例如 PF_ROUTE 缓冲溢出，候选二）时才会走到，这次验证没有触发，
+**未经实测**。CLI 的 `restart-charon` 自愈保留，作为最后一道兜底。
+
+### 部署
+
+新运行时由 `scripts/native/build_runtime.sh` 构建（补丁序列现为 0001–0005），以 runtime archive 方式安装
+（`installed-from` 的 `runtime-archive 215e1572…`）。Homebrew 0.2.2 的 keg 不含这个补丁，因此
+`powervpn doctor` 会继续提示“installed copy differs”；在发布含 0005 的版本之前，**不要**执行它建议的
+`sudo powervpn native install`，那会装回旧运行时。回滚：用 keg 的 `runtime.tar` 重新安装
+（`POWERVPN_NATIVE_RUNTIME_ARCHIVE=…/libexec/powervpn-native/runtime.tar sudo scripts/native/install.sh`）。
