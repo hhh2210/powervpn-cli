@@ -40,7 +40,7 @@ import Testing
     }
   }
 
-  @Test func failsClosedOnDaemonSuccessNoWithoutLeakingErrmsg() throws {
+  @Test func daemonSuccessNoCarriesSanitizedErrmsgButNotInDescription() throws {
     let rejected = VICIMessage(elements: [
       .keyValue("success", "no"),
       .keyValue("errmsg", "synthetic private detail"),
@@ -50,7 +50,7 @@ import Testing
       _ = try VICISession(transport: transport).request(command: "load-conn")
       Issue.record("expected command rejection")
     } catch let error as VICISessionError {
-      #expect(error == .commandFailed("load-conn"))
+      #expect(error == .commandFailed("load-conn", message: "synthetic private detail"))
       #expect(!error.description.contains("synthetic private detail"))
     }
   }
@@ -86,7 +86,7 @@ import Testing
       )
       Issue.record("expected streamed command rejection")
     } catch let error as VICISessionError {
-      #expect(error == .commandFailed("list-conns"))
+      #expect(error == .commandFailed("list-conns", message: "synthetic private detail"))
       #expect(!error.description.contains("synthetic private detail"))
     }
     #expect(transport.sentPayloads.count == 3)

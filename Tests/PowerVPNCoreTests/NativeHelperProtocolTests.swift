@@ -65,4 +65,18 @@ import Testing
         .init(op: .status), socketPath: "/tmp/powervpn-native-test-absent-\(UUID().uuidString)")
     }
   }
+
+  @Test func newOperationsAndFieldsRoundTripAndStayBackwardCompatible() throws {
+    let request = NativeHelperRequest(op: .logTail, lines: 50, sinceEpoch: 1_700_000_000)
+    let encoded = try JSONEncoder().encode(request)
+    #expect(try JSONDecoder().decode(NativeHelperRequest.self, from: encoded) == request)
+    #expect(
+      try JSONDecoder().decode(
+        NativeHelperRequest.self, from: Data(#"{"op":"restart-charon"}"#.utf8)
+      ).op == .restartCharon)
+    // A reply from a helper that predates the new fields still decodes.
+    let old = try JSONDecoder().decode(
+      NativeHelperResponse.self, from: Data(#"{"ok":true,"charonRunning":true,"routes":[]}"#.utf8))
+    #expect(old.capabilities == nil && old.logLines == nil)
+  }
 }

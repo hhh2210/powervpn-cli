@@ -23,26 +23,45 @@ public enum NativeHelperPaths {
   /// The user's VICI endpoint: the helper forwards only allowlisted commands.
   public static let vici = runDirectory + "/vici.sock"
   public static let control = runDirectory + "/control.sock"
+  /// Root-only log directory and the one rotated log (helper + charon lines).
+  public static let logDirectory = "/var/log/powervpn-native"
+  public static let log = logDirectory + "/native.log"
 }
 
 /// One JSON line per connection in each direction. The helper only accepts
-/// these three operations; it never runs a caller-chosen command.
+/// these operations; it never runs a caller-chosen command or path.
 public struct NativeHelperRequest: Codable, Equatable, Sendable {
   public enum Operation: String, Codable, Sendable {
     case status
     case routeAdd = "route-add"
     case routeDelete = "route-delete"
+    /// Recent sanitized log lines (helper and charon), newest last.
+    case logTail = "log-tail"
+    /// Restart charon, only while no session of ours exists.
+    case restartCharon = "restart-charon"
   }
 
   public let op: Operation
   public let ike: String?
   public let host: String?
+  /// log-tail: how many lines (capped by the helper).
+  public let lines: Int?
+  /// log-tail: only lines at or after this Unix time.
+  public let sinceEpoch: Double?
 
-  public init(op: Operation, ike: String? = nil, host: String? = nil) {
+  public init(
+    op: Operation, ike: String? = nil, host: String? = nil, lines: Int? = nil,
+    sinceEpoch: Double? = nil
+  ) {
     self.op = op
     self.ike = ike
     self.host = host
+    self.lines = lines
+    self.sinceEpoch = sinceEpoch
   }
+
+  /// What the helper accepts, so tests and the CLI agree on the ceilings.
+  public static let maximumLogLines = 200
 }
 
 public struct NativeHelperResponse: Codable, Equatable, Sendable {
@@ -52,16 +71,27 @@ public struct NativeHelperResponse: Codable, Equatable, Sendable {
   public let charonRunning: Bool?
   public let interface: String?
   public let routes: [String]?
+  /// log-tail reply: sanitized lines, oldest first.
+  public let logLines: [String]?
+  /// status reply: optional features this helper build understands. Absent on
+  /// a helper that predates them, so a newer CLI can degrade instead of failing.
+  public let capabilities: [String]?
+
+  public static let logTailCapability = "log-tail"
+  public static let restartCharonCapability = "restart-charon"
 
   public init(
     ok: Bool, error: String? = nil, charonRunning: Bool? = nil,
-    interface: String? = nil, routes: [String]? = nil
+    interface: String? = nil, routes: [String]? = nil, logLines: [String]? = nil,
+    capabilities: [String]? = nil
   ) {
     self.ok = ok
     self.error = error
     self.charonRunning = charonRunning
     self.interface = interface
     self.routes = routes
+    self.logLines = logLines
+    self.capabilities = capabilities
   }
 }
 
@@ -74,7 +104,8 @@ public enum NativeHelperClient {
   public static func send(
     _ request: NativeHelperRequest,
     socketPath: String = NativeHelperPaths.control,
-    timeoutSeconds: Int = 10
+    timeoutSeconds: Int = 10,
+    replyLimit: Int = 16_384
   ) throws -> NativeHelperResponse {
     let fd = socket(AF_UNIX, SOCK_STREAM, 0)
     guard fd >= 0 else { throw NativeHelperClientError.unavailable }
@@ -94,7 +125,7 @@ public enum NativeHelperClient {
     var line = try JSONEncoder().encode(request)
     line.append(0x0A)
     guard writeAll(fd, line) else { throw NativeHelperClientError.protocolError }
-    guard let reply = readLine(fd, limit: 16_384, timeoutSeconds: timeoutSeconds),
+    guard let reply = readLine(fd, limit: replyLimit, timeoutSeconds: timeoutSeconds),
       let response = try? JSONDecoder().decode(NativeHelperResponse.self, from: reply)
     else { throw NativeHelperClientError.protocolError }
     return response
