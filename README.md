@@ -17,7 +17,9 @@ powervpn run thu21 -- cmd                       你的用户身份
 powervpn-native-helper                          root LaunchDaemon，安装一次
   ├─ 常驻运行打过补丁的 charon（strongSwan 6.0.7）
   ├─ VICI 代理逐帧检查命令与配置字段；charon 的原始 socket 只供 root 访问
-  └─ 控制接口：查状态、为安装时授权的目标加 /32 路由、删掉它
+  ├─ 控制接口：查状态、为安装时授权的目标加 /32 路由、删掉它、读最近的脱敏日志、
+  │   在没有任何会话时重启 charon（有次数上限）
+  └─ 把 charon 的 IKE/CFG/KNL 日志脱敏后写进 root-only 的轮转日志
 ```
 
 - 默认路由、DNS 和 Surge 都不动，只有你配置的目标 IP 走隧道。
@@ -205,7 +207,8 @@ PowerVPN 自己出错时，stderr 最后两行固定是 `powervpn run: <原因>`
   `~/.local/state/powervpn/native-attempts.log`），以及经 helper 取回的 helper/charon 日志。
   后者存在 root-only 的 `/var/log/powervpn-native/native.log`（按大小轮转，最多约 5 MB），charon 的 IKE、CFG、KNL
   消息写入前都已脱敏：Portal session id 就是本机的 IKE 身份，所以引号和方括号里的身份、长十六进制和类 token 字符串
-  一律替换成 `<redacted>`。launchd 的 `/var/log/powervpn-native-helper.log` 只剩 helper 无法写入轮转日志时的行。
+  一律替换成 `<redacted>`。launchd 的 `/var/log/powervpn-native-helper.log`（所有人可读）只收 helper 自己写不进轮转日志的行和致命错误，
+  从不收 charon 的行。
 - 升级：`brew upgrade powervpn`。只有 helper 或 strongSwan 运行时变了才需要再 sudo 一次；
   `powervpn native status` 或 `powervpn doctor` 会告诉你，并给出要执行的命令。
 - 卸载：`sudo "$(brew --prefix)/bin/powervpn" native uninstall`，再 `brew uninstall powervpn`。

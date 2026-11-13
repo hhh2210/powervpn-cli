@@ -1,6 +1,7 @@
 # native：长时间运行后 Quick Mode 前的虚拟 IP 准备失败
 
-状态：机制为 **最可能、未直接观测**；已加可观测的自愈与日志，等待下一次复现的 KNL 日志确认。
+状态：失败路径已由源码确定；导致缓存失步的具体机制 **未确认**，下面是两个候选。已加可观测的自愈与日志，
+等待下一次复现的 KNL 日志区分它们。
 
 ## 现象（2026-11-12/13）
 
@@ -25,7 +26,7 @@
 事件重新计时）；超时记 `virtual IP %H did not appear on %s`（DBG1 KNL），销毁 TUN，返回 FAILED。
 “utun 存活约 1.3 s”与这个超时一致，不是“地址已被占用”那条分支（那条分支不会建 utun）。
 
-## 最可能的机制：接口缓存只增不减，ifindex 与 utun 名字漂移
+## 候选机制一：接口缓存只增不减，ifindex 与 utun 名字漂移
 
 1. macOS SDK 的 `net/route.h` 没有 `RTM_IFANNOUNCE`，所以 `HAVE_RTM_IFANNOUNCE` 未定义，
    `process_announce()` 被编译掉。已安装的 `libstrongswan-kernel-pfroute.so` 里有
@@ -42,9 +43,16 @@
    把刚学到的 VIP 冲掉；`add_ip()` 就等不到地址。charon 重启时 `init_address_list()` 从
    `getifaddrs()` 按真实名字重建缓存，所以 kickstart 立即见效。
 
-第 1、2 点已核实；第 3 点中“ifindex 被另一个名字复用”和“冲掉 VIP 的那条 RTM_IFINFO”是推断，
-需要 root 才能复现。备选解释：PF_ROUTE socket 在唤醒时溢出（会记
-`unable to receive from PF_ROUTE event socket`），丢失的事件不会补，缓存与内核失步。
+第 1、2 点已核实：离开的接口从不清除，名字与 ifindex 不是一起分配的。第 3 点是推断，需要 root 才能复现，
+而且有反证：上面的空洞没有被后来的 `utun0`（#37）填上，说明内核至少不会把空闲 ifindex 随便分给新接口；
+第 3 点只有在内核回收旧 ifnet（连同它原来的 ifindex）给另一个单元号的 utun 时才成立，这一点没有核实。
+
+## 候选机制二：PF_ROUTE 事件丢失
+
+睡眠唤醒和网络切换时路由消息成批出现，PF_ROUTE socket 接收缓冲溢出时 `receive_events()` 记
+`unable to receive from PF_ROUTE event socket` 并睡 1 s，丢掉的事件不会补发，也没有任何重新同步；
+缓存从此与内核不一致，直到 charon 重启重新 `getifaddrs()`。它能解释“重启即好”，但单靠它不容易解释
+每次新建的 utun 都失败，除非失步落在会被反复用到的条目上。
 
 ## 当时为什么没有日志
 
@@ -68,7 +76,7 @@
 
 在 `powervpn native log 200` 里找同一次尝试的 KNL 行：若 `<VIP> appeared on utunM` 的名字与
 `virtual IP <VIP> did not appear on utunN` 不同，或之前出现 `interface utunN activated` 却没有对应的
-`appeared`，即证实第 3 点；若看到 `unable to receive from PF_ROUTE event socket`，则是备选解释。
+`appeared`，即支持候选一；若看到 `unable to receive from PF_ROUTE event socket`，则支持候选二。
 
 ## 待决定的根因修复
 
