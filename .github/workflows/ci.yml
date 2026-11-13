@@ -2,7 +2,10 @@ name: ci
 
 # The build matrix covers both the advertised minimum toolchain and the
 # current development toolchain. Keep both legs: a current-only green build
-# does not prove source installation on macOS 14.
+# does not prove that Xcode 16.2 still builds the sources. Hosted macOS 14
+# runners were retired on 2026-11-02 (actions/runner-images#13518), so the
+# minimum toolchain runs on macos-15, whose image ships Xcode 16.2; macOS 14
+# itself is no longer covered by CI.
 
 on:
   push:
@@ -45,7 +48,7 @@ jobs:
       matrix:
         include:
           - toolchain: minimum-xcode-16.2
-            runner: macos-14
+            runner: macos-15
             developer-dir: /Applications/Xcode_16.2.app/Contents/Developer
           - toolchain: current-xcode-27
             runner: xcode-27

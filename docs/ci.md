@@ -17,9 +17,11 @@ CI 覆盖四件事：构建与全量测试、格式、密钥扫描、release 构
 | `catalog-replay.yml` | 每次 push（快）+ 每晚 03:17 UTC 顺序矩阵 | catalog 回放套件（`swift test --filter CatalogReplay`） |
 | `tap-sync.yml` | 推稳定 `vX.Y.Z` tag，或手动指定已存在版本 | 解析并证明 exact tag commit，复用完整 CI；仅全绿后打印 tap 手动发版清单 |
 
-构建矩阵同时钉住两个环境：`macos-14` + Xcode 16.2 是 README 宣称的
-最低支持源码安装环境；`xcode-27`（macOS 26 + Xcode 27，Swift 6.4）
-是当前开发工具链。`PortalRequestCancellation` 的成员/局部变量遮蔽已在
+构建矩阵同时钉住两个工具链：Xcode 16.2 是 README 宣称的最低支持源码安装
+工具链，跑在 `macos-15` 上（GitHub 托管的 macOS 14 arm64 runner 已于
+2026-11-02 退役，见 actions/runner-images#13518；macos-15 镜像自带
+`/Applications/Xcode_16.2.app`），因此 macOS 14 这个系统版本本身不再有 CI 覆盖；
+`xcode-27`（macOS 26 + Xcode 27，Swift 6.4）是当前开发工具链。`PortalRequestCancellation` 的成员/局部变量遮蔽已在
 源码修复，不能再用只跑新工具链的绿色结果替代最低支持证明。
 
 - **build-and-test**（minimum Xcode 16.2 + current Xcode 27）：两条 leg 都先
