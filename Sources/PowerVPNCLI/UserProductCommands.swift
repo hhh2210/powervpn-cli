@@ -1006,6 +1006,8 @@ private func runInternalProductProxy(
   let failure =
     result.exitCode == 0 || normalSessionClose
     ? nil : userProductProxyFailure(result.standardError)
+  let failureDetail =
+    failure == nil ? nil : NativeFailureDetail.parse(token: result.standardError)
   if let sessionID {
     _ = try? dependencies.stateStore.update(sessionID: sessionID) { state in
       state.phase = result.exitCode == 0 || normalSessionClose ? .disconnected : .failed
@@ -1017,11 +1019,13 @@ private func runInternalProductProxy(
         state.nativeLocalRecoveryVerified = true
       }
       state.failure = failure
+      state.failureDetail = failureDetail
     }
   }
   return UserProductCommandResult(
     standardOutput: result.standardOutput,
-    standardError: failure.map { userProductFailureMessage($0) + "\n" } ?? "",
+    standardError: failure.map { userProductFailureMessage($0, detail: failureDetail) + "\n" }
+      ?? "",
     exitCode: result.exitCode
   )
 }
@@ -1135,9 +1139,13 @@ private func userProductProxyFailure(_ raw: String) -> String {
   return "connection_failed"
 }
 
-private func userProductFailureMessage(_ failure: String?) -> String {
+private func userProductFailureMessage(
+  _ failure: String?, detail: NativeFailureDetail? = nil
+) -> String {
   if let native = failure.flatMap(NativeTunnelFailure.init(rawValue:)) {
-    return "PowerVPN: native backend: " + nativeFailureDescription(native)
+    let summary = detail?.summary ?? ""
+    return "PowerVPN: native backend: " + nativeFailureDescription(native, detail: detail)
+      + (summary.isEmpty ? "" : " (\(summary))")
   }
   switch failure {
   case "portal_catalog_incomplete":
@@ -1271,20 +1279,37 @@ private func nativeLeftoversFailure() -> UserProductCommandResult {
   )
 }
 
-private func nativeFailureDescription(_ failure: NativeTunnelFailure) -> String {
+func nativeFailureDescription(
+  _ failure: NativeTunnelFailure, detail: NativeFailureDetail? = nil
+) -> String {
   switch failure {
-  case .helperUnavailable: "the root helper is not installed or not running."
-  case .charonUnavailable: "charon is not running."
-  case .targetInvalid: "the target is not configured for a Portal resource."
-  case .portalRejected: "Portal login failed."
-  case .portalUnavailable: "the Portal transport or resource catalog is temporarily unavailable."
-  case .portalConfigurationRejected: "the Portal configuration or TLS trust was rejected."
-  case .cleanupUnproven: "an earlier native session has unverified cleanup."
-  case .resourceUnavailable: "the Portal resource for this target was not found."
-  case .ikeFailed: "IKE negotiation with the gateway failed."
-  case .childFailed: "the gateway did not install the tunnel for this resource."
-  case .routeRejected: "the helper refused to route the target into the tunnel."
-  case .busy: "another session is starting or stopping."
-  case .cancelled: "the session start was cancelled."
+  case .helperUnavailable: return "the root helper is not installed or not running."
+  case .charonUnavailable: return "charon is not running."
+  case .targetInvalid: return "the target is not configured for a Portal resource."
+  case .portalRejected: return "Portal login failed."
+  case .portalUnavailable:
+    return "the Portal transport or resource catalog is temporarily unavailable."
+  case .portalConfigurationRejected: return "the Portal configuration or TLS trust was rejected."
+  case .cleanupUnproven: return "an earlier native session has unverified cleanup."
+  case .resourceUnavailable: return "the Portal resource for this target was not found."
+  case .ikeFailed:
+    switch detail?.cause {
+    case .gatewayRefused?: return "the gateway rejected the IKE negotiation."
+    case .timedOut?: return "the gateway did not answer the IKE negotiation."
+    default: return "IKE negotiation with the gateway failed."
+    }
+  case .childFailed:
+    switch detail?.cause {
+    case .gatewayRefused?: return "the gateway refused to install the tunnel for this resource."
+    case .timedOut?: return "the gateway did not answer the tunnel request in time."
+    default:
+      return "the tunnel (child SA) could not be established; the cause was not identified."
+    }
+  case .localVirtualIPFailed:
+    return
+      "charon could not create the tunnel's virtual IP on this Mac (a local fault, not a gateway refusal)."
+  case .routeRejected: return "the helper refused to route the target into the tunnel."
+  case .busy: return "another session is starting or stopping."
+  case .cancelled: return "the session start was cancelled."
   }
 }

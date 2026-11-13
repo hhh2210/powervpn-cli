@@ -1,4 +1,5 @@
 import Foundation
+import PowerVPNCore
 import PowerVPNPortal
 import PowerVPNProduct
 
@@ -57,6 +58,7 @@ struct ProxyTunnelOpenFailure: Equatable, Sendable {
   var selectionFailureClass: ProductM2SelectionFailureClass? = nil
   var resourceCatalogFailure: ProductResourceCatalogFailure? = nil
   var nativeFailure: NativeTunnelFailure? = nil
+  var nativeDetail: NativeFailureDetail? = nil
   let helperMutationRequested: Bool
   let serverContactRequested: Bool
   let cleanupVerified: Bool
@@ -139,6 +141,7 @@ func nativeOpenFailure(_ report: NativeTunnelOpenFailure) -> ProxyTunnelOpenFail
     failure: !report.cleanupVerified
       ? .cleanupUnproven : (report.failure == .cancelled ? .cancelled : nil),
     nativeFailure: report.failure,
+    nativeDetail: report.detail,
     helperMutationRequested: report.helperMutationRequested,
     serverContactRequested: report.serverContactRequested,
     cleanupVerified: report.cleanupVerified,

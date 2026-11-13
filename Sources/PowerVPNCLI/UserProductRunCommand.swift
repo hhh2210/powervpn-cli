@@ -44,6 +44,8 @@ private let runHumanStartFailures: Set<String> = [
   NativeTunnelFailure.targetInvalid.rawValue,
   NativeTunnelFailure.portalRejected.rawValue,
   NativeTunnelFailure.portalConfigurationRejected.rawValue,
+  // After the helper's own bounded restart-and-retry, only a human can restart it.
+  NativeTunnelFailure.localVirtualIPFailed.rawValue,
 ]
 
 /// `local_safety_check_failed` also names transient states (the vendor helper still exiting, the

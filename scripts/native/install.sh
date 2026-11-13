@@ -125,15 +125,19 @@ charon {
         daemon { default = -1 }
         auth { default = -1 }
     }
+    # charon logs to its stderr; the root helper drains it, sanitizes every line
+    # (the IKE identity is the Portal session id) and writes it to the rotated
+    # /var/log/powervpn-native/native.log. A file logger of charon's own would
+    # be truncated by every restart and would not be rotated. knl shows the
+    # kernel-interface events behind "virtual IP did not appear on utunN".
     filelog {
-        stderr { default = -1 }
-        native {
-            path = /var/log/powervpn-native-charon.log
-            time_format = %F %T
-            append = no
+        stderr {
             default = 0
             ike = 1
             cfg = 1
+            knl = 1
+            ike_name = yes
+            flush_line = yes
         }
     }
     plugins {
@@ -165,6 +169,20 @@ if launchctl print "system/$LABEL" >/dev/null 2>&1; then
 fi
 rm -rf "$HOME_DIR"
 mv "$new_home" "$HOME_DIR"
+
+# The helper writes its sanitized, rotated log into this root-only directory
+# and falls back to launchd's stderr file when the directory is unsafe. An
+# older install had charon write its own, unsanitized file log: remove it.
+LOG_DIR=/var/log/powervpn-native
+rm -f /var/log/powervpn-native-charon.log
+if [ -e "$LOG_DIR" ] || [ -L "$LOG_DIR" ]; then
+	[ -d "$LOG_DIR" ] && [ ! -L "$LOG_DIR" ] || fail "unsafe log directory $LOG_DIR"
+	[ "$(stat -f %u "$LOG_DIR")" = 0 ] || fail "log directory $LOG_DIR not root-owned"
+else
+	mkdir -m 700 "$LOG_DIR"
+fi
+chmod -N "$LOG_DIR"
+chmod 700 "$LOG_DIR"
 
 # A previous installation may have handed this socket to the user. The new
 # daemon creates it root-only; do not leave an old endpoint at activation.
@@ -203,8 +221,8 @@ for _ in $(seq 1 50); do
 		[ "$(stat -f '%u:%Lp' "$RUN_DIR/private/charon.vici" 2>/dev/null || true)" = '0:600' ] && break
 	sleep 0.2
 done
-[ -S "$RUN_DIR/control.sock" ] || fail "helper did not start; see /var/log/powervpn-native-helper.log"
-[ -S "$RUN_DIR/private/charon.vici" ] || fail "charon did not start; see /var/log/powervpn-native-helper.log"
+[ -S "$RUN_DIR/control.sock" ] || fail "helper did not start; see /var/log/powervpn-native/native.log and /var/log/powervpn-native-helper.log"
+[ -S "$RUN_DIR/private/charon.vici" ] || fail "charon did not start; see /var/log/powervpn-native/native.log and /var/log/powervpn-native-helper.log"
 [ -S "$RUN_DIR/vici.sock" ] || fail "VICI broker did not start"
 [ "$(stat -f '%u:%Lp' "$RUN_DIR/private/charon.vici")" = '0:600' ] || fail "unsafe charon socket"
 # The sockets are up within a second, but a helper that dies later (its first
@@ -212,5 +230,5 @@ done
 helper_pid() { launchctl print "system/$LABEL" 2>/dev/null | awk '$1 == "pid" { print $3; exit }'; }
 started=$(helper_pid)
 sleep 6
-[ -n "$started" ] && [ "$(helper_pid)" = "$started" ] || fail "helper exited after start; see /var/log/powervpn-native-helper.log"
+[ -n "$started" ] && [ "$(helper_pid)" = "$started" ] || fail "helper exited after start; see /var/log/powervpn-native/native.log and /var/log/powervpn-native-helper.log"
 echo "install: native backend running ($LABEL)"

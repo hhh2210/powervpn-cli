@@ -8,18 +8,51 @@ import PowerVPNCore
 //   1. keep the patched charon running, with its VICI socket kept root-only;
 //   2. add one host route per tunnel into charon's virtual-IP utun, and take it
 //      away again when asked or when the IKE SA behind it is gone.
-// The control socket accepts status/route-add/route-delete only, from the
-// installing user's uid. It never runs a caller-chosen command or path.
+// The control socket accepts status, route-add, route-delete, log-tail and
+// restart-charon only, from the installing user's uid. It never runs a
+// caller-chosen command or path, and restart-charon refuses while any session of
+// ours exists.
 
 let paths = NativeHelperPaths.self
 
+/// The one durable log: helper lifecycle lines and charon's own IKE/CFG/KNL
+/// output, sanitized, in a root-only directory (0700) and file (0600), rotated
+/// by size. A non-root owner reads it only through the control socket's
+/// `log-tail`. launchd's stderr file keeps what cannot reach this one: a trap
+/// message, or a failure before the log directory exists.
+enum HelperLog {
+  /// nil when the directory fails its checks: a log directory that is not
+  /// root-only would expose charon's lines, so then only stderr is used.
+  /// Initialized (lazily and once) by the first line, which top-level code
+  /// writes after setting the umask.
+  private static let file: NativeRotatingLog? = {
+    let path = NativeHelperPaths.logDirectory
+    if mkdir(path, 0o700) != 0, errno != EEXIST { return nil }
+    var info = stat()
+    guard lstat(path, &info) == 0, info.st_uid == 0, info.st_mode & S_IFMT == S_IFDIR,
+      NativeInstallValidation.hasNoACL(path), chmod(path, 0o700) == 0
+    else { return nil }
+    return NativeRotatingLog(path: NativeHelperPaths.log)
+  }()
+
+  /// `echo` also writes the line to stderr (launchd's file) when the rotated
+  /// log took it, for messages that must survive a broken log directory.
+  static func write(_ source: String, _ message: String, echo: Bool = false) {
+    let line = "\(Date().formatted(.iso8601)) [\(source)] " + NativeLogSanitizer.sanitize(message)
+    if file?.append(line) != true || echo {
+      FileHandle.standardError.write(Data((line + "\n").utf8))
+    }
+  }
+
+  static func tail(lines: Int) -> [String] { file?.tail(lines: lines) ?? [] }
+}
+
 func log(_ message: String) {
-  let line = "\(ISO8601DateFormatter().string(from: Date())) \(message)\n"
-  FileHandle.standardError.write(Data(line.utf8))
+  HelperLog.write("helper", message)
 }
 
 func fail(_ message: String) -> Never {
-  log("fatal: " + message)
+  HelperLog.write("helper", "fatal: " + message, echo: true)
   exit(1)
 }
 
@@ -38,6 +71,12 @@ final class Helper: @unchecked Sendable {
   private var absenceCounts: [String: Int] = [:]
   private var restartDelay: TimeInterval = 1
   private var stopping = false
+  /// Set while a requested restart is in flight, so charonExited neither
+  /// doubles the crash backoff nor waits for it.
+  private var restartRequested = false
+  private var governor = NativeCharonRestartGovernor()
+  /// pid of the charon whose VICI socket was verified and tightened.
+  private var readyPID: pid_t?
 
   init(allowedHosts: Set<String>) {
     self.allowedHosts = allowedHosts
@@ -63,7 +102,11 @@ final class Helper: @unchecked Sendable {
     ]
     process.standardInput = FileHandle.nullDevice
     process.standardOutput = FileHandle.nullDevice
-    process.standardError = FileHandle.nullDevice
+    // charon's own log (IKE, CFG, KNL; see strongswan.conf) is drained here,
+    // sanitized and written to the helper's rotated log. A pipe nobody reads
+    // would stall charon, so the reader runs until EOF.
+    let errors = Pipe()
+    process.standardError = errors
     process.terminationHandler = { [weak self] finished in
       self?.charonExited(finished)
     }
@@ -71,13 +114,27 @@ final class Helper: @unchecked Sendable {
       try process.run()
     } catch {
       lock.unlock()
+      try? errors.fileHandleForWriting.close()
+      try? errors.fileHandleForReading.close()
       log("charon failed to start")
       scheduleRestart()
       return
     }
     charon = process
     lock.unlock()
+    // The child holds the write end now; ours must close for EOF to arrive.
+    try? errors.fileHandleForWriting.close()
     log("charon started pid=\(process.processIdentifier)")
+    // The reader owns a duplicate, so the Pipe object's own close cannot
+    // pull the descriptor out from under it.
+    let reader = dup(errors.fileHandleForReading.fileDescriptor)
+    try? errors.fileHandleForReading.close()
+    if reader >= 0 {
+      Thread.detachNewThread { drainCharonLog(reader) }
+    } else {
+      log("charon log pipe unavailable; stopping charon")
+      process.terminate()
+    }
     DispatchQueue.global().async { [self] in checkVICISocket(process) }
   }
 
@@ -93,7 +150,10 @@ final class Helper: @unchecked Sendable {
           process.terminate()
           return
         }
-        lock.withLock { restartDelay = 1 }
+        lock.withLock {
+          restartDelay = 1
+          readyPID = process.processIdentifier
+        }
         log("vici socket ready")
         return
       }
@@ -105,11 +165,22 @@ final class Helper: @unchecked Sendable {
 
   private func charonExited(_ process: Process) {
     guard lock.withLock({ charon === process }) else { return }
-    log("charon exited status=\(process.terminationStatus)")
+    let requested = lock.withLock { restartRequested }
+    log(
+      "charon exited status=\(process.terminationStatus) reason=\(process.terminationReason == .exit ? "exit" : "signal")"
+        + (requested ? " (restart requested)" : ""))
     // Every owned route pointed into charon's utun, which is gone with it.
     deleteAllRoutes(reason: "charon_exited")
-    lock.withLock { charon = nil }
-    scheduleRestart()
+    lock.withLock {
+      charon = nil
+      readyPID = nil
+      restartRequested = false
+    }
+    if requested {
+      DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { [self] in startCharon() }
+    } else {
+      scheduleRestart()
+    }
   }
 
   private func scheduleRestart() {
@@ -124,6 +195,67 @@ final class Helper: @unchecked Sendable {
   }
 
   var charonRunning: Bool { lock.withLock { charon?.isRunning == true } }
+
+  /// True once the running charon's VICI socket is verified.
+  private var charonReady: Bool {
+    lock.withLock {
+      guard let charon, charon.isRunning else { return false }
+      return readyPID == charon.processIdentifier
+    }
+  }
+
+  /// nil when idleness cannot be proven. Idle means: no route we own, and
+  /// charon holds no IKE SA, connection or key of ours. A restart drops all of
+  /// them, so unreadable state counts as "not provably idle".
+  private func charonIsIdle() -> Bool? {
+    if !routeHosts.isEmpty { return false }
+    guard charonRunning else { return true }
+    guard let session = try? VICISession(socketPath: paths.charonVICI, timeoutMilliseconds: 3_000)
+    else { return nil }
+    defer { session.close() }
+    guard let names = try? nativeSessionNames(session) else { return nil }
+    return names.isEmpty
+  }
+
+  /// Restarts charon on request of the owner, only while idle and within the
+  /// governor's budget. Replies once the new charon's VICI socket is ready, so
+  /// the caller can retry immediately.
+  func restartCharon() -> NativeHelperResponse {
+    let decision = routeLock.withLock { () -> NativeCharonRestartGovernor.Decision in
+      let idle = charonIsIdle()
+      return lock.withLock { governor.request(now: Date(), idle: idle) }
+    }
+    if case .refuse(let reason) = decision {
+      log("restart-charon refused: \(reason.rawValue)")
+      return NativeHelperResponse(ok: false, error: "restart_refused_\(reason.rawValue)")
+    }
+    let process = lock.withLock { () -> Process? in
+      guard !stopping else { return nil }
+      restartRequested = true
+      return charon
+    }
+    log("restart-charon granted (owner request; charon idle)")
+    if let process, process.isRunning {
+      process.terminate()
+      for _ in 0..<100 where process.isRunning { usleep(100_000) }
+      if process.isRunning {
+        kill(process.processIdentifier, SIGKILL)
+        for _ in 0..<30 where process.isRunning { usleep(100_000) }
+      }
+    } else {
+      lock.withLock { restartRequested = false }
+      startCharon()
+    }
+    for _ in 0..<150 {
+      if charonReady {
+        log("restart-charon complete")
+        return NativeHelperResponse(ok: true, charonRunning: true)
+      }
+      usleep(100_000)
+    }
+    log("restart-charon: charon not ready after 15 s")
+    return NativeHelperResponse(ok: false, error: "restart_not_ready")
+  }
 
   func stop() {
     let process = lock.withLock { () -> Process? in
@@ -303,6 +435,68 @@ func utunInterface(holding ipv4: String) -> String? {
   return nil
 }
 
+// MARK: log
+
+/// Reads charon's stderr until EOF (charon exited). Lines are capped, sanitized
+/// and rate-limited so a log flood cannot turn into unbounded disk churn.
+/// read(2), not FileHandle.availableData: that raises an Objective-C exception
+/// on a read error, which would take the root daemon down. If this reader
+/// stopped while charon ran, charon would block on a full pipe.
+func drainCharonLog(_ descriptor: Int32) {
+  var pending = Data()
+  var windowStart = Date()
+  var inWindow = 0
+  var dropped = 0
+  func emit(_ lineData: Data) {
+    let now = Date()
+    if now.timeIntervalSince(windowStart) >= 10 {
+      if dropped > 0 { log("dropped \(dropped) charon log lines (rate limit)") }
+      windowStart = now
+      inWindow = 0
+      dropped = 0
+    }
+    inWindow += 1
+    guard inWindow <= 500 else {
+      dropped += 1
+      return
+    }
+    HelperLog.write("charon", String(decoding: lineData.prefix(2_000), as: UTF8.self))
+  }
+  var buffer = [UInt8](repeating: 0, count: 8_192)
+  while true {
+    let count = buffer.withUnsafeMutableBytes { read(descriptor, $0.baseAddress, $0.count) }
+    if count < 0, errno == EINTR { continue }
+    if count <= 0 { break }
+    pending.append(contentsOf: buffer[0..<count])
+    while let newline = pending.firstIndex(of: 0x0A) {
+      emit(pending[pending.startIndex..<newline])
+      pending.removeSubrange(pending.startIndex...newline)
+    }
+    if pending.count > 8_192 {
+      emit(pending)
+      pending.removeAll()
+    }
+  }
+  if !pending.isEmpty { emit(pending) }
+  close(descriptor)
+}
+
+/// The newest `lines` (default 80, at most 200) lines, optionally only those at
+/// or after `since`. Every stored line was sanitized when written.
+func tailLog(lines: Int?, since: Double?) -> [String] {
+  let count = min(max(lines ?? 80, 1), NativeHelperRequest.maximumLogLines)
+  let all = HelperLog.tail(lines: since == nil ? count : 2_000)
+  guard let since else { return all }
+  let parser = ISO8601DateFormatter()
+  let recent = all.filter { line in
+    guard let stamp = line.split(separator: " ", maxSplits: 1).first,
+      let date = parser.date(from: String(stamp))
+    else { return true }
+    return date.timeIntervalSince1970 >= since.rounded(.down)
+  }
+  return Array(recent.suffix(count))
+}
+
 // MARK: control socket
 
 func serveControl(_ helper: Helper, owner: uid_t) {
@@ -345,7 +539,15 @@ func serveControl(_ helper: Helper, owner: uid_t) {
       switch request.op {
       case .status:
         response = NativeHelperResponse(
-          ok: true, charonRunning: helper.charonRunning, routes: helper.routeHosts)
+          ok: true, charonRunning: helper.charonRunning, routes: helper.routeHosts,
+          capabilities: [
+            NativeHelperResponse.logTailCapability, NativeHelperResponse.restartCharonCapability,
+          ])
+      case .logTail:
+        response = NativeHelperResponse(
+          ok: true, logLines: tailLog(lines: request.lines, since: request.sinceEpoch))
+      case .restartCharon:
+        response = helper.restartCharon()
       case .routeAdd:
         if let ike = request.ike, let host = request.host {
           response = helper.addRoute(ike: ike, host: host)
@@ -399,6 +601,20 @@ func stopStrayCharon() {
   unlink(paths.charonPID)
 }
 
+final class WakeWatcher: @unchecked Sendable {
+  private let lock = NSLock()
+  private var detector = NativeWakeDetector()
+
+  func tick() {
+    let slept = lock.withLock {
+      detector.observe(
+        uptimeNanoseconds: clock_gettime_nsec_np(CLOCK_UPTIME_RAW),
+        continuousNanoseconds: clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW))
+    }
+    if let slept { log("wake detected: the Mac slept about \(Int(slept)) s") }
+  }
+}
+
 /// Top-level code is main-actor isolated, and so is any non-Sendable closure
 /// written in it, such as a dispatch source handler. Run on a global queue,
 /// that closure fails Swift 6's runtime isolation check and traps the daemon,
@@ -425,7 +641,13 @@ func startBackgroundWork(_ helper: Helper, owner: uid_t) -> [any DispatchSourceP
   helper.startCharon()
   let reconcileTimer = DispatchSource.makeTimerSource(queue: .global())
   reconcileTimer.schedule(deadline: .now() + 5, repeating: 5)
-  reconcileTimer.setEventHandler { helper.reconcile() }
+  // Only logged, never acted on: it lets a later failure be correlated with
+  // a sleep/wake that charon's kernel-interface cache may not have survived.
+  let wake = WakeWatcher()
+  reconcileTimer.setEventHandler {
+    helper.reconcile()
+    wake.tick()
+  }
   reconcileTimer.resume()
   sources.append(reconcileTimer)
 
@@ -478,6 +700,7 @@ let owner = uid_t(ownerValue)
 
 // umask applies before charon binds: there is no world-accessible socket window.
 umask(0o077)
+log("helper starting pid=\(getpid()) owner=\(owner)")
 if mkdir(paths.runDirectory, 0o755) != 0, errno != EEXIST { fail("runtime directory") }
 var runInfo = stat()
 guard lstat(paths.runDirectory, &runInfo) == 0, runInfo.st_uid == 0,

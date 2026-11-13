@@ -88,7 +88,9 @@ private func openFailureExecution(_ failure: ProxyTunnelOpenFailure) -> ProxyExe
 }
 
 private func tunnelOpenFailureToken(_ failure: ProxyTunnelOpenFailure) -> String {
-  if let native = failure.nativeFailure { return "tunnel_open_failed:\(native.rawValue)" }
+  if let native = failure.nativeFailure {
+    return "tunnel_open_failed:\(native.rawValue)" + (failure.nativeDetail?.tokenSuffix ?? "")
+  }
   var token = "tunnel_open_failed:\(failure.failure?.rawValue ?? "unclassified")"
   if let firstBadEvent = failure.firstBadEvent {
     token += ":first_bad=\(firstBadEvent.rawValue)"

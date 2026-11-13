@@ -32,4 +32,5 @@ if [ "$status" != 0 ] && [ -e "$pidfile" ]; then
 fi
 rm -f "/Library/LaunchDaemons/$LABEL.plist"
 rm -rf "/Library/PrivilegedHelperTools/$LABEL" /var/run/powervpn-native
+rm -rf /var/log/powervpn-native /var/log/powervpn-native-charon.log
 echo "uninstall: removed $LABEL"

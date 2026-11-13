@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 
+@testable import PowerVPNCLI
 @testable import PowerVPNCore
 @testable import PowerVPNPortal
 @testable import PowerVPNProduct
@@ -111,4 +112,77 @@ private final class NativeInventoryTransport: VICIFrameTransport {
     return VICIReceivedFrame(payload: payload, wireByteCount: payload.count + 4)
   }
   func close() {}
+}
+
+@Suite struct NativeOpenPolicyTests {
+  // MARK: restart / retry decision
+
+  private func step(
+    _ failure: NativeTunnelFailure, attempt: Int = 1, restarted: Bool = false,
+    cleanup: Bool = true, cancelled: Bool = false, canRestart: Bool = true
+  ) -> NativeOpenNextStep {
+    .after(
+      failure: failure, attempt: attempt, attempts: 3, charonRestarted: restarted,
+      cleanupVerified: cleanup, cancelled: cancelled, helperCanRestart: canRestart)
+  }
+
+  @Test func localVirtualIPFailureRestartsCharonExactlyOnce() {
+    #expect(step(.localVirtualIPFailed) == .restartCharonThenRetry)
+    #expect(step(.localVirtualIPFailed, restarted: true) == .stop)
+    #expect(step(.localVirtualIPFailed, canRestart: false) == .stop)
+  }
+
+  @Test func restartNeverHappensOverUnverifiedCleanupOrCancellation() {
+    #expect(step(.localVirtualIPFailed, cleanup: false) == .stop)
+    #expect(step(.localVirtualIPFailed, cancelled: true) == .stop)
+    #expect(step(.resourceUnavailable, cleanup: false) == .stop)
+  }
+
+  @Test func gatewayAndIKEFailuresNeverTriggerARestart() {
+    for failure in [
+      NativeTunnelFailure.childFailed, .ikeFailed, .routeRejected, .portalUnavailable,
+    ] {
+      #expect(step(failure) == .stop)
+    }
+  }
+
+  @Test func resourceCatalogRetryIsBoundedByTheAttemptBudget() {
+    #expect(step(.resourceUnavailable, attempt: 1) == .retryAfterDelay)
+    #expect(step(.resourceUnavailable, attempt: 2) == .retryAfterDelay)
+    #expect(step(.resourceUnavailable, attempt: 3) == .stop)
+  }
+
+  // MARK: user-facing mapping
+
+  @Test func localFailureNoLongerBlamesTheGateway() {
+    let local = nativeFailureDescription(.localVirtualIPFailed)
+    #expect(local.contains("local fault") && !local.contains("gateway did not"))
+    let local2 = NativeTunnelFailure.localVirtualIPFailed
+    #expect(local2.next.contains("kickstart") && local2.next.contains("native log"))
+  }
+
+  @Test func childFailureWordingFollowsPositiveEvidenceOnly() {
+    func described(_ cause: NativeFailureCause?) -> String {
+      nativeFailureDescription(
+        .childFailed,
+        detail: cause.map { NativeFailureDetail(phase: .child, cause: $0) })
+    }
+    #expect(described(.gatewayRefused).contains("gateway refused"))
+    #expect(described(.timedOut).contains("did not answer"))
+    for neutral in [nil, NativeFailureCause.unclassified] {
+      let text = described(neutral)
+      #expect(text.contains("cause was not identified"))
+      #expect(!text.contains("gateway"))
+    }
+  }
+
+  @Test func attemptLogWritesTokensOnlyAndSanitizes() throws {
+    let path = NSTemporaryDirectory() + "attempt-" + UUID().uuidString
+    defer { try? FileManager.default.removeItem(atPath: path) }
+    let log = NativeRotatingLog(path: path)
+    NativeAttemptLog(log).record(
+      "attempt=1 failed=native_child_failed keyid:#3a7f9c0b12de45a8b6c7d8e9")
+    let text = try String(contentsOfFile: path, encoding: .utf8)
+    #expect(text.contains("native_child_failed") && !text.contains("3a7f9c0b12de45a8"))
+  }
 }
