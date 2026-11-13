@@ -15,6 +15,9 @@ package enum NativeTunnelFailure: String, Error, Equatable, Sendable {
   case resourceUnavailable = "native_resource_unavailable"
   case ikeFailed = "native_ike_failed"
   case childFailed = "native_child_failed"
+  /// charon could not create or see the tunnel's virtual IP on the Mac: a local
+  /// fault, not a gateway refusal.
+  case localVirtualIPFailed = "native_local_vip_failed"
   case routeRejected = "native_route_rejected"
   case busy = "native_session_busy"
   case cancelled = "native_cancelled"
@@ -29,8 +32,10 @@ package enum NativeTunnelFailure: String, Error, Equatable, Sendable {
     case .cleanupUnproven: "powervpn down (inspect local recovery and Portal cleanup separately)"
     case .resourceUnavailable:
       "make `resource` in targets.json match the Portal resource name exactly"
+    case .localVirtualIPFailed:
+      "sudo launchctl kickstart -k system/\(NativeHelperPaths.label), then retry (evidence: powervpn native log)"
     case .portalUnavailable, .ikeFailed, .childFailed, .routeRejected, .busy, .cancelled:
-      "retry the same command"
+      "retry the same command (if it repeats: powervpn native log)"
     }
   }
 
@@ -80,12 +85,15 @@ package struct NativeTunnelOpenFailure: Error, Equatable, Sendable {
   package var serverContactRequested = false
   package var cleanupVerified = true
   package var cleanupReport: NativeTunnelCleanupReport? = nil
+  /// Why the step failed, when charon or its log said so.
+  package var detail: NativeFailureDetail? = nil
 
   package init(
     failure: NativeTunnelFailure, helperMutationRequested: Bool = false,
     serverContactRequested: Bool = false, cleanupVerified: Bool = true,
-    cleanupReport: NativeTunnelCleanupReport? = nil
+    cleanupReport: NativeTunnelCleanupReport? = nil, detail: NativeFailureDetail? = nil
   ) {
+    self.detail = detail
     self.failure = failure
     self.helperMutationRequested = helperMutationRequested
     self.serverContactRequested = serverContactRequested
@@ -112,6 +120,65 @@ package struct NativeTunnelOpenFailure: Error, Equatable, Sendable {
   }
 }
 
+/// What `open` does after a failed attempt. Pure, so the retry and restart
+/// rules are tested without a helper.
+package enum NativeOpenNextStep: Equatable, Sendable {
+  case stop
+  /// Fresh Portal login after a short delay (the catalog intermittently lacks
+  /// the resource).
+  case retryAfterDelay
+  /// Ask the helper to restart charon, then one fresh attempt.
+  case restartCharonThenRetry
+
+  package static func after(
+    failure: NativeTunnelFailure, attempt: Int, attempts: Int, charonRestarted: Bool,
+    cleanupVerified: Bool, cancelled: Bool, helperCanRestart: Bool
+  ) -> Self {
+    // An unverified cleanup must reach the recovery path untouched, and a
+    // restart would also destroy the evidence it needs.
+    guard cleanupVerified, !cancelled else { return .stop }
+    switch failure {
+    case .localVirtualIPFailed:
+      return !charonRestarted && helperCanRestart ? .restartCharonThenRetry : .stop
+    case .resourceUnavailable:
+      return attempt < attempts ? .retryAfterDelay : .stop
+    default:
+      return .stop
+    }
+  }
+}
+
+/// Per-attempt phase outcomes and timings, one sanitized line each, in the
+/// user's own 0600 state directory. Only tokens and numbers are written, never
+/// Portal or credential material.
+package struct NativeAttemptLog: Sendable {
+  let log: NativeRotatingLog?
+  let attemptID: String
+
+  package static var standardPath: String {
+    NSHomeDirectory() + "/.local/state/powervpn/native-attempts.log"
+  }
+
+  package static func standard() -> NativeRotatingLog {
+    NativeRotatingLog(path: standardPath, maximumBytes: 262_144, keep: 2)
+  }
+
+  init(_ log: NativeRotatingLog?) {
+    self.log = log
+    attemptID = String(UUID().uuidString.prefix(8)).lowercased()
+  }
+
+  /// One line from a process that is not opening a tunnel (`powervpn run`).
+  package static func note(_ message: String, log: NativeRotatingLog? = standard()) {
+    NativeAttemptLog(log).record(message)
+  }
+
+  func record(_ message: String) {
+    let stamp = ISO8601DateFormatter().string(from: Date())
+    log?.append("\(stamp) \(attemptID) " + NativeLogSanitizer.sanitize(message))
+  }
+}
+
 /// Everything one native session owns, so shutdown can remove exactly that.
 package final class NativeTunnel: @unchecked Sendable {
   package static let namePrefix = "powervpn-"
@@ -122,13 +189,19 @@ package final class NativeTunnel: @unchecked Sendable {
   private let lease: AuthenticatedPortalLease
   private let vici: String
   private let helper: String
+  /// What the running helper reported in `status` before this attempt.
+  private let helperCapabilities: Set<String>
+  /// The open attempt's log, so a later loss line carries the same id.
+  private let trail: NativeAttemptLog
+  private let openedAt = ContinuousClock.now
   private let lock = NSLock()
   private var shutdownTask: Task<NativeTunnelCleanupReport, Never>?
   private var mutationRequested = false
 
   init(
     targetIPv4: UInt32, targetHost: String, name: String, lease: AuthenticatedPortalLease,
-    vici: String, helper: String
+    vici: String, helper: String, helperCapabilities: Set<String> = [],
+    trail: NativeAttemptLog = NativeAttemptLog(nil)
   ) {
     self.targetIPv4 = targetIPv4
     self.targetHost = targetHost
@@ -136,25 +209,41 @@ package final class NativeTunnel: @unchecked Sendable {
     self.lease = lease
     self.vici = vici
     self.helper = helper
+    self.helperCapabilities = helperCapabilities
+    self.trail = trail
   }
 
   /// True when the root helper and charon are both up.
   package static func backendAvailable(
     helper: String = NativeHelperPaths.control
   ) -> NativeTunnelFailure? {
+    probeBackend(helper: helper).failure
+  }
+
+  /// One `status` round trip: whether the backend is up, and the optional
+  /// features the helper understands (none on a helper that predates them).
+  static func probeBackend(helper: String) -> (
+    failure: NativeTunnelFailure?, capabilities: Set<String>
+  ) {
     guard let status = try? NativeHelperClient.send(.init(op: .status), socketPath: helper),
       status.ok
-    else { return .helperUnavailable }
-    return status.charonRunning == true ? nil : .charonUnavailable
+    else { return (.helperUnavailable, []) }
+    return (status.charonRunning == true ? nil : .charonUnavailable, Set(status.capabilities ?? []))
   }
 
   package static func open(
     configuration: PowerVPNTargetsConfiguration,
     targetKey: String,
     vici: String = NativeHelperPaths.vici,
-    helper: String = NativeHelperPaths.control
+    helper: String = NativeHelperPaths.control,
+    attemptLog: NativeRotatingLog? = NativeAttemptLog.standard()
   ) async -> Result<NativeTunnel, NativeTunnelOpenFailure> {
-    if let failure = backendAvailable(helper: helper) { return .failure(.init(failure: failure)) }
+    let trail = NativeAttemptLog(attemptLog)
+    let backend = await onBlockingThread { probeBackend(helper: helper) }
+    if let failure = backend.failure {
+      trail.record("open target=\(targetKey) backend=\(failure.rawValue)")
+      return .failure(.init(failure: failure))
+    }
     guard let target = try? configuration.target(named: targetKey),
       target.resourceDisplayName != nil
     else { return .failure(.init(failure: .targetInvalid)) }
@@ -164,53 +253,155 @@ package final class NativeTunnel: @unchecked Sendable {
     // standalone proxy must not silently erase that owner's cleanup evidence.
     let empty = await onBlockingThread { localStateIsEmpty(vici: vici, helper: helper) }
     guard empty else {
+      trail.record("open target=\(targetKey) leftovers=present")
       return .failure(.init(failure: .cleanupUnproven, cleanupVerified: false))
     }
     if Task.isCancelled { return .failure(.init(failure: .cancelled)) }
 
-    // The Portal resource catalog intermittently comes back without the
-    // selected resource; a fresh login usually returns it.
-    for attempt in 1...portalAttempts {
+    var attempt = 1
+    var charonRestarted = false
+    var restartNote: String?
+    while true {
+      // The Portal resource catalog intermittently comes back without the
+      // selected resource; a fresh login usually returns it.
       let lease: AuthenticatedPortalLease
       switch await PortalLoginRuntime.acquire(configuration: configuration) {
       case .acquired(let acquired): lease = acquired
       case .rejected(let report):
+        trail.record("attempt=\(attempt) portal=rejected")
         return .failure(.init(portal: report))
       }
       let tunnel = NativeTunnel(
         targetIPv4: target.ipv4, targetHost: target.host, name: name, lease: lease,
-        vici: vici, helper: helper)
-      let established = await onBlockingThread { tunnel.establish(target: target) }
-      if established == nil, !Task.isCancelled { return .success(tunnel) }
+        vici: vici, helper: helper, helperCapabilities: backend.capabilities, trail: trail)
+      let current = attempt
+      let outcome = await onBlockingThread {
+        tunnel.establish(target: target, trail: trail, attempt: current)
+      }
+      if outcome == nil, !Task.isCancelled {
+        trail.record("attempt=\(attempt) established")
+        return .success(tunnel)
+      }
       let cleanup = await tunnel.shutdownReport()
-      let failure: NativeTunnelFailure = Task.isCancelled ? .cancelled : (established ?? .cancelled)
-      guard cleanup.cleanupVerified else {
+      let failure: NativeTunnelFailure =
+        Task.isCancelled ? .cancelled : (outcome?.failure ?? .cancelled)
+      var detail = outcome?.detail
+      if let restartNote { detail?.selfHeal = restartNote }
+      trail.record(
+        "attempt=\(attempt) failed=\(failure.rawValue) cleanup=\(cleanup.cleanupVerified)"
+          + (detail.map { " " + $0.summary } ?? ""))
+      let canRestart = backend.capabilities.contains(NativeHelperResponse.restartCharonCapability)
+      let step = NativeOpenNextStep.after(
+        failure: failure, attempt: attempt, attempts: portalAttempts,
+        charonRestarted: charonRestarted, cleanupVerified: cleanup.cleanupVerified,
+        cancelled: Task.isCancelled, helperCanRestart: canRestart)
+      switch step {
+      case .stop:
+        if failure == .localVirtualIPFailed, !charonRestarted {
+          detail?.selfHeal = canRestart ? "not_attempted" : "helper_without_restart"
+        }
         return .failure(
           .init(
             failure: failure, helperMutationRequested: tunnel.mutationRequested,
-            serverContactRequested: true, cleanupVerified: false, cleanupReport: cleanup))
-      }
-      if failure != .resourceUnavailable || attempt == portalAttempts {
-        return .failure(
-          .init(
-            failure: failure, helperMutationRequested: tunnel.mutationRequested,
-            serverContactRequested: true, cleanupVerified: true))
-      }
-      try? await Task.sleep(for: .seconds(2))
-      if Task.isCancelled {
-        return .failure(.init(failure: .cancelled, serverContactRequested: true))
+            serverContactRequested: true, cleanupVerified: cleanup.cleanupVerified,
+            cleanupReport: cleanup.cleanupVerified ? nil : cleanup, detail: detail))
+      case .retryAfterDelay:
+        try? await Task.sleep(for: .seconds(2))
+        if Task.isCancelled {
+          return .failure(.init(failure: .cancelled, serverContactRequested: true))
+        }
+        attempt += 1
+      case .restartCharonThenRetry:
+        let reply = await onBlockingThread {
+          try? NativeHelperClient.send(
+            .init(op: .restartCharon), socketPath: helper, timeoutSeconds: 30)
+        }
+        charonRestarted = true
+        if reply?.ok == true {
+          restartNote = "restarted_retry_failed"
+          trail.record("attempt=\(attempt) charon restarted by helper; retrying once")
+          try? await Task.sleep(for: .seconds(1))
+        } else {
+          let why = (reply?.error ?? "helper_unreachable")
+            .replacingOccurrences(of: "restart_refused_", with: "")
+          trail.record("attempt=\(attempt) charon restart refused: \(why)")
+          detail?.selfHeal = "refused:" + why
+          return .failure(
+            .init(
+              failure: failure, helperMutationRequested: tunnel.mutationRequested,
+              serverContactRequested: true, cleanupVerified: true, detail: detail))
+        }
+        if Task.isCancelled {
+          return .failure(.init(failure: .cancelled, serverContactRequested: true))
+        }
       }
     }
-    return .failure(.init(failure: .resourceUnavailable, serverContactRequested: true))
   }
 
   private static let portalAttempts = 3
 
-  private func establish(target: PowerVPNTargetConfiguration) -> NativeTunnelFailure? {
+  package struct EstablishFailure: Equatable, Sendable {
+    package let failure: NativeTunnelFailure
+    package let detail: NativeFailureDetail?
+  }
+
+  private static func milliseconds(since start: ContinuousClock.Instant) -> Int {
+    let parts = start.duration(to: .now).components
+    return Int(parts.seconds * 1_000 + parts.attoseconds / 1_000_000_000_000_000)
+  }
+
+  /// charon's `errmsg` plus the helper's captured charon log lines for this
+  /// attempt, classified on positive evidence only. The broker forces
+  /// `loglevel=-1` on every initiate, so the log lines are the only source of
+  /// the distinguishing detail; a helper without `log-tail` degrades to
+  /// `unclassified` with the errmsg and the timing.
+  private func analyze(
+    phase: NativeFailurePhase, error: Error?, attemptStart: Date, startedAt: ContinuousClock.Instant
+  ) -> NativeFailureDetail {
+    var message: String?
+    if case VICISessionError.commandFailed(_, let text)? = error { message = text }
+    let elapsed = Self.milliseconds(since: startedAt)
+    func classify(_ lines: [String]) -> NativeFailureDetail {
+      NativeFailureClassifier.classify(
+        phase: phase, charonMessage: message, logLines: lines, session: name,
+        elapsedMilliseconds: elapsed)
+    }
+    guard helperCapabilities.contains(NativeHelperResponse.logTailCapability) else {
+      return classify([])
+    }
+    var detail = classify([])
+    // charon logs before it answers VICI, but the helper reads its pipe
+    // asynchronously: look twice, briefly.
+    for delay: useconds_t in [150_000, 400_000] {
+      usleep(delay)
+      if let reply = try? NativeHelperClient.send(
+        .init(op: .logTail, lines: 120, sinceEpoch: attemptStart.timeIntervalSince1970 - 1),
+        socketPath: helper, timeoutSeconds: 10, replyLimit: 131_072),
+        reply.ok
+      {
+        detail = classify(reply.logLines ?? [])
+      }
+      if detail.cause != .unclassified { break }
+    }
+    return detail
+  }
+
+  private func establish(
+    target: PowerVPNTargetConfiguration, trail: NativeAttemptLog, attempt: Int
+  ) -> EstablishFailure? {
+    let attemptStart = Date()
     guard let session = try? VICISession(socketPath: vici, timeoutMilliseconds: 25_000) else {
-      return .charonUnavailable
+      trail.record("attempt=\(attempt) vici=unavailable")
+      return .init(failure: .charonUnavailable, detail: nil)
     }
     defer { session.close() }
+    var clock = ContinuousClock.now
+    func phase(_ label: String, _ outcome: String) {
+      trail.record(
+        "attempt=\(attempt) phase=\(label) outcome=\(outcome) ms=\(Self.milliseconds(since: clock))"
+      )
+      clock = .now
+    }
     do {
       try NativeTrialPortalBridge.withRequests(
         snapshot: lease.snapshot, target: target, name: name, includePrivateRule: true
@@ -220,21 +411,42 @@ package final class NativeTunnel: @unchecked Sendable {
         _ = try session.request(command: "load-shared", message: shared)
         _ = try session.request(command: "load-conn", message: connection)
       }
+      phase("load", "ok")
     } catch is NativeTrialPortalBridge.Failure {
-      return .resourceUnavailable
+      phase("load", "resource_unavailable")
+      return .init(failure: .resourceUnavailable, detail: nil)
     } catch is NativeTrialMaterial.Failure {
-      return .resourceUnavailable
+      phase("load", "resource_unavailable")
+      return .init(failure: .resourceUnavailable, detail: nil)
     } catch {
-      return .ikeFailed
+      phase("load", "failed")
+      let started = clock
+      return .init(
+        failure: .ikeFailed,
+        detail: analyze(phase: .ike, error: error, attemptStart: attemptStart, startedAt: started))
     }
+    let ikeStart = clock
     do {
       _ = try session.streamedRequest(
         command: "initiate", event: "control-log",
         message: VICIMessage(elements: [
           .keyValue("ike", name), .keyValue("timeout", "15000"), .keyValue("loglevel", "-1"),
         ]))
-    } catch { return .ikeFailed }
-    guard let ike = summary(session), ike.state == "ESTABLISHED" else { return .ikeFailed }
+    } catch {
+      phase("ike", "failed")
+      return .init(
+        failure: .ikeFailed,
+        detail: analyze(phase: .ike, error: error, attemptStart: attemptStart, startedAt: ikeStart))
+    }
+    guard let ike = summary(session), ike.state == "ESTABLISHED" else {
+      phase("ike", "not_established")
+      return .init(
+        failure: .ikeFailed,
+        detail: analyze(phase: .ike, error: nil, attemptStart: attemptStart, startedAt: ikeStart))
+    }
+    phase("ike", "established")
+    let childStart = clock
+    var childError: Error?
     do {
       _ = try session.streamedRequest(
         command: "initiate", event: "control-log",
@@ -242,13 +454,25 @@ package final class NativeTunnel: @unchecked Sendable {
           .keyValue("ike", name), .keyValue("child", NativeTrialMaterial.childName),
           .keyValue("timeout", "15000"), .keyValue("loglevel", "-1"),
         ]))
-    } catch { return .childFailed }
-    guard summary(session)?.hasInstalledChild == true else { return .childFailed }
+    } catch { childError = error }
+    if childError != nil || summary(session)?.hasInstalledChild != true {
+      phase("child", "failed")
+      let detail = analyze(
+        phase: .child, error: childError, attemptStart: attemptStart, startedAt: childStart)
+      return .init(
+        failure: detail.cause == .localVirtualIP ? .localVirtualIPFailed : .childFailed,
+        detail: detail)
+    }
+    phase("child", "installed")
     guard
       let routed = try? NativeHelperClient.send(
         .init(op: .routeAdd, ike: name, host: targetHost), socketPath: helper),
       routed.ok
-    else { return .routeRejected }
+    else {
+      phase("route", "rejected")
+      return .init(failure: .routeRejected, detail: nil)
+    }
+    phase("route", "added")
     return nil
   }
 
@@ -261,14 +485,17 @@ package final class NativeTunnel: @unchecked Sendable {
     return NativeIKESummary.parse(result.events).first { $0.name == name }
   }
 
-  /// True while the IKE SA still carries an installed child.
-  package func isAlive() async -> Bool {
-    await onBlockingThread {
-      guard let session = try? VICISession(socketPath: self.vici, timeoutMilliseconds: 3_000)
-      else { return false }
-      defer { session.close() }
-      return self.summary(session)?.hasInstalledChild == true
-    }
+  /// One probe of this session's IKE SAs (see `NativeTunnelLiveness`).
+  package func liveness() async -> NativeTunnelLiveness {
+    await onBlockingThread { Self.liveness(vici: self.vici) { $0 == self.name } }
+  }
+
+  /// The owner's watchdog confirmed the loss and is about to end the session.
+  package func recordLost(consecutiveAbsent: Int) {
+    let uptime = openedAt.duration(to: .now).components.seconds
+    trail.record(
+      "tunnel_lost reason=ike_sa_absent probes=\(consecutiveAbsent) uptime_s=\(uptime); closing the session"
+    )
   }
 
   /// Removes the route, the SA, the loaded connection and the Portal session.
@@ -356,23 +583,6 @@ private func removeSession(name: String, vici: String) -> Bool {
   // Check all three object types, even when an unload response was lost.
   guard let remaining = try? nativeSessionNames(session) else { return false }
   return !remaining.contains(name)
-}
-
-func nativeSessionNames(_ session: VICISession) throws -> Set<String> {
-  var names = Set<String>()
-  let sas = try session.streamedRequest(command: "list-sas", event: "list-sa")
-  for ike in NativeIKESummary.parse(sas.events) { names.insert(ike.name) }
-  for (command, key) in [("get-conns", "conns"), ("get-shared", "keys")] {
-    let result = try session.request(command: command)
-    guard
-      let element = result.message.elements.first(where: {
-        if case .list(key, _) = $0 { return true }
-        return false
-      }), case .list(_, let values) = element
-    else { throw VICISessionError.commandFailed(command) }
-    for value in values { names.insert(String(decoding: value, as: UTF8.self)) }
-  }
-  return names
 }
 
 private func localStateIsEmpty(vici: String, helper: String) -> Bool {

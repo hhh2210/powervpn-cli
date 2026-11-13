@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import PowerVPNCore
 import PowerVPNPortal
 import PowerVPNProduct
 
@@ -23,6 +24,9 @@ struct UserProductSessionState: Codable, Equatable, Sendable {
   var ownerPID: Int?
   var cleanupVerified: Bool?
   var failure: String?
+  /// Why a native step failed (charon's message, the proving log line, timing).
+  /// Value-free and sanitized; absent in records written by older versions.
+  var failureDetail: NativeFailureDetail?
   var originalCleanupReceipt: UserProductOriginalCleanupReceipt?
   var recoveryReceipt: UserProductRecoveryReceipt?
   /// Missing in legacy records: those belong to the vendor backend. Never
@@ -31,6 +35,9 @@ struct UserProductSessionState: Codable, Equatable, Sendable {
   var nativeLocalRecoveryVerified: Bool?
   var nativeCleanup: NativeTunnelCleanupReport?
   var nativePortalLogoutAcknowledged: Bool?
+  /// True when the owning proxy ends the session by itself once its tunnel is
+  /// gone. Absent in records written by a version without that watchdog.
+  var tunnelWatchdog: Bool?
 
   init(
     sessionID: String,
@@ -73,6 +80,7 @@ struct UserProductSessionState: Codable, Equatable, Sendable {
       && !controlPath.contains("\0")
       && !controlPath.contains("\n")
       && (ownerPID.map { $0 > 0 } ?? true)
+      && (failureDetail?.valid ?? true)
       && (originalCleanupReceipt?.valid ?? true)
       && (originalCleanupReceipt?.cleanupVerified == cleanupVerified
         || originalCleanupReceipt == nil)

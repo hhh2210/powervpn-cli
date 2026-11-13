@@ -1,4 +1,5 @@
 import Foundation
+import PowerVPNCore
 import PowerVPNPortal
 import PowerVPNProduct
 
@@ -49,6 +50,15 @@ struct ProxyTunnelShutdown: Equatable, Sendable {
 protocol ProxyTunnelLeasing: Sendable {
   func permitsIPv4(_ address: UInt32) async -> Bool
   func shutdown(budget: ProductM2CleanupBudget) async -> ProxyTunnelShutdown
+  /// One liveness probe; nil when the backend has none, so no watchdog runs.
+  func liveness() async -> NativeTunnelLiveness?
+  /// Called once when the watchdog confirmed the loss, before the child stops.
+  func tunnelLost(consecutiveAbsent: Int) async
+}
+
+extension ProxyTunnelLeasing {
+  func liveness() async -> NativeTunnelLiveness? { nil }
+  func tunnelLost(consecutiveAbsent _: Int) async {}
 }
 
 struct ProxyTunnelOpenFailure: Equatable, Sendable {
@@ -57,6 +67,7 @@ struct ProxyTunnelOpenFailure: Equatable, Sendable {
   var selectionFailureClass: ProductM2SelectionFailureClass? = nil
   var resourceCatalogFailure: ProductResourceCatalogFailure? = nil
   var nativeFailure: NativeTunnelFailure? = nil
+  var nativeDetail: NativeFailureDetail? = nil
   let helperMutationRequested: Bool
   let serverContactRequested: Bool
   let cleanupVerified: Bool
@@ -139,6 +150,7 @@ func nativeOpenFailure(_ report: NativeTunnelOpenFailure) -> ProxyTunnelOpenFail
     failure: !report.cleanupVerified
       ? .cleanupUnproven : (report.failure == .cancelled ? .cancelled : nil),
     nativeFailure: report.failure,
+    nativeDetail: report.detail,
     helperMutationRequested: report.helperMutationRequested,
     serverContactRequested: report.serverContactRequested,
     cleanupVerified: report.cleanupVerified,
@@ -158,6 +170,14 @@ private final class NativeProxyTunnelLease: ProxyTunnelLeasing, @unchecked Senda
 
   func permitsIPv4(_ address: UInt32) async -> Bool {
     address == tunnel.targetIPv4
+  }
+
+  func liveness() async -> NativeTunnelLiveness? {
+    await tunnel.liveness()
+  }
+
+  func tunnelLost(consecutiveAbsent: Int) async {
+    tunnel.recordLost(consecutiveAbsent: consecutiveAbsent)
   }
 
   func shutdown(budget _: ProductM2CleanupBudget) async -> ProxyTunnelShutdown {

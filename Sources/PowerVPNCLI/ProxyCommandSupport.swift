@@ -24,6 +24,8 @@ enum ProxyExecution: Sendable {
 enum ProxyLeaseOperationResult: Sendable {
   case child(ProxyChildRunResult)
   case preChildFailure(String, Int32)
+  /// The watchdog confirmed that the tunnel is gone and stopped the child.
+  case tunnelLost
   case cancelled
 }
 
@@ -88,7 +90,9 @@ private func openFailureExecution(_ failure: ProxyTunnelOpenFailure) -> ProxyExe
 }
 
 private func tunnelOpenFailureToken(_ failure: ProxyTunnelOpenFailure) -> String {
-  if let native = failure.nativeFailure { return "tunnel_open_failed:\(native.rawValue)" }
+  if let native = failure.nativeFailure {
+    return "tunnel_open_failed:\(native.rawValue)" + (failure.nativeDetail?.tokenSuffix ?? "")
+  }
   var token = "tunnel_open_failed:\(failure.failure?.rawValue ?? "unclassified")"
   if let firstBadEvent = failure.firstBadEvent {
     token += ":first_bad=\(firstBadEvent.rawValue)"
@@ -139,6 +143,17 @@ private func runOpenedLease(
     return .failure(
       token: "cancelled",
       exitCode: 130,
+      runtimeInvoked: true,
+      helperMutationRequested: helperMutationRequested,
+      serverContactRequested: serverContactRequested,
+      cleanupVerified: true,
+      cleanupReceipt: shutdown.cleanupReceipt,
+      nativeCleanup: shutdown.nativeCleanup
+    )
+  case .tunnelLost:
+    return .failure(
+      token: proxyTunnelLostToken,
+      exitCode: 70,
       runtimeInvoked: true,
       helperMutationRequested: helperMutationRequested,
       serverContactRequested: serverContactRequested,

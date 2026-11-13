@@ -15,6 +15,7 @@ private struct UserProductRecoveryCommandReport: Encodable {
   let target: String?
   let originalCleanupVerified: Bool?
   let originalFailure: String?
+  let originalFailureDetail: NativeFailureDetail?
   let originalCleanupReceipt: UserProductOriginalCleanupReceipt?
   let recoveryReceipt: UserProductRecoveryReceipt?
   let measurement: ProductCleanupRecoveryReport?
@@ -342,6 +343,7 @@ private func recoveryResult(
     target: state?.target,
     originalCleanupVerified: state?.cleanupVerified,
     originalFailure: state?.failure,
+    originalFailureDetail: state?.failureDetail,
     originalCleanupReceipt: state?.originalCleanupReceipt,
     recoveryReceipt: recoveryReceipt,
     measurement: measurement,

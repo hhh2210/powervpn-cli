@@ -21,6 +21,7 @@ func printCLIUsage() {
       repair vendor-log --json
                              Restore the root-only vendor log (one macOS admin approval)
       native status          Check the installed native backend against this powervpn
+      native log [lines]     Recent native diagnostics (attempt timings, helper and charon log); no sudo
       sudo powervpn native install | uninstall
                              Install or remove the native backend (Homebrew installs)
       --version              Print the powervpn version

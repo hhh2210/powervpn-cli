@@ -17,7 +17,8 @@ func runNativeCommand(
   notice: (String) -> Void = { FileHandle.standardError.write(Data(($0 + "\n").utf8)) },
   runScript: (String, [String: String]) -> Int32 = runNativeScript
 ) -> UserProductCommandResult {
-  let usage = "usage: powervpn native install|uninstall|status"
+  if arguments.count >= 2, arguments[1] == "log" { return runNativeLogCommand(arguments) }
+  let usage = "usage: powervpn native install|uninstall|status|log"
   guard arguments.count == 2, ["install", "uninstall", "status"].contains(arguments[1]) else {
     return .failure(usage, exitCode: 64, next: nil)
   }

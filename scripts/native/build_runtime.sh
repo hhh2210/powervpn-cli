@@ -54,7 +54,7 @@ if [ -n "$source_tree" ]; then
 		fail "not a strongSwan $UPSTREAM_TAG source tree: $source_tree"
 	rm -rf "$src"
 	ditto "$source_tree" "$src"
-	for patch in "$patch_dir"/000[1-4]-*.patch; do
+	for patch in "$patch_dir"/000[1-5]-*.patch; do
 		patch -d "$src" -p1 --forward --batch --quiet -i "$patch" >/dev/null ||
 			fail "patch does not apply: $(basename "$patch")"
 	done
@@ -72,7 +72,7 @@ else
 	git -C "$src" checkout --quiet --detach "$base"
 	git -C "$src" reset --quiet --hard "$base"
 	git -C "$src" clean -qfdx
-	for patch in "$patch_dir"/000[1-4]-*.patch; do
+	for patch in "$patch_dir"/000[1-5]-*.patch; do
 		git -C "$src" -c user.name=powervpn -c user.email=powervpn@localhost \
 			am --quiet --keep-cr "$patch" || fail "patch does not apply: $(basename "$patch")"
 	done
@@ -151,5 +151,5 @@ find "$licenses" -type f -exec chmod 644 {} +
 (cd "$root" && find . -type f | sort | xargs shasum -a 256) > "$out/runtime.sha256"
 # The Homebrew keg ships this tar, so Homebrew never relocates the Mach-O files.
 tar -c -f "$out/runtime.tar" -C "$root" --no-acls --no-xattrs --no-mac-metadata .
-(cd "$patch_dir" && shasum -a 256 000[1-4]-*.patch) > "$out/patches.txt"
+(cd "$patch_dir" && shasum -a 256 000[1-5]-*.patch) > "$out/patches.txt"
 echo "build_runtime: staged $root"

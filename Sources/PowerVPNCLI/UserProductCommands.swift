@@ -75,6 +75,11 @@ struct UserProductCommandDependencies: Sendable {
   /// nil unless a Homebrew keg ships the native payload; false when the root
   /// install no longer matches it (a `brew upgrade` changed the helper/runtime).
   let nativeInstallCurrent: @Sendable () -> Bool?
+  /// One probe of the native session of a target, by a process that does not
+  /// own it.
+  let nativeTunnelLiveness: @Sendable (String) async -> NativeTunnelLiveness
+  /// One line in the native attempts log.
+  let nativeAttemptNote: @Sendable (String) -> Void
 
   init(
     loadConfiguration: @escaping @Sendable () throws -> PowerVPNTargetsConfiguration = {
@@ -148,7 +153,11 @@ struct UserProductCommandDependencies: Sendable {
     },
     nativeInstallCurrent: @escaping @Sendable () -> Bool? = {
       NativeBundledPayload.current?.matchesInstalled()
-    }
+    },
+    nativeTunnelLiveness: @escaping @Sendable (String) async -> NativeTunnelLiveness = {
+      await NativeTunnel.liveness(target: $0)
+    },
+    nativeAttemptNote: @escaping @Sendable (String) -> Void = { NativeAttemptLog.note($0) }
   ) {
     self.loadConfiguration = loadConfiguration
     self.processRunner = processRunner
@@ -179,6 +188,8 @@ struct UserProductCommandDependencies: Sendable {
     self.nativeBackendFailure = nativeBackendFailure
     self.nativeRecoverStale = nativeRecoverStale
     self.nativeInstallCurrent = nativeInstallCurrent
+    self.nativeTunnelLiveness = nativeTunnelLiveness
+    self.nativeAttemptNote = nativeAttemptNote
   }
 
   private static var currentExecutablePath: String {
@@ -506,13 +517,15 @@ func runUserProductUp(
   }
 
   let sessionID = UUID().uuidString.lowercased()
-  let connecting = UserProductSessionState(
+  var connecting = UserProductSessionState(
     sessionID: sessionID,
     target: target.key,
     controlPath: sshConfiguration.controlPath,
     phase: .connecting,
     backend: try dependencies.loadConfiguration().backend
   )
+  // The master's ProxyCommand is this same executable, so it has the watchdog.
+  if connecting.originatingBackend == .native { connecting.tunnelWatchdog = true }
   try dependencies.stateStore.save(connecting)
 
   let diagnosticLog = UserProductSSHDiagnosticPipe.create()
@@ -1006,6 +1019,8 @@ private func runInternalProductProxy(
   let failure =
     result.exitCode == 0 || normalSessionClose
     ? nil : userProductProxyFailure(result.standardError)
+  let failureDetail =
+    failure == nil ? nil : NativeFailureDetail.parse(token: result.standardError)
   if let sessionID {
     _ = try? dependencies.stateStore.update(sessionID: sessionID) { state in
       state.phase = result.exitCode == 0 || normalSessionClose ? .disconnected : .failed
@@ -1017,11 +1032,13 @@ private func runInternalProductProxy(
         state.nativeLocalRecoveryVerified = true
       }
       state.failure = failure
+      state.failureDetail = failureDetail
     }
   }
   return UserProductCommandResult(
     standardOutput: result.standardOutput,
-    standardError: failure.map { userProductFailureMessage($0) + "\n" } ?? "",
+    standardError: failure.map { userProductFailureMessage($0, detail: failureDetail) + "\n" }
+      ?? "",
     exitCode: result.exitCode
   )
 }
@@ -1132,12 +1149,17 @@ private func userProductProxyFailure(_ raw: String) -> String {
   if raw.contains("resource_not_found") { return "target_resource_unavailable" }
   if raw.contains("cleanup_unproven") { return "cleanup_unproven" }
   if raw.contains("runtime_unavailable") { return "runtime_unavailable" }
+  if raw.contains(proxyTunnelLostToken) { return proxyTunnelLostToken }
   return "connection_failed"
 }
 
-private func userProductFailureMessage(_ failure: String?) -> String {
+private func userProductFailureMessage(
+  _ failure: String?, detail: NativeFailureDetail? = nil
+) -> String {
   if let native = failure.flatMap(NativeTunnelFailure.init(rawValue:)) {
-    return "PowerVPN: native backend: " + nativeFailureDescription(native)
+    let summary = detail?.summary ?? ""
+    return "PowerVPN: native backend: " + nativeFailureDescription(native, detail: detail)
+      + (summary.isEmpty ? "" : " (\(summary))")
   }
   switch failure {
   case "portal_catalog_incomplete":
@@ -1154,6 +1176,9 @@ private func userProductFailureMessage(_ failure: String?) -> String {
     return "PowerVPN: Portal credentials or target configuration are unavailable."
   case "ssh_master_start_failed":
     return "PowerVPN: the persistent SSH owner could not start."
+  case proxyTunnelLostToken:
+    return
+      "PowerVPN: the tunnel was lost (the native backend restarted or the gateway closed it); the session was closed."
   case "stale_session_cleanup_unverified":
     return
       "PowerVPN: a stale session was quarantined because cleanup is unverified. Run `powervpn recovery inspect --json`."
@@ -1271,20 +1296,37 @@ private func nativeLeftoversFailure() -> UserProductCommandResult {
   )
 }
 
-private func nativeFailureDescription(_ failure: NativeTunnelFailure) -> String {
+func nativeFailureDescription(
+  _ failure: NativeTunnelFailure, detail: NativeFailureDetail? = nil
+) -> String {
   switch failure {
-  case .helperUnavailable: "the root helper is not installed or not running."
-  case .charonUnavailable: "charon is not running."
-  case .targetInvalid: "the target is not configured for a Portal resource."
-  case .portalRejected: "Portal login failed."
-  case .portalUnavailable: "the Portal transport or resource catalog is temporarily unavailable."
-  case .portalConfigurationRejected: "the Portal configuration or TLS trust was rejected."
-  case .cleanupUnproven: "an earlier native session has unverified cleanup."
-  case .resourceUnavailable: "the Portal resource for this target was not found."
-  case .ikeFailed: "IKE negotiation with the gateway failed."
-  case .childFailed: "the gateway did not install the tunnel for this resource."
-  case .routeRejected: "the helper refused to route the target into the tunnel."
-  case .busy: "another session is starting or stopping."
-  case .cancelled: "the session start was cancelled."
+  case .helperUnavailable: return "the root helper is not installed or not running."
+  case .charonUnavailable: return "charon is not running."
+  case .targetInvalid: return "the target is not configured for a Portal resource."
+  case .portalRejected: return "Portal login failed."
+  case .portalUnavailable:
+    return "the Portal transport or resource catalog is temporarily unavailable."
+  case .portalConfigurationRejected: return "the Portal configuration or TLS trust was rejected."
+  case .cleanupUnproven: return "an earlier native session has unverified cleanup."
+  case .resourceUnavailable: return "the Portal resource for this target was not found."
+  case .ikeFailed:
+    switch detail?.cause {
+    case .gatewayRefused?: return "the gateway rejected the IKE negotiation."
+    case .timedOut?: return "the gateway did not answer the IKE negotiation."
+    default: return "IKE negotiation with the gateway failed."
+    }
+  case .childFailed:
+    switch detail?.cause {
+    case .gatewayRefused?: return "the gateway refused to install the tunnel for this resource."
+    case .timedOut?: return "the gateway did not answer the tunnel request in time."
+    default:
+      return "the tunnel (child SA) could not be established; the cause was not identified."
+    }
+  case .localVirtualIPFailed:
+    return
+      "charon could not create the tunnel's virtual IP on this Mac (a local fault, not a gateway refusal)."
+  case .routeRejected: return "the helper refused to route the target into the tunnel."
+  case .busy: return "another session is starting or stopping."
+  case .cancelled: return "the session start was cancelled."
   }
 }

@@ -18,6 +18,13 @@
     "sha256": "d1132ebcb5230caeabe8271acef78ce709a25eeaa2188a5caecc54c4224c8af2",
     "scope": "LeadSec NC child ADDRULE envelope and proposal number over VICI, Quick Mode ADDRULE under HASH(3), NC IPv4 and NEW CLIENT vendor IDs, VIP ownership guard in kernel-libipsec"
   },
+  "kernelPatch": {
+    "sequence": 5,
+    "path": "0005-kernel-pfroute-follow-reused-interface-indexes.patch",
+    "sha256": "e60f3ed4de11fb09c994936d0eac829af05e99138b68e07257cafdc00e852d9b",
+    "scope": "kernel-pfroute on macOS: rebuild a cached interface when its index is reused under another name, drop departed and same-name stale entries, resynchronize the TUN device once before add_ip() gives up",
+    "evidence": "docs/evidence/native-vip-stale-interface-cache.md"
+  },
   "runtimeSettings": {
     "charon.leadsec_new_client_vid": "yes (required: without it the gateway never returns ESP for the virtual IP)"
   },

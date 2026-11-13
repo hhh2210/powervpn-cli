@@ -191,6 +191,44 @@ import Testing
     #expect(try store.load()?.cleanupVerified == false)
   }
 
+  /// The 2026-11-13 failure: charon's errmsg and the proving log line reach
+  /// the user's message, the session record and `recovery inspect --json`, and
+  /// the message no longer blames the gateway.
+  @Test func localVirtualIPFailureReachesMessageStateAndRecoveryInspect() async throws {
+    let store = try makeStore()
+    defer { try? FileManager.default.removeItem(at: store.directory) }
+    var state = staleState(backend: .native)
+    state.phase = .connecting
+    state.cleanupVerified = nil
+    state.failure = nil
+    try store.save(state)
+    let detail = NativeFailureDetail(
+      phase: .child, cause: .localVirtualIP,
+      charonMessage: "establishing CHILD_SA 'selected-resource' failed",
+      evidence: "scoped Portal VIP preparation failed", elapsedMilliseconds: 1_312,
+      selfHeal: "restarted_retry_failed")
+    let token = "tunnel_open_failed:native_local_vip_failed" + detail.tokenSuffix
+    let dependencies = UserProductCommandDependencies(
+      loadConfiguration: { try config(.native) },
+      processRunner: NativeStoppedMaster(), stateStore: store,
+      proxyRunner: { _ in .init(standardOutput: "", standardError: token + "\n", exitCode: 69) })
+    let result = try await runCurrentMachineUserProductCommand(
+      ["internal-session-proxy", state.sessionID, "thu21", "192.0.2.21", "22"],
+      dependencies: dependencies)
+    #expect(result.standardError.contains("local fault"))
+    #expect(!result.standardError.contains("gateway did not install"))
+    #expect(result.standardError.contains("establishing CHILD_SA 'selected-resource' failed"))
+    #expect(result.standardError.contains("scoped Portal VIP preparation failed"))
+    let saved = try #require(try store.load())
+    #expect(saved.failure == NativeTunnelFailure.localVirtualIPFailed.rawValue)
+    #expect(saved.failureDetail == detail)
+    let inspect = try await runCurrentMachineUserProductCommand(
+      ["recovery", "inspect", "--json"], dependencies: deps(store: store))
+    #expect(inspect.standardOutput.contains("\"originalFailureDetail\""))
+    #expect(inspect.standardOutput.contains("\"cause\" : \"local_virtual_ip\""))
+    #expect(inspect.standardOutput.contains("scoped Portal VIP preparation failed"))
+  }
+
   @Test(arguments: [
     (NativeTunnelFailure.portalUnavailable, Int32(75), 2),
     (.resourceUnavailable, Int32(75), 2), (.portalRejected, Int32(77), 1),

@@ -136,6 +136,74 @@ import Testing
     #expect(state?.failure == nil)
   }
 
+  @Test func sessionProxyClosesAConnectedSessionCleanlyWhenItsWatchdogReportsALostTunnel()
+    async throws
+  {
+    let directory = temporaryStateDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = UserProductSessionStateStore(directory: directory)
+    let sessionID = UUID().uuidString.lowercased()
+    try store.save(
+      UserProductSessionState(
+        sessionID: sessionID,
+        target: "thu52",
+        controlPath: uniqueSSHSocketPath(),
+        phase: .connected
+      )
+    )
+    let trace = UserProductProxyTrace(
+      result: ProxyCommandResult(
+        standardOutput: "",
+        standardError: "tunnel_lost\n",
+        exitCode: 70
+      )
+    )
+
+    let result = try await runCurrentMachineUserProductCommand(
+      ["internal-session-proxy", sessionID, "thu52", "192.0.2.52", "22"],
+      dependencies: dependencies(store: store, proxyRunner: trace.run)
+    )
+
+    #expect(result.standardError.isEmpty)
+    let state = try store.load()
+    #expect(state?.phase == .disconnected)
+    #expect(state?.cleanupVerified == true)
+    #expect(state?.failure == nil)
+  }
+
+  @Test func sessionProxyNamesALostTunnelWhenTheSessionNeverBecameReady() async throws {
+    let directory = temporaryStateDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = UserProductSessionStateStore(directory: directory)
+    let sessionID = UUID().uuidString.lowercased()
+    try store.save(
+      UserProductSessionState(
+        sessionID: sessionID,
+        target: "thu52",
+        controlPath: uniqueSSHSocketPath(),
+        phase: .connecting
+      )
+    )
+    let trace = UserProductProxyTrace(
+      result: ProxyCommandResult(
+        standardOutput: "",
+        standardError: "tunnel_lost\n",
+        exitCode: 70
+      )
+    )
+
+    let result = try await runCurrentMachineUserProductCommand(
+      ["internal-session-proxy", sessionID, "thu52", "192.0.2.52", "22"],
+      dependencies: dependencies(store: store, proxyRunner: trace.run)
+    )
+
+    #expect(result.standardError.contains("the tunnel was lost"))
+    let state = try store.load()
+    #expect(state?.phase == .failed)
+    #expect(state?.cleanupVerified == true)
+    #expect(state?.failure == "tunnel_lost")
+  }
+
   @Test func sessionProxyTreatsControlledSIGHUPAsVerifiedDisconnect() async throws {
     let directory = temporaryStateDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }

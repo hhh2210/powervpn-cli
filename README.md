@@ -17,7 +17,9 @@ powervpn run thu21 -- cmd                       你的用户身份
 powervpn-native-helper                          root LaunchDaemon，安装一次
   ├─ 常驻运行打过补丁的 charon（strongSwan 6.0.7）
   ├─ VICI 代理逐帧检查命令与配置字段；charon 的原始 socket 只供 root 访问
-  └─ 控制接口：查状态、为安装时授权的目标加 /32 路由、删掉它
+  ├─ 控制接口：查状态、为安装时授权的目标加 /32 路由、删掉它、读最近的脱敏日志、
+  │   在没有任何会话时重启 charon（有次数上限）
+  └─ 把 charon 的 IKE/CFG/KNL 日志脱敏后写进 root-only 的轮转日志
 ```
 
 - 默认路由、DNS 和 Surge 都不动，只有你配置的目标 IP 走隧道。
@@ -196,7 +198,22 @@ PowerVPN 自己出错时，stderr 最后两行固定是 `powervpn run: <原因>`
   - `~/.ssh/config` 里写了 `LogLevel QUIET` 时，`powervpn ssh` 不会显示 ssh 的原因；排查期间先改成 `LogLevel ERROR`。
 - 其他 SSH 启动失败仍报 `session_start_failed`（75，第一行是 `SSH master did not start`），可以原样重跑；
   反复出现时用 `powervpn ssh lab-a -- true` 看 ssh 自己怎么说。
-- 日志（需要 sudo 读）：`/var/log/powervpn-native-helper.log`、`/var/log/powervpn-native-charon.log`。
+- `native_local_vip_failed`（77）：charon 没能在本机把隧道的虚拟 IP 装到 utun 上，是本机故障，不是网关拒绝。
+  helper 空闲时会自动重启一次 charon 并重试一次（30 分钟内最多 3 次、两次之间至少 60 秒）；仍失败时按 `next:` 行
+  `sudo launchctl kickstart -k system/com.hhh2210.powervpn-native` 再重跑。失败消息会带上 charon 自己的报错
+  （如 `establishing CHILD_SA 'selected-resource' failed`）和证明原因的那行日志，`recovery inspect --json` 的
+  `originalFailureDetail` 里也有。原因分析见 `docs/evidence/native-vip-stale-interface-cache.md`。
+- 隧道在会话存活期间消失（helper 或 charon 重启会删掉 IKE SA，SSH master 进程却还在）：持有隧道的代理进程
+  每 5 秒经 VICI 查一次自己的 IKE SA，连续 3 次确认不存在才结束会话并照常清理，`powervpn status` 随之变为
+  `disconnected`，尝试日志里记一行 `tunnel_lost`。查询失败或超时不算数，不会因此断开正在跑命令的会话。
+  这期间执行 `powervpn run` 会先等旧会话收尾再自动重连（stderr 有一行 `powervpn run: tunnel_lost`）；
+  命令执行到一半隧道才断时仍报 `session_lost`（75），并记入尝试日志。由旧版本 CLI 建立的会话没有这个检查。
+- 日志：`powervpn native log [行数]`（不需要 sudo）列出最近的连接尝试（每个阶段的结果和耗时，
+  `~/.local/state/powervpn/native-attempts.log`），以及经 helper 取回的 helper/charon 日志。
+  后者存在 root-only 的 `/var/log/powervpn-native/native.log`（按大小轮转，最多约 5 MB），charon 的 IKE、CFG、KNL
+  消息写入前都已脱敏：Portal session id 就是本机的 IKE 身份，所以引号和方括号里的身份、长十六进制和类 token 字符串
+  一律替换成 `<redacted>`。launchd 的 `/var/log/powervpn-native-helper.log`（所有人可读）只收 helper 自己写不进轮转日志的行和致命错误，
+  从不收 charon 的行。
 - 升级：`brew upgrade powervpn`。只有 helper 或 strongSwan 运行时变了才需要再 sudo 一次；
   `powervpn native status` 或 `powervpn doctor` 会告诉你，并给出要执行的命令。
 - 卸载：`sudo "$(brew --prefix)/bin/powervpn" native uninstall`，再 `brew uninstall powervpn`。

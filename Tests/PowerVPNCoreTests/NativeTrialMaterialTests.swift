@@ -162,10 +162,12 @@ import Testing
         command: "unload-conn", message: VICIMessage(elements: [.keyValue("name", name)]))
       var invalid = payload
       invalid[1] = 18  // a nonzero next-payload is rejected by the profile gate
-      #expect(throws: VICISessionError.commandFailed("load-conn")) {
+      #expect {
         _ = try session.request(
           command: "load-conn", message: VICIMessage(elements: inject(connection.elements, invalid))
         )
+      } throws: {
+        isRejected($0, "load-conn")
       }
     }
     try NativeTrialMaterial.withRequests(
@@ -181,10 +183,19 @@ import Testing
       for value in ["", "2", "01", "255", "-1"] {
         let candidate = VICIMessage(
           elements: inject(connection.elements, Data(value.utf8), name: "leadsec_proposal_number"))
-        #expect(throws: VICISessionError.commandFailed("load-conn")) {
+        #expect {
           _ = try session.request(command: "load-conn", message: candidate)
+        } throws: {
+          isRejected($0, "load-conn")
         }
       }
     }
   }
+}
+
+/// charon's errmsg rides along in the error; these tests care only that the
+/// command was rejected.
+private func isRejected(_ error: any Error, _ command: String) -> Bool {
+  if case VICISessionError.commandFailed(command, _)? = error as? VICISessionError { return true }
+  return false
 }

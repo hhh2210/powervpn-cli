@@ -25,7 +25,8 @@ public struct VICIStreamResult: Equatable, Sendable {
 
 public enum VICISessionError: Error, Equatable, CustomStringConvertible, Sendable {
   case commandUnknown(String)
-  case commandFailed(String)
+  /// `message` is charon's own `errmsg`, sanitized and length-capped.
+  case commandFailed(String, message: String? = nil)
   case unexpectedPacket(expected: String, actual: VICIPacketOperation)
   case unexpectedEvent(expected: String, actual: String)
   case eventUnknown(String)
@@ -34,7 +35,10 @@ public enum VICISessionError: Error, Equatable, CustomStringConvertible, Sendabl
     switch self {
     case .commandUnknown(let command):
       return "VICI daemon does not recognize command \(command)"
-    case .commandFailed(let command):
+    case .commandFailed(let command, _):
+      // The message is deliberately not part of the description: a generic
+      // `\(error)` must stay free of daemon text. Callers that show it read
+      // the associated value, which is already sanitized.
       return "VICI daemon rejected command \(command)"
     case .unexpectedPacket(let expected, let actual):
       return "VICI expected \(expected), received operation \(actual.rawValue)"
@@ -212,7 +216,11 @@ public final class VICISession {
 
   private func validateCommandResponse(_ response: VICIMessage, command: String) throws {
     if let success = response.value(forKey: "success"), success != Data("yes".utf8) {
-      throw VICISessionError.commandFailed(command)
+      // charon says why in `errmsg`. Keep it: the caller decides what to show.
+      let message = response.value(forKey: "errmsg").map {
+        NativeLogSanitizer.sanitize(String(decoding: $0, as: UTF8.self), limit: 200)
+      }
+      throw VICISessionError.commandFailed(command, message: message)
     }
   }
 }

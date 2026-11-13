@@ -35,6 +35,10 @@ private let runBusyWaitMilliseconds = 2_000
 private let runStartRetryMilliseconds = 3_000
 private let runSettlePollLimit = 20
 private let runSettlePollMilliseconds = 1_000
+/// How long `run` waits for the owner of a session whose tunnel is gone to end it: the owner
+/// needs up to three probes five seconds apart, then its cleanup. 15 waits of 2 s.
+private let runLostTunnelWaitLimit = 15
+private let runLostTunnelWaitMilliseconds = 2_000
 
 /// Start failures that a retry cannot fix: credentials or configuration.
 private let runHumanStartFailures: Set<String> = [
@@ -44,6 +48,8 @@ private let runHumanStartFailures: Set<String> = [
   NativeTunnelFailure.targetInvalid.rawValue,
   NativeTunnelFailure.portalRejected.rawValue,
   NativeTunnelFailure.portalConfigurationRejected.rawValue,
+  // After the helper's own bounded restart-and-retry, only a human can restart it.
+  NativeTunnelFailure.localVirtualIPFailed.rawValue,
 ]
 
 /// `local_safety_check_failed` also names transient states (the vendor helper still exiting, the
@@ -89,6 +95,7 @@ func runUserProductRun(
   var startFailures = 0
   var localSafetyRetries = 0
   var busyWaits = 0
+  var lostTunnelWaits = 0
 
   func waitWhileBusy() async -> Bool {
     guard busyWaits < runBusyWaitLimit else { return false }
@@ -107,6 +114,21 @@ func runUserProductRun(
             exitCode: UserProductRunExit.needsHuman,
             next: "powervpn down"
           )
+        }
+        // The master outlives its tunnel (a restarted native backend deletes the SA), and a
+        // command sent now would hang until ssh's TCP times out. The owning proxy ends such a
+        // session by itself, so wait for that and start a new one. Only the owner ends a
+        // session: on any other answer, or once the wait runs out, the command is sent as before.
+        if state.originatingBackend == .native, state.tunnelWatchdog == true,
+          lostTunnelWaits < runLostTunnelWaitLimit,
+          await dependencies.nativeTunnelLiveness(target.key) == .absent
+        {
+          if lostTunnelWaits == 0 {
+            notes.append("powervpn run: tunnel_lost (waited for the old session to close)")
+          }
+          lostTunnelWaits += 1
+          await dependencies.sleepMilliseconds(runLostTunnelWaitMilliseconds)
+          continue
         }
         return execute(
           state: state, target: target, remoteCommand: remoteCommand, notes: notes,
@@ -284,6 +306,9 @@ private func execute(
   // 255 is OpenSSH's own failure code. If the master is gone too, the command may never
   // have reached the server, so report a retryable PowerVPN failure instead of passing 255 on.
   if result.exitCode == 255, checkMaster(state, dependencies: dependencies).exitCode != 0 {
+    if state.originatingBackend == .native {
+      dependencies.nativeAttemptNote("run target=\(target.key) failed=session_lost ssh_exit=255")
+    }
     return runFailure(
       "session_lost",
       "PowerVPN: the session ended before or while the command ran; it may not have run.",
