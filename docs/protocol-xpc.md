@@ -6,6 +6,10 @@ legal value-free GUI resource-toggle trace is captured.
 Detailed evidence and code locations are in
 [`evidence/checkpoint-5-static-correlation.md`](evidence/checkpoint-5-static-correlation.md).
 
+The key words MUST and MUST NOT in this document are to be interpreted as
+described in BCP 14 (RFC 2119, RFC 8174) when, and only when, they appear in
+all capitals.
+
 ## Confirmed command surfaces
 
 | Helper | Fixed dispatcher order |
@@ -41,8 +45,8 @@ For the pinned installed helper, the expected version is build 24572. The
 outer dispatcher then ordinary-sends an empty dictionary. Although the GUI
 uses `xpc_connection_send_message_with_reply`, its reply callback performs no
 business decoding; the full result is consumed by its connection event
-handler. A compatible probe must therefore accept only the exact full event
-from that handler and must never promote the empty dispatcher tail or an empty
+handler. A compatible probe MUST therefore accept only the exact full event
+from that handler and MUST NOT promote the empty dispatcher tail or an empty
 reply acknowledgement to success.
 
 This is a read-only helper-control contract, not the owned product XPC design.
