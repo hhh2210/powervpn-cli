@@ -6,6 +6,10 @@ No credential or session value is recorded.
 Detailed evidence and code locations are in
 [`evidence/checkpoint-5-static-correlation.md`](evidence/checkpoint-5-static-correlation.md).
 
+The key words MUST and MUST NOT in this document are to be interpreted as
+described in BCP 14 (RFC 2119, RFC 8174) when, and only when, they appear in
+all capitals.
+
 ## Confirmed static request shapes
 
 | Method/path | Ordered fields |
@@ -66,12 +70,12 @@ PSK.
 
 ## Independent state axes
 
-Runtime evidence must record auth-session and control-channel transitions
+Runtime evidence MUST record auth-session and control-channel transitions
 independently. In particular:
 
-- a WebSocket close must not imply session expiry;
-- a session-check failure must not imply that an IKE SA has already stopped;
-- helper establishment must not imply a valid current portal session.
+- a WebSocket close MUST NOT imply session expiry;
+- a session-check failure MUST NOT imply that an IKE SA has already stopped;
+- helper establishment MUST NOT imply a valid current portal session.
 
 The metadata-only model uses closed state enums and rejects discontinuous state
 transitions. Unknown evidence remains explicitly `unknown`.
@@ -130,7 +134,7 @@ three-event value-free subset of the legal observation and confirms:
 The first observation window also reached a visible session-timeout failure
 before the resource action. A fresh legal login then produced repeated HTTP 200
 session checks. This is direct evidence that displayed resource/tunnel state
-must not be used as a proxy for current control-session validity.
+MUST NOT be used as a proxy for current control-session validity.
 
 ## Gate
 

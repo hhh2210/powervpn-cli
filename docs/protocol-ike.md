@@ -8,6 +8,10 @@ No business-semantic field promotion passed the two-evidence-class gate. Live
 vendor differential behavior, server acceptance, a responsive daemon VICI path,
 and backend equivalence remain unverified.
 
+The key words MUST, MUST NOT, and MAY in this document are to be interpreted as
+described in BCP 14 (RFC 2119, RFC 8174) when, and only when, they appear in
+all capitals.
+
 ## Vendor baseline
 
 - strongSwan base: 5.8.0, proven by Mach-O OSO/SO source and archive paths.
@@ -20,8 +24,8 @@ and backend equivalence remain unverified.
   activation.
 
 These algorithms describe compatibility, not a security recommendation. The
-server is unchanged, so the first interop test must reproduce the observed
-proposal exactly and may not silently strengthen it.
+server is unchanged, so the first interop test MUST reproduce the observed
+proposal exactly and MUST NOT silently strengthen it.
 
 ## Protocol fidelity invariant
 
@@ -37,14 +41,14 @@ upstream 6.0.7, governed by ten hard rules:
    emit; parse, accept, and emit remain distinct.
 5. The private predicate MUST be complete; outside it, payload order, HASH,
    message rules, and results remain identical to unmodified upstream.
-6. Same-implementation generate/verify proves self-consistency only, never
-   vendor compatibility.
+6. Same-implementation generate/verify proves self-consistency only and MUST NOT
+   be treated as evidence of vendor compatibility.
 7. Observed vendor behavior outranks standards cleanup or upstream intuition
    inside the compatibility profile.
-8. Wire-neutral safety checks are allowed; wire-visible improvements and
-   generalizations are forbidden.
-9. Owned GUI, XPC/control schema, helper names, classes, and state machines may
-   be refactored; only server-observable wire, timing, and effects must match.
+8. Wire-neutral safety checks MAY be added; wire-visible improvements and
+   generalizations MUST NOT be.
+9. Owned GUI, XPC/control schema, helper names, classes, and state machines MAY
+   be refactored; only server-observable wire, timing, and effects MUST match.
 10. Intentional divergence MUST remain outside the compatibility profile behind
     an independent feature gate that is default off.
 
@@ -76,7 +80,7 @@ The codec uses five explicit contexts: Quick Mode ADD snapshot, Informational
 ADD delta, Informational DELETE delta, server type-19 short revoke, and a
 receive-only type-17 compatibility revoke. Type 19 is direction-dependent and
 the current type is carried by the predecessor's `Next Payload`, so type,
-direction, exchange, body shape, dialect, and family may not be inferred from
+direction, exchange, body shape, dialect, and family MUST NOT be inferred from
 the custom payload bytes alone.
 
 CP4A intentionally calls the two encodings dialect 0/1 and keeps their
@@ -97,8 +101,8 @@ dialect-0 address/mask/prefix names remain syntax-only; every length-delimited
 identity value and the short server revoke value remain opaque. The exact
 matrix and machine gate are recorded in
 [`evidence/checkpoint-4b-semantic-promotion.md`](evidence/checkpoint-4b-semantic-promotion.md)
-and `fixtures/redacted/semantic-promotion-gate-v1.json`. CP6 must integrate
-this neutral model and may not introduce semantic aliases as a shortcut.
+and `fixtures/redacted/semantic-promotion-gate-v1.json`. CP6 MUST integrate
+this neutral model and MUST NOT introduce semantic aliases as a shortcut.
 
 ## macOS backend evidence
 
